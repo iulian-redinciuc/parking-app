@@ -54,6 +54,8 @@ Bottom navigation with three tabs: **Live · Alerts · Stats**. Admin is reached
 | `estimated` | any zone confidence < 0.8 | inline note on that card | shown with ≈ |
 | `unavailable` | API 503 | "Waiting for the first camera reading" | hidden |
 
+Components (P3.4, `src/components/`, helpers in `src/lib/status.ts`): **BigCount** (total free, "free space(s)", `LevelBar` + level word; the visible number updates at once, a screen-reader-only `aria-live="polite"` copy is throttled to one change per 30 s), **ZoneCard** (name, `free / capacity`, `TrendIcon`, `LevelBar` + level word, "ⓘ Estimated from entry/exit counts" for `flow` zones or "Estimated: the camera view is unclear" otherwise when confidence < 0.8), **LevelBar** (taken share `occupied / capacity`, coloured by level, decorative), **TrendIcon** (arrow for free spaces: `filling` ↘, `emptying` ↗, `steady` →, with the text "Trend: getting fuller / emptying / steady"), **UpdatedAgo** ("Updated 3 seconds ago" via `Intl.RelativeTimeFormat`, from `lastMessageAt`, i.e. the last event, ping or poll, ticking with `useNow`). Level words and colours are the [api.md table](api.md#levels).
+
 ### 2.2 Alerts (`#/alerts`): Phase 6
 - **Enable notifications** button: never asks for permission until tapped.
 - On iPhone and not installed: an **InstallHint** card ("Tap Share → Add to Home Screen, then open from the icon") instead of the button.
