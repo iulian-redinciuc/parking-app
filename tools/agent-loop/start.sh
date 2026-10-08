@@ -4,12 +4,16 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 STATE="${STATE:-$HOME/.parking-loop}"
 mkdir -p "$STATE"
-rm -f "$STATE/STOP"
 
 if tmux has-session -t parking-loop 2>/dev/null; then
-    echo "Already running. Watch it with:  tmux attach -t parking-loop"
-    exit 0
+    # The window stays open after the loop ends ("Press Enter to close"), so check the lock, not just the window.
+    if ! flock -n "$STATE/lock" true 2>/dev/null; then
+        echo "Already running. Watch it with:  tmux attach -t parking-loop"
+        exit 0
+    fi
+    tmux kill-session -t parking-loop   # leftover window from a loop that already ended
 fi
+rm -f "$STATE/STOP"
 
 tmux new-session -d -s parking-loop -x 200 -y 50 \
     "bash '$HERE/run.sh'; echo; echo 'Loop ended. Press Enter to close this window.'; read -r _"
