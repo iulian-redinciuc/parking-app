@@ -3,7 +3,8 @@
 - File: `data/db/parking.sqlite`, opened in **WAL mode** (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`) so reads never block writes.
 - ORM: **SQLModel** (SQLAlchemy 2). Migrations: **Alembic** from Phase 2 (`parking db upgrade` runs at API start-up).
 - Only the API process writes. Workers never touch the DB.
-- All timestamps are UTC (`datetime` with tz, stored as ISO text).
+- All timestamps are UTC (`datetime` with tz, stored as fixed-width ISO text, `2026-10-08T18:03:09.123456+00:00`, so they sort as strings).
+- Migrations live in `backend/migrations/` (`backend/alembic.ini`). The URL comes from `PARKING_DB_URL`, else `data/db/parking.sqlite` under the repo root.
 
 ## 1. Tables
 
@@ -16,7 +17,7 @@
 | occupied | int | |
 | free | int | |
 | confidence | real | |
-| source | text | `observation \| flow \| correction \| reset \| startup` |
+| source | text | the `StateStore` change source `observation \| health \| tick`; later `flow \| correction \| reset`. `startup` changes are not written (they republish restored rows) |
 
 ### `slot_state`: a slot's smoothed state, written only when it flips
 | Column | Type | Notes |
@@ -24,7 +25,7 @@
 | id | int PK | |
 | ts | datetime | |
 | camera_id | text | |
-| slot_id | text | index `(slot_id, ts)` |
+| slot_id | text | index `(slot_id, ts)`; latest per `(camera_id, slot_id)` is restored |
 | taken | bool | |
 
 ### `flow_event`

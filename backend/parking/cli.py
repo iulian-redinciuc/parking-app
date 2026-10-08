@@ -695,3 +695,23 @@ def worker_occupancy(
         worker.run(max_frames or None)
     except WorkerError as e:
         _fail(str(e))
+
+
+@db_app.command("upgrade")
+def db_upgrade(
+    url: Annotated[
+        str | None,
+        typer.Option(help="Database URL. Default: PARKING_DB_URL, else data/db/parking.sqlite."),
+    ] = None,
+    revision: Annotated[str, typer.Option(help="Alembic revision to upgrade to.")] = "head",
+) -> None:
+    """Apply the database migrations (creates the SQLite file if needed)."""
+    from parking.db.engine import default_url, upgrade
+
+    root = _find_config(DEFAULT_CONFIG).parent.parent
+    url = url or default_url(root)
+    try:
+        upgrade(url, revision)
+    except Exception as e:  # alembic/sqlalchemy errors: show the message, not a traceback
+        _fail(f"upgrade failed: {e}")
+    typer.echo(f"database at {revision}: {url}")
