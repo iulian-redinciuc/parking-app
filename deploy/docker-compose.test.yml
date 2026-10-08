@@ -1,0 +1,55 @@
+# End-to-end test stack (P2.11). Spec: docs/design/testing.md §5 (CI job 4)
+# Run by backend/tests/e2e/test_pipeline.py, which sets the env below, then:
+#   docker compose -f deploy/docker-compose.test.yml up -d --build --wait  ...  down -v --rmi local
+# By hand:  cd backend && PARKING_E2E=1 uv run pytest tests/e2e -v
+# Project "parking-e2e" (its own containers and network, separate from the dev stack "parking").
+# Both services run the api image: with PARKING_FAKE_DETECTOR=1 the worker reads detections from
+# <frame>.json sidecars, so the large PyTorch vision image isn't needed.
+name: parking-e2e
+
+x-common: &common
+  image: parking-e2e:latest       # built once by the api service
+  environment: &env
+    WORKER_TOKEN: e2e-token
+    PARKING_DB_URL: sqlite:////tmp/parking.sqlite
+    API_INTERNAL_URL: http://api:8000
+    PARKING_FAKE_DETECTOR: "1"
+    LOG_LEVEL: INFO
+    TZ: UTC
+  volumes:
+    - ../backend/tests/fixtures/replay/config:/app/config:ro
+    - ${E2E_REPLAY_DIR:?set by the e2e test}:/app/data/replay:ro
+
+services:
+  api:
+    <<: *common
+    container_name: parking-e2e-api
+    build: { context: .., dockerfile: backend/Dockerfile, target: api }
+    ports: ["127.0.0.1:${E2E_API_PORT:-18000}:8000"]
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+
+  vision-occupancy:
+    <<: *common
+    container_name: parking-e2e-vision-occupancy
+    pull_policy: never
+    command: ["/app/backend/.venv/bin/parking", "worker", "occupancy", "--camera", "cam-e2e"]
+    networks: [e2e]
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+
+networks:
+  e2e: {}

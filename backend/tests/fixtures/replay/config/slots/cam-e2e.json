@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "camera_id": "cam-e2e",
+  "image_size": [320, 240],
+  "slots": [
+    { "id": "G01", "zone": "ground", "polygon": [[10, 60], [80, 60], [80, 200], [10, 200]], "type": "standard" },
+    { "id": "G02", "zone": "ground", "polygon": [[90, 60], [160, 60], [160, 200], [90, 200]], "type": "standard" },
+    { "id": "G03", "zone": "ground", "polygon": [[170, 60], [240, 60], [240, 200], [170, 200]], "type": "standard" },
+    { "id": "G04", "zone": "ground", "polygon": [[250, 60], [310, 60], [310, 200], [250, 200]], "type": "standard" }
+  ]
+}

@@ -7,7 +7,7 @@
 >
 > The [agent loop](tools/agent-loop/README.md) works through the unticked tasks in order. A task marked `⏸️` is skipped until its need is met: **delete the `⏸️ ` from its line to unblock it** (editing on GitHub works too).
 
-**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 2: P2.11.
+**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 3: P3.1.
 **Build order:** 0 → 1 → 2 → 3 (MVP) → 6 → 7 (no hardware needed) → 4 → 5 → 8 (need the real cameras / production machines) → 9.
 **Last updated:** 2026-10-09
 
@@ -22,7 +22,7 @@
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) (MVP) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 11 / 11 | ✅ | 2026-10-08 | 2026-10-08 |
-| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 10 / 11 | 🟡 | 2026-10-08 | |
+| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 11 / 11 | ✅ | 2026-10-08 | 2026-10-09 |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) (MVP) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
 | 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 0 / 11 | ⬜ | | |
@@ -57,7 +57,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P1.10** Benchmark on the dev Pi
 - [x] **P1.11** Tune and decide
 
-## Phase 2: Backend + simulated live feed 🟡
+## Phase 2: Backend + simulated live feed ✅
 - [x] **P2.1** Message models + worker API client (with flow-event outbox)
 - [x] **P2.2** Frame sources + health checks
 - [x] **P2.3** Occupancy worker
@@ -68,7 +68,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P2.8** SSE broadcaster + `/api/stream`
 - [x] **P2.9** REST endpoints, CORS, errors
 - [x] **P2.10** Docker images + Compose
-- [ ] **P2.11** End-to-end test
+- [x] **P2.11** End-to-end test
 
 ## Phase 3: Mobile web app + public access ⬜
 - [ ] **P3.1** App shell, routing, theme
@@ -219,6 +219,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-09 | P2.8: `Broadcaster` (`parking/api/sse.py`) keeps the latest `StatusEvent(id, json)` and one `Queue(10)` per client (full → drop oldest, counted); `/api/stream` sends `retry: 3000`, the latest status (always present after the start-up restore, stale if no fresh data), then each new one; pings are `: ping` comments every `api.sse_ping_s`; `Cache-Control: no-cache` (sse-starlette's default is `no-store`); cap 1000 clients → 503 `unavailable` (soft: checked before subscribing); `send_timeout` 30 s drops stuck clients; `/healthz` gets `stream` counters. Live check found a worker deadlock: the SIGTERM handler called `Event.set()` while the interrupted main thread held the event's lock (`timeout` never stopped the worker); the handler now sets it from a thread (separate `fix worker:` commit). Recorded in api.md §2/§3 | The guide left the empty-status case, cache header, send timeout and cap behaviour open; the deadlock blocked clean worker shutdown |
 | 2026-10-09 | P2.9: rate limits use the **`limits`** library (slowapi's engine) through a FastAPI dependency instead of slowapi (dependency swapped in pyproject); one 120/min per-IP budget for all public GETs incl. `/healthz`, none on `/internal/*`, 429 with `Retry-After`. Errors: 404/405/422/500 also use the `{"error"}` format (`method_not_allowed`, `internal` added; validation stays 422 `bad_request` like P2.7). `/docs` + `/openapi.json` only with `LOG_LEVEL=DEBUG` (the "or on the LAN" part dropped: no reliable LAN check behind Docker/tunnel). Zone-name language also applies to `/api/lot` and `/api/stream` (per-language JSON cached per event); `Zone.display_name()`. `parking api --reload` runs the `create_app_from_env` factory (config path via `PARKING_CONFIG`). Recorded in api.md §1/§2/§3/§7 | slowapi needs a module-global limiter (tests and multiple apps share state) and a `BaseHTTPMiddleware`; the guide left the other details open |
 | 2026-10-09 | P2.10: Dockerfile installs dependencies with `uv sync --no-install-project` before copying the code (the spec's single `uv sync` before `COPY backend/` can't install the project), then a second `uv sync` installs it; `VISION_EXTRAS` is split into one `--extra` per name; the vision stage sets `HOME=/tmp` for uid 1000. Root `.dockerignore` lets in only `backend/` (no `.venv`, caches, `tests/`), so `data/`, `models/`, `deploy/.env` never reach an image. Compose: `start_period` + `start_interval` on the API healthcheck, the worker `depends_on` a healthy API and has a TCP healthcheck on its control port 9000 (no token-free endpoint exists). Dev override uses `image: !reset null` + `build`, so local images are `parking-api` / `parking-vision-occupancy` (removed by `down --rmi local`), and mounts `../backend/parking` read-only over the editable install. `tunnel` and `vision-flow` not in the base file yet (P3.9 / Phase 5). Replay = `data/replay/ground/` with copies of `ground-01/02.jpg`. Recorded in deployment.md §2/§4 | The spec's Dockerfile was abridged and wouldn't build as written; the guide asked for `compose ps` to show everything healthy |
+| 2026-10-09 | P2.11: the e2e test is **pytest on the host driving Compose** (`up -d --build --wait` … `down -v --rmi all`, project `parking-e2e`, API on a free loopback port), skipped unless `PARKING_E2E=1`; CI job `e2e` runs it when `backend/**` or `deploy/**` changed (`dorny/paths-filter`), instead of `up --abort-on-container-exit` with a runner container. Both services use the **api** image (fake detector needs no PyTorch). The test **replaces** `frame-01` with `frame-02` (sidecar first, rename-on-copy) rather than only adding it: with both in the folder the replay alternates and 3-reading smoothing never flips. DB in the container's `/tmp`. Fixture camera uses `box_bottom` with threshold 0.20 (these boxes score 0.32). Pytest runs with `--import-mode=importlib` (two `test_pipeline.py`). Recorded in testing.md §5 | The runner image would need the dev dependencies; one service image builds once; the guide's 3 × interval + 5 s budget only holds with a single frame in the folder |
 
 ## Metrics
 
@@ -230,6 +231,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | 1 | Time per image, chosen MVP settings (dev Pi 5) | **157 ms** median, 158 ms p95, 143 MB peak RSS (1932×2576); `analyze` on the 24 MP `ground-02.jpg`: 1.1 s | < 2 s | `parking benchmark --runtimes '' --runs 20`; CPU 56.5 → 58.2 °C |
 | 2026-10-08 | 1 | Scoring time per image (dev Pi, appearance) | ~0.3 s | < 2 s | 1932×2576 frame, 17 slots, no model; full benchmark in P1.10 |
 | 2026-10-08 | 1 | Inference time per image (dev Pi 5, appearance, MVP setting for `cam-ground`) | **158 ms** median, 160 ms p95, 142 MB peak RSS | < 2 s | `parking benchmark`, 20 runs after 3 warm-ups on `ground-01.jpg`; no model. Detector cases in the table below; the final pick is P1.11 |
+| 2026-10-09 | 2 | E2E: new replay frame → new count on `/api/stream` (dev Pi, Compose) | 4.7–4.8 s (3 runs) | ≤ 11 s (3 × 2 s + 5 s) | whole test ~17.5 s incl. `up`/`down` with a cached image |
 | 2026-10-09 | 2 | Docker image size (dev Pi, arm64) | `parking-api` 1.59 GB, `parking-vision-occupancy` 4.92 GB | | api has no torch; vision carries torch/ultralytics/ncnn/onnxruntime + ffmpeg (spec expected ~2 GB; slimming is a P8 item) |
 | 2026-10-08 | 1 | Detector speed (dev Pi 5 8 GB, CPU, `ground-01.jpg` 1932×2576) | NCNN `yolo11n` @ 640: 83 ms; `yolo11n-seg` @ 1280: 520 ms | < 2 s (occupancy), ≤ 120 ms (flow) | table below; CPU 54.9 → 62.0 °C, never throttled (`get_throttled=0x0`); the Pi's other services kept running (not ours to stop), load avg ~1 at start |
 | | 4 | Slot accuracy (validation set) | | ≥ 97% | |
@@ -302,3 +304,4 @@ NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occup
 - P2.8: SSE `Broadcaster` + `/api/stream` (retry + current status at once, every change as `event: status` with a monotonic id, `: ping` every `sse_ping_s`, 503 above 1000 clients, cleanup on disconnect, `/healthz` stream counters). Done-when on the dev Pi: `curl -N localhost:8000/api/stream` against `parking api` + `parking worker occupancy` replaying the sample photo and a synthetic all-slots-painted copy (/tmp only) printed `retry: 3000`, the current status, then total-free 72 ↔ 77 (ground 12 ↔ 17) events every 6 s with `: ping` lines in between; the API shuts down in < 1 s with a client attached. Also fixed a worker SIGTERM deadlock found during the check. `tests/unit/test_sse.py` (5) + `tests/integration/test_stream.py` (2, real uvicorn); pytest 361 passed, ruff clean; coverage sse 100%, routes/public 95%.
 - P2.9: public REST + cross-cutting (`/api/lot`, `/api/status` 503 until data or restore, `?lang=`/`Accept-Language` zone names on lot/status/stream, CORS from `CORS_ORIGINS`, gzip > 1 KB, `{"error"}` format for every error, per-IP rate limits, `/docs` only in DEBUG, `parking api --reload`). Done-when on the dev Pi: `LOG_LEVEL=DEBUG parking api --reload` served `/docs` 200 with all 7 paths in `/openapi.json`, `/api/status` 503 `unavailable` before data. `tests/integration/test_public_api.py` (18, httpx `AsyncClient`: ASGI + real uvicorn for SSE), `tests/unit/test_api_deps.py` (8), 2 CLI tests; pytest 388 passed, ruff clean.
 - P2.10: `backend/Dockerfile` (multi-stage `api` / `vision`), root `.dockerignore`, `deploy/docker-compose.yml` (project `parking`, `parking_internal` internal + `parking_egress`, API on `127.0.0.1:8000` only, healthchecks) + `docker-compose.dev.yml` (local builds, code mounted); `deploy/.env` with a generated `WORKER_TOKEN` (not committed); `cam-ground` now replays `data/replay/ground` every 5 s. Done-when on the dev Pi: `up -d --build` → both containers `healthy`, `curl localhost:8000/api/status` returned a real `LotStatus` (ground 12 free / 5 occupied of 17, not stale; underground stale until Phase 5); stack stopped afterwards (images kept). pytest 387 passed (also without `data/replay`), ruff clean.
+- P2.11: end-to-end test (`deploy/docker-compose.test.yml` project `parking-e2e`, both services on the api image with `PARKING_FAKE_DETECTOR=1`; `backend/tests/e2e/test_pipeline.py` drives it; synthetic fixtures in `backend/tests/fixtures/replay/`; CI job `e2e` when `backend/**`/`deploy/**` change). Done-when on the dev Pi: `PARKING_E2E=1 uv run pytest tests/e2e` passed 3 runs in a row, new count on `/api/stream` 4.7–4.8 s after the frame swap (budget 11 s), stack and image removed afterwards. pytest 387 passed + 1 skipped (e2e), ruff clean. **Phase 2 done.**

@@ -1,0 +1,38 @@
+# End-to-end test lot (P2.11, backend/tests/e2e/test_pipeline.py). Mounted at /app/config in
+# deploy/docker-compose.test.yml; the replay folder is a temp dir the test fills from frames/.
+version: 1
+
+lot:
+  id: e2e
+  name: "E2E"
+  location: { lat: 0, lon: 0 }
+  timezone: UTC
+
+zones:
+  - id: ground
+    name: { en: "Ground" }
+    method: slots
+
+cameras:
+  - id: cam-e2e
+    role: occupancy
+    zones: [ground]
+    source: "folder:data/replay?interval=2&loop=true"
+    slots_file: config/slots/cam-e2e.json
+    control_url: http://vision-occupancy:9000
+    detector:                      # PARKING_FAKE_DETECTOR=1: <frame>.json sidecars, no model
+      model: models/none
+      imgsz: 320
+      conf: 0.35
+      classes: [car, motorcycle, bus, truck]
+      use_masks: false
+    occupancy:
+      method: detector
+      threshold: 0.20               # box_bottom scores ~0.32 for these boxes
+      mode: box_bottom
+    smoothing:
+      consistent_readings: 3
+
+api:
+  stale_after_s: 60
+  sse_ping_s: 5

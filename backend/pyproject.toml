@@ -54,5 +54,9 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["slow: needs the real model"]
+markers = [
+  "slow: needs the real model",
+  "e2e: Docker Compose end-to-end test (PARKING_E2E=1)",
+]
 asyncio_mode = "auto"
+addopts = "--import-mode=importlib"  # tests/unit and tests/e2e both have a test_pipeline.py
