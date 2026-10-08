@@ -1,0 +1,17 @@
+# Dev Pi override: builds the images locally (ARM64 on the Pi) and mounts the backend code.
+# Spec: docs/design/deployment.md §4
+#   cd deploy && docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+# Images are named parking-api / parking-vision-occupancy (removed by `down --rmi local`).
+# After a code change: docker compose -f docker-compose.yml -f docker-compose.dev.yml restart
+services:
+  api:
+    image: !reset null
+    build: { context: .., dockerfile: backend/Dockerfile, target: api }
+    volumes:
+      - ../backend/parking:/app/backend/parking:ro
+
+  vision-occupancy:
+    image: !reset null
+    build: { context: .., dockerfile: backend/Dockerfile, target: vision }
+    volumes:
+      - ../backend/parking:/app/backend/parking:ro

@@ -1,0 +1,53 @@
+# Base Compose definition (released images from GHCR). Spec: docs/design/deployment.md §4
+#   cp .env.example .env   # then fill in WORKER_TOKEN etc.; .env is git-ignored
+#   docker compose up -d
+# Dev Pi (builds the images locally): add  -f docker-compose.dev.yml
+# Isolation (deployment.md §1.1): project "parking", its own networks, API on loopback only.
+# Not yet here: vision-flow (Phase 5) and tunnel (P3.9).
+name: parking
+
+x-common: &common
+  env_file: .env
+  restart: unless-stopped
+  volumes:
+    - ../config:/app/config
+    - ../data:/app/data
+    - ../models:/app/models:ro
+  logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+services:
+  api:
+    <<: *common
+    container_name: parking-api
+    image: ghcr.io/iulian-redinciuc/parking-api:${PARKING_VERSION:-latest}
+    ports: ["127.0.0.1:${API_HOST_PORT:-8000}:8000"]          # loopback only
+    networks: [internal, egress]                               # egress: Web Push
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+
+  vision-occupancy:
+    <<: *common
+    container_name: parking-vision-occupancy
+    image: ghcr.io/iulian-redinciuc/parking-vision:${PARKING_VERSION:-latest}
+    command: ["occupancy", "--camera", "cam-ground"]
+    networks: [internal, egress]                               # egress: reach the camera
+    deploy: { resources: { limits: { cpus: "${VISION_CPUS:-1.0}", memory: 1200M } } }
+    environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:                                               # the /control/* server is up
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
+
+networks:
+  internal: { internal: true }
+  egress: {}

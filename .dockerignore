@@ -1,0 +1,10 @@
+# Docker build context = the repo root (backend/Dockerfile copies backend/ only).
+# Keep private data, local venvs and caches out of the images and the context.
+*
+!backend/
+backend/.venv/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.coverage
+**/__pycache__/
+backend/tests/

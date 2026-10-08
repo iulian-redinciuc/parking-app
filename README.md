@@ -21,7 +21,7 @@ Development and testing happen on a Raspberry Pi; production will be deployed el
 | `backend/` | Python package `parking`: CLI, vision workers, API (uv, Python 3.12) |
 | `frontend/` | Vite + React + TypeScript + Tailwind PWA |
 | `config/` | `lot.example.yaml` (template) and `lot.yaml` ([config.md](docs/design/config.md)) |
-| `deploy/` | `.env.example` (copy to the git-ignored `deploy/.env`), Compose files from Phase 2 |
+| `deploy/` | `.env.example` (copy to the git-ignored `deploy/.env`), `docker-compose.yml` + `docker-compose.dev.yml` (local builds) |
 | `data/`, `models/` | Camera images, labels and model weights. **Git-ignored**, never committed |
 | `docs/` | Design specs and phase guides |
 
@@ -71,6 +71,21 @@ npm run format:check          # npm run format to fix
 npm test -- --run
 npm run build
 ```
+
+## Run the full stack in Docker
+
+The API and the occupancy worker replay the images in `data/replay/ground/` (any `.jpg`, e.g. copies of `data/samples/`):
+
+```bash
+cd deploy
+cp .env.example .env && sed -i "s/^WORKER_TOKEN=.*/WORKER_TOKEN=$(openssl rand -hex 32)/" .env
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build   # builds parking-api / parking-vision-occupancy
+docker compose ps                                       # both "healthy"
+curl localhost:8000/api/status
+docker compose down                                     # stop; add -v --rmi local to remove everything
+```
+
+Only `127.0.0.1:8000` is published. Details and isolation rules: [deployment.md](docs/design/deployment.md).
 
 ## CI
 

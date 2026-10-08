@@ -33,7 +33,8 @@ The app **does not use, connect to, or modify anything already installed on the 
 
 ```dockerfile
 FROM python:3.12-slim-bookworm AS base
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_PYTHON_DOWNLOADS=never
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
@@ -41,19 +42,25 @@ COPY backend/pyproject.toml backend/uv.lock ./backend/
 RUN pip install uv
 
 FROM base AS api
-RUN cd backend && uv sync --frozen --no-dev            # core deps only (no torch)
+RUN cd backend && uv sync --frozen --no-dev --no-install-project   # core deps only (no torch), cached layer
 COPY backend/ ./backend/
+RUN cd backend && uv sync --frozen --no-dev                         # installs the project itself
 USER 1000:1000
 CMD ["/app/backend/.venv/bin/parking", "api", "--host", "0.0.0.0", "--port", "8000"]
 
 FROM base AS vision
 ARG VISION_EXTRAS=vision                               # e.g. "vision,openvino" for Intel hosts
-RUN cd backend && uv sync --frozen --no-dev --extra ${VISION_EXTRAS}
+RUN cd backend && uv sync --frozen --no-dev --no-install-project \
+    $(echo ",${VISION_EXTRAS}" | sed 's/,/ --extra /g')               # one --extra per name
 COPY backend/ ./backend/
+RUN cd backend && uv sync --frozen --no-dev $(echo ",${VISION_EXTRAS}" | sed 's/,/ --extra /g')
+ENV HOME=/tmp YOLO_CONFIG_DIR=/tmp/Ultralytics         # uid 1000 has no home in the image
 USER 1000:1000
 ENTRYPOINT ["/app/backend/.venv/bin/parking", "worker"]
 ```
 
+- The build context is the repo root; `.dockerignore` lets in only `backend/` (minus `.venv`, caches and `tests/`), so `data/`, `models/` and `deploy/.env` never reach an image.
+- The working directory is `/app`, so the default `config/lot.yaml` and the relative paths in it resolve against the mounted `/app/config`, `/app/data` and `/app/models`. Containers run as uid 1000 (the owner of the repo folders on the dev Pi).
 - The **api** image stays small (no PyTorch). Only **vision** carries the ML stack (expect ~2 GB).
 - **Multi-arch:** CI builds every image for `linux/amd64` **and** `linux/arm64` with `docker buildx`, so the same version runs on the dev Pi and on any production machine. On PRs, CI only builds them (both CPU types) to catch "works on ARM, breaks on x86" early. On a release tag (`v*`), CI pushes them to **GitHub Container Registry**: `ghcr.io/iulian-redinciuc/parking-api:<version>` and `parking-vision:<version>`.
 - **NVIDIA hosts** (if chosen) need a separate CUDA-based `vision` variant (`parking-vision:<version>-cuda`), built only if that hardware is picked.
@@ -114,6 +121,8 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 30s
+      start_interval: 2s
 
   vision-occupancy:
     <<: *common
@@ -123,6 +132,14 @@ services:
     networks: [internal, egress]                               # egress: reach the camera
     deploy: { resources: { limits: { cpus: "${VISION_CPUS:-1.0}", memory: 1200M } } }
     environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
+    depends_on: { api: { condition: service_healthy } }
+    healthcheck:                                               # the /control/* server is up
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
 
   vision-flow:
     <<: *common
@@ -147,6 +164,8 @@ networks:
   internal: { internal: true }
   egress: {}
 ```
+
+Dev override (`docker-compose.dev.yml`): each service drops the GHCR `image` (`image: !reset null`, Compose ≥ 2.24) and gets `build: { context: .., dockerfile: backend/Dockerfile, target: api | vision }`, so the local images are named `parking-api` / `parking-vision-occupancy` and `down --rmi local` removes them. `../backend/parking` is mounted read-only over the installed code (the project is installed editable), so a code change only needs `docker compose … restart`.
 
 Notes:
 - On one machine, workers reach the API at `http://api:8000/internal/*`, and the API reaches workers at `http://vision-occupancy:9000/control/*`. Both use `WORKER_TOKEN`.
