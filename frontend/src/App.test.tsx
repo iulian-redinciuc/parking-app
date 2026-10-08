@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import App from './App'
 
@@ -15,7 +15,10 @@ describe('App shell', () => {
   it('shows the header, the Live screen and three tabs', () => {
     renderAt('#/')
     expect(screen.getByText('Parking')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Live') // the mock feed (VITE_API_BASE=mock)
+    // the header's connection word, from the mock feed (VITE_API_BASE=mock); the Live screen may
+    // add its own status banner when the random mock starts in a stale/unavailable episode
+    const header = screen.getByRole('banner')
+    expect(within(header).getByRole('status')).toHaveTextContent('Live')
     expect(screen.getByRole('heading', { name: 'Live' })).toBeInTheDocument()
     const nav = screen.getByRole('navigation', { name: 'Main' })
     expect(nav.querySelectorAll('a')).toHaveLength(3)
