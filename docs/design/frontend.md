@@ -4,9 +4,9 @@
 
 | Concern | Choice | Notes |
 |---------|--------|-------|
-| Build | **Vite** | `base: '/parking-app/'` for GitHub Pages |
+| Build | **Vite** | `base` from `VITE_BASE` (`/parking-app/` for the GitHub Pages preview, usually `/` in production) |
 | UI | **React 19 + TypeScript** (strict) | |
-| Routing | **react-router `HashRouter`** | GitHub Pages has no SPA fallback, so `#/stats` avoids 404s on reload |
+| Routing | **react-router `HashRouter`** | Works on any static host without server rewrite rules (GitHub Pages has none), so `#/stats` never 404s on reload |
 | Styling | **Tailwind CSS v4** + CSS custom properties for tokens | Light and dark |
 | i18n | **i18next + react-i18next** | `en` first; files in `src/i18n/locales/*.json` |
 | PWA | **vite-plugin-pwa**, `strategies: 'injectManifest'` | A custom `src/sw.ts`, because we need push handlers |
@@ -148,7 +148,8 @@ Install UX:
 
 | Env | Value | Where |
 |-----|-------|-------|
-| `VITE_API_BASE` | `mock` (dev default) / `http://localhost:8000` / production URL | `.env.development`, GitHub repo variable for Pages |
+| `VITE_BASE` | `/parking-app/` (preview) / `/` | build environment |
+| `VITE_API_BASE` | `mock` (dev default) / `http://localhost:8000` / dev API URL (preview) / production API URL | `.env.development`, GitHub repo variable for the preview, production build settings |
 
 Scripts: `npm run dev`, `npm run build`, `npm run preview`, `npm run test`, `npm run e2e`, `npm run lint`.
 

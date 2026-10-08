@@ -1,7 +1,8 @@
 # Phase 4: Live occupancy camera
 
 **Goal:** replace the replay feed with the real Camera B, reaching the accuracy targets in all conditions.
-**Needs hardware:** Camera B, PoE switch, cabling, Pi active cooler.
+**Needs hardware:** Camera B, PoE switch, cabling, and the **production vision host** (or, temporarily, any machine on the camera network that can record).
+**Where the work happens:** code is developed and tested on the **dev Pi** using recordings and snapshots from the real camera. The live soak test runs on the vision host at the lot.
 **Specs used:** [hardware.md](../design/hardware.md), [vision.md §2–3, §5–6, §9–10](../design/vision.md), [config.md](../design/config.md), [security-privacy.md §4](../design/security-privacy.md#4-privacy-and-gdpr-checklist).
 
 ## Deliverables
@@ -12,24 +13,26 @@
 
 ---
 
-## P4.1: Choose and buy the camera
+## P4.1: Choose the production layout, the camera and the vision host
 **Steps**
-1. Use the Phase 1 findings (angle, distance, occlusion) and [hardware.md §2](../design/hardware.md#2-cameras) to choose resolution, lens and mounting height.
-2. Decide where vision runs: this Pi, or an edge box ([deployment.md §9](../design/deployment.md#9-edge-box-variant-lot-is-elsewhere)).
-3. Record the model, lens and mount position in the Decision log.
+1. **Choose the production topology** T1 / T2 / T3 ([deployment.md §3](../design/deployment.md#3-production-topologies-to-be-chosen)), which answers open question #2. This decides where vision runs in production.
+2. Use the Phase 1 findings (angle, distance, occlusion) and [hardware.md §2](../design/hardware.md#2-cameras) to choose the camera's resolution, lens and mounting height.
+3. Choose the **vision host** for the lot ([hardware.md §4.2](../design/hardware.md#42-production-vision-host-at-the-lot-topologies-t1t2)). If unsure between candidates, buy one first and benchmark it on recorded clips (P5.2) before committing.
+4. Record the topology, camera model, lens, mount position and vision host in the Decision log.
 
-**Done when:** the hardware is ordered and the decision recorded.
+**Done when:** the decisions are recorded and the hardware is ordered.
 
 ## P4.2: Install and network
 **Steps**
 1. Mount per the [checklist](../design/hardware.md#6-mounting-checklist). Before fixing it permanently, take a test snapshot and check every space is visible.
-2. Camera VLAN on your router/switch: a new network + firewall rules "camera VLAN → internet: block", "Pi → camera VLAN: allow".
+2. Camera VLAN on the lot's router/switch: a new network + firewall rules "camera VLAN → internet: block", "vision host → camera VLAN: allow".
 3. Static IP / DHCP reservation, new strong password, firmware update, disable cloud/P2P/UPnP, privacy masks over neighbouring windows and the street.
 4. Camera settings: main stream 2560×1440 (or native), H.264 (more compatible than H.265 with OpenCV), sub-stream 640×360. Turn on WDR. Time sync (NTP) and the correct timezone.
-5. From the Pi: `ffprobe -rtsp_transport tcp "$CAM_GROUND_RTSP_URL"` and `curl -sf -o /tmp/s.jpg "$CAM_GROUND_SNAPSHOT_URL"`.
-6. Put the URLs in `deploy/.env`.
+5. From the vision host: `ffprobe -rtsp_transport tcp "$CAM_GROUND_RTSP_URL"` and `curl -sf -o /tmp/s.jpg "$CAM_GROUND_SNAPSHOT_URL"`.
+6. Put the URLs in the vision host's `deploy/.env`.
+7. For development on the dev Pi: grab snapshots and short recordings on site (`parking record`, P5.2) and copy them to the Pi's `data/` folder. Work against `folder:`/`video:` sources; the dev Pi doesn't need to reach the live camera.
 
-**Done when:** both commands work from the Pi and from inside the vision container (`docker compose run --rm vision-occupancy ...`).
+**Done when:** both commands work from the vision host and from inside its vision container (`docker compose run --rm vision-occupancy ...`).
 
 ## P4.3: Snapshot and RTSP sources
 **Files:** `parking/vision/sources.py`, tests
@@ -98,15 +101,16 @@
 ## P4.10: Per-slot classifier (only if P4.9 misses the target)
 **Files:** `parking/vision/slot_classifier.py`, `scripts/train_slot_classifier.py`
 
-**Steps:** follow [vision.md §9](../design/vision.md#9-fallback-per-slot-classifier-only-if-phase-4-accuracy--target). Train on a laptop or desktop (or Google Colab), not the Pi. Export ONNX into `models/`. Add `occupancy.mode: classifier | ensemble`. Re-evaluate on the **same** validation set; keep 20% of frames held out from fine-tuning.
+**Steps:** follow [vision.md §9](../design/vision.md#9-fallback-per-slot-classifier-only-if-phase-4-accuracy--target). Train on a laptop or desktop with a GPU (or Google Colab), not on the dev Pi or the vision host. Export ONNX into `models/`. Add `occupancy.mode: classifier | ensemble`. Re-evaluate on the **same** validation set; keep 20% of frames held out from fine-tuning.
 
 **Done when:** targets are met, or the gap and next steps are documented.
 
-## P4.11: Soak test
+## P4.11: Soak test (on the vision host)
 **Steps**
-1. Run for 7 days with the Phase 3 app in use.
-2. Each day, glance at the app against reality once or twice and note any mismatch in PROGRESS.md.
-3. Watch for memory growth, CPU temperature, reconnects, and stale periods.
+1. On the **vision host at the lot**, run the full stack (API + occupancy worker) from the same compose files. This is temporary: the production API moves to its final machine in Phase 8 if the topology is T2/T3. For phone testing, expose it with the tunnel container under a test hostname, and point the Pages preview at it.
+2. Run for 7 days with the Phase 3 app in use.
+3. Each day, glance at the app against reality once or twice and note any mismatch in PROGRESS.md.
+4. Watch for memory growth, CPU temperature, reconnects, and stale periods, and record the vision host's speed in Metrics.
 
 **Done when:** 7 days with no unrecovered outage and no memory growth.
 

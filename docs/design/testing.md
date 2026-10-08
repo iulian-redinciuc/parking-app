@@ -6,7 +6,7 @@
 |-------|----------|-------|-------------|
 | Backend unit | `backend/tests/unit/` | pytest | ✅ |
 | Backend integration (API + DB, posting to `/internal/*`) | `backend/tests/integration/` | pytest, httpx `AsyncClient`, pytest-asyncio | ✅ |
-| Vision evaluation on **real** images/clips | `data/` (local only) | `parking evaluate`, `parking evaluate-flow` | ❌ (private data). Run on the Pi, record results in PROGRESS.md |
+| Vision evaluation on **real** images/clips | `data/` (local only) | `parking evaluate`, `parking evaluate-flow` | ❌ (private data). Run on the dev Pi, and again on production hardware (P8.2); record results in PROGRESS.md labelled with the machine |
 | Vision smoke test on **synthetic** images | `backend/tests/fixtures/` | pytest (marked `slow`, needs model) | ✅ nightly / manual |
 | End-to-end (replay feed → worker → API → SSE) | `backend/tests/e2e/` + `deploy/docker-compose.test.yml` | pytest + docker compose | ✅ on PRs touching backend |
 | Frontend unit/component | `frontend/src/**/*.test.tsx` | Vitest, Testing Library | ✅ |
@@ -56,6 +56,7 @@ Jobs:
 2. **frontend**: `npm ci`, `npm run lint`, `npm run test -- --run`, `npm run build`, `npx playwright install --with-deps chromium webkit`, `npm run e2e`.
 3. **secrets**: gitleaks.
 4. **e2e** (only if `backend/**` or `deploy/**` changed): build images, `docker compose -f deploy/docker-compose.test.yml up --abort-on-container-exit`.
+5. **images** (only if `backend/**` changed): `docker buildx build --platform linux/amd64,linux/arm64` for both targets, without pushing. This catches "works on the Pi, breaks on x86" (and the reverse) early. Pushing images happens only on release tags ([deployment.md §8](deployment.md#8-releases-and-updating)).
 
 The vision image is large; the e2e job uses a `FakeDetector` (env `PARKING_FAKE_DETECTOR=1`) that reads expected detections from a JSON sidecar next to each replay image, so CI doesn't need PyTorch.
 

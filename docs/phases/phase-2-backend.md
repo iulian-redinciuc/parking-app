@@ -7,7 +7,7 @@
 ## Deliverables
 - `parking worker occupancy` publishing observations
 - `parking api` serving `/healthz`, `/api/lot`, `/api/status`, `/api/stream`
-- Docker Compose with api + vision-occupancy (own project, nothing shared with other software on the Pi)
+- Docker Compose with api + vision-occupancy (own project; on the dev Pi nothing is shared with other software)
 - An end-to-end test on a replay folder
 
 ## Order
@@ -136,12 +136,13 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
 
 **Steps**
 1. Dockerfile per [deployment.md §2](../design/deployment.md#2-docker-images-backenddockerfile-multi-stage).
-2. Compose per [deployment.md §3](../design/deployment.md#3-compose-deploydocker-composeyml), without `tunnel` and `vision-flow` for now. Follow the [isolation rules](../design/deployment.md#0-isolation-from-everything-else-on-the-pi): project name `parking`, its own networks, loopback-only port.
+2. Compose per [deployment.md §4](../design/deployment.md#4-compose-deploy), without `tunnel` and `vision-flow` for now. Follow the [isolation rules](../design/deployment.md#11-isolation-rules-dev-pi): project name `parking`, its own networks, loopback-only port.
 3. Generate `WORKER_TOKEN` (`openssl rand -hex 32`) into `deploy/.env`.
 4. Set `config/lot.yaml` → `cam-ground.source: "folder:data/replay/ground?interval=5&loop=true"` and copy a few sample images into `data/replay/ground/`.
-5. `cd deploy && docker compose up -d --build` → `docker compose ps` shows everything healthy.
+5. `docker-compose.dev.yml` override that builds the images locally ([deployment.md §4](../design/deployment.md#4-compose-deploy)).
+6. `cd deploy && docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build` → `docker compose ps` shows everything healthy.
 
-**Done when:** `curl localhost:8000/api/status` on the Pi returns a real `LotStatus` computed from the replay images.
+**Done when:** `curl localhost:8000/api/status` on the dev Pi returns a real `LotStatus` computed from the replay images.
 
 ## P2.11: End-to-end test
 **Files:** `deploy/docker-compose.test.yml`, `backend/tests/e2e/test_pipeline.py`, `backend/tests/fixtures/replay/*` (synthetic images + detection sidecars)
@@ -159,5 +160,6 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
 - [ ] Dropping a new image into `data/replay/ground/` changes the numbers on `curl -N …/api/stream` within ~20 s
 - [ ] Restarting the API shows the last known numbers immediately (marked stale), then live again
 - [ ] Killing the worker → camera `down` after 30 s → zone `stale` after 60 s
-- [ ] `docker ps` shows only `parking-*` containers added; nothing else on the Pi was changed
+- [ ] `docker ps` shows only `parking-*` containers added; nothing else on the dev Pi was changed
+- [ ] CI builds both images for amd64 **and** arm64 (testing.md §5, job 5), so they're ready for whatever production machine is chosen
 - [ ] Unit + integration + e2e tests green in CI

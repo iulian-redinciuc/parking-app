@@ -135,7 +135,7 @@ data: {…}
 - the static `ADMIN_TOKEN` from `.env` (scripts, and Phases 5–6 before login exists), or
 - a session token from `POST /api/admin/login` (random 32 bytes, stored hashed in `admin_session`, valid 7 days).
 
-Why not cookies: the frontend (github.io) and API (your domain) are different sites. Browsers, Safari especially, block third-party cookies, and cookies would also need CSRF protection. A bearer token kept in memory or `sessionStorage` avoids both.
+Why not cookies: the frontend and the API can be on different sites (e.g. the GitHub Pages preview and a separate API host). Browsers, Safari especially, block third-party cookies, and cookies would also need CSRF protection. A bearer token kept in memory or `sessionStorage` avoids both.
 
 | Method | Path | Phase | Description |
 |--------|------|-------|-------------|
@@ -219,7 +219,7 @@ Each worker runs a tiny HTTP server on port **9000**, reachable only inside the 
   "title": "Parking: 23 free",
   "body": "Ground 12 · Underground ≈11 · 17:05",
   "tag": "parking-status",
-  "url": "https://iulian-redinciuc.github.io/parking-app/#/",
+  "url": "<PUBLIC_APP_URL>#/",
   "level": "plenty",
   "kind": "on_my_way"
 }

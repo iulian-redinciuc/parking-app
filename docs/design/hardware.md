@@ -14,7 +14,7 @@ Requirements:
 - All from the **same position and angle** (as if from the final fixed camera).
 - **Original file**, full resolution (≥ 1920×1080 ideally). Not a screenshot, not forwarded through WhatsApp/Messenger (they compress heavily).
 - Shot from **high up** if you can (window, upper floor, pole), since that's what the camera will see.
-- These stay in `data/samples/` on the Pi and are **never committed** (the repo is public).
+- These stay in `data/samples/` on the development machine and are **never committed** (the repo is public).
 
 ## 2. Cameras
 
@@ -43,24 +43,34 @@ Requirements:
 
 ## 3. Network
 - PoE switch (802.3af/at), budget ≥ 15 W per camera with IR.
-- Put cameras on a **separate VLAN** with no internet access. Only the Pi (or the edge box) may reach them.
+- Put cameras on a **separate VLAN** with no internet access. Only the vision host may reach them.
 - Give cameras **static IPs** (or DHCP reservations). Change default passwords; disable cloud/P2P features; update firmware.
-- Test from the Pi: `ffprobe -rtsp_transport tcp "rtsp://user:pass@IP:554/..."` and `curl -o test.jpg "http://user:pass@IP/snapshot..."`.
+- Test from the vision host: `ffprobe -rtsp_transport tcp "rtsp://user:pass@IP:554/..."` and `curl -o test.jpg "http://user:pass@IP/snapshot..."`.
 
-## 4. Raspberry Pi 5 accessories
-| Item | Why | Needed? |
-|------|-----|---------|
-| **Active cooler** | Sustained inference throttles a bare Pi 5 | Yes |
-| Official 27 W USB-C PSU | Stability under load | Yes |
-| NVMe (already have) | DB, recordings | ✅ |
-| **AI HAT+** (Hailo-8L 13 TOPS or Hailo-8 26 TOPS) | Only if the flow camera can't keep ≥ 8 fps on the CPU | Decide in Phase 5 |
-| UPS / power bank with pass-through | Survive short power cuts | Phase 8, optional |
+## 4. Compute hardware
 
-## 5. Edge box bill of materials (only if the lot isn't on the Pi's network)
-- Raspberry Pi 5 (4–8 GB), active cooler, PSU, 128 GB+ NVMe or high-endurance SD.
-- PoE switch, weatherproof enclosure if outdoors.
-- 4G/5G router with a data SIM if there's no wired internet (vision results only need a few MB per day; remote admin snapshots add a little).
-- Optional: UPS.
+### 4.1 Development machine: Raspberry Pi 5 (already have)
+Used only to build and test. Recommended: an **active cooler**, because long benchmark and evaluation runs throttle a bare Pi 5. Nothing else is needed for development.
+
+### 4.2 Production vision host (at the lot; topologies T1/T2)
+Chosen in P4.1, once the topology is decided ([deployment.md §3](deployment.md#3-production-topologies-to-be-chosen)). Candidates:
+
+| Option | AI runtime | Notes |
+|--------|-----------|-------|
+| Raspberry Pi 5 (8 GB) + active cooler, optionally **AI HAT+** (Hailo-8L 13 TOPS / Hailo-8 26 TOPS) | NCNN (CPU) / Hailo | Same CPU type as the dev Pi, so the fewest surprises. Add the AI HAT+ if the flow camera needs more speed |
+| **Intel N100/N150 mini PC** (8–16 GB RAM, SSD) | OpenVINO | x86, usually faster than a Pi on CPU alone; fanless models exist |
+| **NVIDIA Jetson Orin Nano** | CUDA / TensorRT | Most AI headroom (several cameras, higher fps); needs the CUDA image variant |
+
+Pick by measuring: record clips from the real cameras (P5.2), then run `parking benchmark` and `parking evaluate-flow` on the candidate machine before buying more than one.
+
+### 4.3 Production API server (topologies T2/T3)
+- **T2:** a small cloud VM or any always-on server: 1–2 vCPU, 1–2 GB RAM, ~20 GB disk, Linux with Docker. The API doesn't run AI, so it needs very little.
+- **T3:** a VM big enough to also run vision for every camera (benchmark first), or one with a GPU.
+
+### 4.4 Site extras (T1/T2)
+- PoE switch (see §3), a weatherproof enclosure if outdoors.
+- A 4G/5G router with a data SIM if there's no wired internet. T2 needs only a few MB per day plus admin snapshots; **T1** also serves all public app traffic from the lot.
+- Optional: a UPS for the vision host, switch and router.
 
 ## 6. Mounting checklist
 - [ ] Camera positions agree with the layout option (A/B/C) chosen in PLAN.md.

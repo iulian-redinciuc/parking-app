@@ -65,8 +65,8 @@ Plain HTML and JavaScript with no build step, so you open it by double-clicking 
 **Files:** `backend/parking/vision/detector.py`, `backend/parking/cli.py` (`models export`), `backend/tests/unit/test_detector_filter.py`
 
 **Steps**
-1. `uv sync --extra vision` (installs ultralytics + torch CPU + ncnn; takes a while on the Pi).
-2. `parking models export --model yolo11n-seg --imgsz 1280 --format ncnn` → `models/yolo11n-seg_ncnn_model/`. Also export `yolo11n` at 640 (used in Phase 5 and for benchmarking).
+1. `uv sync --extra vision` (installs ultralytics + torch CPU + ncnn + onnxruntime; takes a while on the dev Pi).
+2. `parking models export --model yolo11n-seg --imgsz 1280 --runtime ncnn` (NCNN suits the dev Pi's ARM CPU; other machines use other runtimes, see [vision.md §11](../design/vision.md#11-runtimes-and-performance)) → `models/yolo11n-seg_ncnn_model/`. Also export `yolo11n` at 640 (used in Phase 5 and for benchmarking).
 3. `YoloDetector` per [vision.md §1](../design/vision.md#1-detector): load once, `detect(frame)` → `list[Detection]`, mapping class ids ↔ names, with masks from `result.masks.xy`.
 4. `FakeDetector(json_path)` returning detections from a JSON sidecar (for tests and CI).
 5. A unit test for the class-filter/mapping logic using `FakeDetector`. A `@pytest.mark.slow` test that runs the real model on a synthetic fixture and expects ≥ 1 car.
@@ -129,7 +129,7 @@ Plain HTML and JavaScript with no build step, so you open it by double-clicking 
 
 **Done when:** running it on the busy sample produces a slot file that opens in the editor, needing only adjustments rather than drawing from scratch.
 
-## P1.10: Benchmark on the Pi 5
+## P1.10: Benchmark on the dev Pi
 **Files:** CLI `benchmark`, results in PROGRESS.md → Metrics
 
 **Steps**
@@ -152,7 +152,7 @@ Plain HTML and JavaScript with no build step, so you open it by double-clicking 
 
 ## Exit criteria
 - [ ] Free count matches the hand count on the sample image(s), or the remaining error is explained with a plan
-- [ ] < 2 s per image on the Pi with the chosen settings
+- [ ] < 2 s per image on the dev Pi with the chosen settings (production hardware is re-checked in P8.2)
 - [ ] You've looked at the annotated image(s) and agree
 - [ ] Benchmarks + decisions in PROGRESS.md
 - [ ] All unit tests green in CI

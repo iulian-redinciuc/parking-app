@@ -1,86 +1,122 @@
-# Phase 8: Hardening for production
+# Phase 8: Production deployment and hardening
 
-**Goal:** the system runs unattended, recovers by itself, and is safe and documented.
-**Specs used:** [deployment.md](../design/deployment.md), [security-privacy.md](../design/security-privacy.md), [testing.md](../design/testing.md), [data-model.md §5](../design/data-model.md#5-backups).
+**Goal:** move from the dev Pi to the **production environment** chosen in P4.1, and make it run unattended, recover by itself, and be safe and documented.
+**Runs on:** production machines (topology T1, T2 or T3 from [deployment.md §3](../design/deployment.md#3-production-topologies-to-be-chosen)). The dev Pi stays the test machine.
+**Specs used:** [deployment.md](../design/deployment.md), [hardware.md §4](../design/hardware.md#4-compute-hardware), [security-privacy.md](../design/security-privacy.md), [testing.md](../design/testing.md), [data-model.md §5](../design/data-model.md#5-backups).
+
+## Order
+```
+P8.1 release images ─> P8.2 provision ─> P8.3 public entry + frontend ─> P8.4–P8.12 hardening ─> P8.13 staging run + go-live
+```
 
 ---
 
-## P8.1: Compose hardening
+## P8.1: Release pipeline (multi-arch images)
+**Files:** `.github/workflows/release.yml`
+
+**Steps**
+1. On tags `v*`: `docker/setup-qemu-action` + `docker/setup-buildx-action` → build `api` and `vision` for `linux/amd64,linux/arm64` → push to `ghcr.io/iulian-redinciuc/parking-api:<tag>` and `parking-vision:<tag>` (plus `:latest`).
+2. If the production vision host is NVIDIA: also build `parking-vision:<tag>-cuda` for that platform only.
+3. Write release notes from the commit messages (task IDs make this easy).
+
+**Done when:** tagging `v0.1.0` produces both images for both CPU types in GHCR, and `docker pull` works on the dev Pi and on an x86 machine.
+
+## P8.2: Provision the production machines
+**Steps**
+1. Set up the machine(s) for the chosen topology: Linux with automatic security updates, Docker, a firewall that denies everything inbound except what the topology needs, SSH with keys only.
+2. **T2 only:** set up the private VPN between the lot box and the API server ([deployment.md §9](../design/deployment.md#9-workers-and-api-on-different-machines-t2)).
+3. Create `/opt/parking/` with `deploy/`, `config/`, `models/`, `data/`. Create a **new production `.env`** with fresh secrets. Never reuse the dev tokens, keys or passwords.
+4. On the vision host: `parking models export --runtime <runtime for this machine>` ([vision.md §11](../design/vision.md#11-runtimes-and-performance)).
+5. **Re-measure on production hardware:** `parking benchmark`, `parking evaluate` on the validation set, `parking evaluate-flow` on the test clips. Re-tune `imgsz`, thresholds and CPU limits in the production config if the numbers differ from the dev Pi. Record them in PROGRESS.md → Metrics, labelled "production".
+
+**Done when:** `PARKING_VERSION=<tag> docker compose up -d` runs on the production machine(s), and accuracy and speed meet the targets on that hardware.
+
+## P8.3: Production public entry and frontend hosting
+**Steps**
+1. Public HTTPS entry for the API ([deployment.md §5](../design/deployment.md#5-public-access-for-the-api)): a tunnel, or Caddy on a public-IP server. Production hostname, separate from the dev one.
+2. Decide production frontend hosting ([deployment.md §6](../design/deployment.md#6-frontend-hosting)): keep GitHub Pages (custom domain optional), another static host, or served by the production reverse proxy. Build with that host's `VITE_BASE` and `VITE_API_BASE`.
+3. Production `CORS_ORIGINS`, `PUBLIC_APP_URL`, and **production VAPID keys**. Push subscriptions made against the preview don't carry over: testers re-enable notifications once.
+4. Keep the GitHub Pages preview pointed at the dev API (or `mock`) for future testing.
+
+**Done when:** the production URL works on a phone over mobile data, and push works from production.
+
+## P8.4: Compose hardening
 **Steps**
 1. Every service: `restart: unless-stopped`, a healthcheck, `read_only: true` where possible (with `tmpfs: /tmp`), `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, non-root user.
-2. Resource limits tuned to the Phase 4–5 measurements.
-3. Pin image tags (e.g. `cloudflare/cloudflared:<version>`, `python:3.12.x-slim-bookworm`). Let Dependabot propose updates.
-4. Docker starts on boot (`systemctl is-enabled docker`). The stack comes back after `sudo reboot`.
+2. Resource limits tuned to the production measurements (P8.2), set in the production `.env`.
+3. Pin image tags (e.g. `cloudflare/cloudflared:<version>`, `PARKING_VERSION=v0.x.y`; never `latest` in production). Let Dependabot propose updates.
+4. Docker starts on boot. The stack comes back after a reboot.
 
-**Done when:** after `sudo reboot`, the app shows live data again within 3 minutes with no manual steps.
+**Done when:** after rebooting the production machine(s), the app shows live data again within 3 minutes with no manual steps.
 
-## P8.2: Watchdog for stuck workers
+## P8.5: Watchdog for stuck workers
 **Steps**
 1. Workers write a heartbeat file (`/tmp/heartbeat`) after each successful loop; the Docker healthcheck fails if it's older than 3 × the interval.
-2. Docker doesn't restart *unhealthy* containers by itself. Add `willfarrell/autoheal` (or a tiny cron script: `docker ps --filter health=unhealthy -q | xargs -r docker restart`).
+2. Docker doesn't restart *unhealthy* containers by itself. Add a `parking-autoheal` container (`willfarrell/autoheal`, limited to containers labelled `autoheal=true`), or a tiny cron script: `docker ps --filter health=unhealthy --filter name=parking- -q | xargs -r docker restart`.
 3. The API exposes a `restarts` count per worker in `/healthz` (from health messages).
 
 **Done when:** freezing a worker (`docker compose pause vision-occupancy` doesn't count; use a debug command that blocks the loop) gets it restarted automatically within ~1 min.
 
-## P8.3: Backups and restore
+## P8.6: Backups and restore
 **Files:** CLI `parking backup`, `deploy/backup.sh`, crontab entry
 
 **Steps**
 1. `parking backup --out DIR` uses the SQLite online backup API, adds `config/` and the reference images, and writes `parking-YYYYMMDD-HHMM.tar.gz`.
-2. Host cron at 03:30 runs it in the API container; rotate 14 daily + 8 weekly copies.
-3. Off-Pi copy with `rclone` (Google Drive/OneDrive/another machine). **Encrypt** (rclone crypt), because it contains config and coordinates.
-4. Also back up `deploy/.env` (VAPID keys!) to the encrypted remote.
-5. **Restore drill:** on a spare folder/Pi, restore and start; check `/api/status` and history.
+2. Cron at 03:30 on the API machine runs it in the API container; rotate 14 daily + 8 weekly copies.
+3. Off-machine copy with `rclone` (object storage or another machine). **Encrypt** (rclone crypt), because it contains config and coordinates.
+4. Also back up the production `.env` (VAPID keys!) to the encrypted remote.
+5. **Restore drill:** on a spare machine (the dev Pi works), restore and start; check `/api/status` and history.
 
 **Done when:** the restore drill succeeds, and is documented in the runbook.
 
-## P8.4: Monitoring and alerts
+## P8.7: Monitoring and alerts
 **Steps**
-1. Admin push alerts (P7.8) cover cameras and staleness. Add: disk > 85%, CPU temp > 80 °C sustained 10 min, API restarted, backup failed.
-2. External uptime check: a free monitor (e.g. UptimeRobot / Healthchecks.io) on `https://<api>/healthz` every 5 min, emailing you. This catches "the whole Pi or internet is down", which the Pi can't report itself.
+1. Admin push alerts (P7.8) cover cameras and staleness. Add: disk > 85%, CPU temperature high (on machines that report it), API restarted, backup failed.
+2. External uptime check: a free monitor (e.g. UptimeRobot / Healthchecks.io) on `https://<api-host>/healthz` every 5 min, emailing you. This catches "the whole machine or its internet is down", which the machine can't report itself.
 
-**Done when:** pulling the Pi's network cable produces an external alert email within 10 min.
+**Done when:** stopping the production API (or cutting its network) produces an external alert email within 10 min.
 
-## P8.5: Security review
-Go through [security-privacy.md §2](../design/security-privacy.md#2-threats-and-controls) line by line and tick each control as verified:
-- [ ] `/internal/*` returns 401 without `WORKER_TOKEN` and 404 through the tunnel
-- [ ] `docker ps` / `docker network ls`: only `parking-*` containers and `parking_*` networks belong to this app; no other project's containers were changed
-- [ ] Cameras unreachable from outside the camera VLAN (except the Pi)
+## P8.8: Security review
+Go through [security-privacy.md §2](../design/security-privacy.md#2-threats-and-controls) line by line on the **production** setup and tick each control as verified:
+- [ ] `/internal/*` returns 401 without `WORKER_TOKEN` and 404 through the public entry; workers' `/control/*` unreachable from outside
+- [ ] Production secrets differ from dev; `.env` readable only by its owner (`chmod 600`)
+- [ ] Cameras unreachable from outside the camera VLAN (except the vision host)
 - [ ] Login rate limit works; tokens expire; logout revokes
 - [ ] CSP meta present; no `dangerouslySetInnerHTML`; the admin token is in sessionStorage
 - [ ] CORS rejects other origins (`curl -H "Origin: https://evil.example" -I …`)
 - [ ] gitleaks scan of the **full history** clean (`gitleaks detect --log-opts="--all"`)
 - [ ] Dependabot alerts at zero high/critical
-- [ ] Only the API is reachable from outside; `nmap` from outside your network shows nothing
+- [ ] From outside: only the public HTTPS entry answers (`nmap` the production address(es))
 
 **Done when:** every item is ticked, and the results are noted in PROGRESS.md.
 
-## P8.6: Privacy deliverables
+## P8.9: Privacy deliverables
 **Steps**
 1. Work through the [GDPR checklist](../design/security-privacy.md#4-privacy-and-gdpr-checklist); keep the notes (purpose, lawful basis, DPIA decision) in a private place, not this public repo.
 2. Signage at the lot.
 3. The privacy screen in the app (`#/privacy`), linked from the footer and the Alerts screen.
 4. Verify the retention jobs actually delete data (query the oldest rows).
+5. **T3 only:** document that video travels to the cloud machine (encrypted VPN), and how long nothing is kept there.
 
 **Done when:** the checklist is complete, the signage is up, and the privacy screen is live.
 
-## P8.7: Load test
+## P8.10: Load test
 **Files:** `scripts/load/sse.py`
 
-**Steps:** 500 concurrent SSE clients through the tunnel for 10 min, while the replay feed changes every 10 s. Measure the delivery delay (server `updated_at` vs client receive time), API memory and CPU.
+**Steps:** 500 concurrent SSE clients against the **production** public entry for 10 min (outside peak hours), while counts change. Measure the delivery delay (server `updated_at` vs client receive time), API memory and CPU.
 
 **Done when:** p95 delivery < 2 s, no errors, API memory stable.
 
-## P8.8: Power and network resilience
+## P8.11: Power and network resilience
 **Steps**
-1. Pull the power for 1 min → everything comes back by itself; the app shows stale, then live.
-2. Unplug the internet for 10 min → the local pipeline keeps counting; after reconnect, the tunnel recovers and phones resync.
+1. Cut power to each production machine for 1 min → everything comes back by itself; the app shows stale, then live.
+2. Cut the lot's internet for 10 min → **T2:** counting continues on site and flow events arrive after reconnect (outbox); **T1:** the app is unreachable, then recovers by itself.
 3. Unplug one camera for 10 min → its zone shows stale; the other zones stay live; an admin alert fires; it recovers by itself.
-4. Optional UPS for the Pi + PoE switch; test a 5 min outage.
+4. Optional UPS for the vision host, switch and router; test a 5 min outage.
 
 **Done when:** all scenarios pass with no manual help.
 
-## P8.9: Runbook and README
+## P8.12: Runbook and README
 **Files:** `docs/runbook.md`, `README.md`
 
 Runbook sections, each with symptoms → checks (commands) → fix:
@@ -89,18 +125,29 @@ Runbook sections, each with symptoms → checks (commands) → fix:
 - Counts are wrong (occupancy) → recalibrate
 - Counts drifting (flow) → correct, check the clips
 - Camera shifted
+- Deploy a new version / roll back
 - Restore from backup
-- Rotate a secret (camera password, admin password, VAPID keys: the consequences)
-- Update the software
+- Rotate a secret (camera password, admin password, worker token, VAPID keys: the consequences)
 - Add a new language / zone / camera
+- Rebuild the dev environment on the Pi (or another dev machine)
 
 **Done when:** someone other than you could follow the runbook to fix a stale camera.
+
+## P8.13: Staging run and go-live
+**Steps**
+1. Run production for **7 days** with only you and a few testers, comparing against reality daily (as in P4.11/P5.11).
+2. Fix anything found and release a new version (P8.1 flow).
+3. Go live: share the production URL, put up signage, keep the preview for testing future changes.
+
+**Done when:** 7 clean days, then the production URL is shared.
 
 ---
 
 ## Exit criteria
+- [ ] Running on the production machine(s) from released, version-pinned images
+- [ ] Accuracy and speed targets met **on production hardware**
 - [ ] Survives a reboot, power cut, internet outage and camera outage with no manual help
-- [ ] Backups off-Pi, restore drill done
+- [ ] Backups off the production machine, restore drill done
 - [ ] Security and privacy checklists complete
 - [ ] External uptime monitoring active
-- [ ] Runbook complete
+- [ ] Runbook complete; 7-day staging run passed

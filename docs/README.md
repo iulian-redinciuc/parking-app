@@ -22,8 +22,8 @@ Phase guides **link to** the design specs instead of repeating them. If a spec a
 | [design/data-model.md](design/data-model.md) | SQLite tables, retention, aggregation, restart behaviour |
 | [design/frontend.md](design/frontend.md) | Screens, components, live-update hook, PWA, i18n, styling |
 | [design/notifications.md](design/notifications.md) | Push, proximity tiers, iPhone specifics |
-| [design/deployment.md](design/deployment.md) | Isolation rules, Docker images, Compose, tunnel, GitHub Pages, backups |
-| [design/hardware.md](design/hardware.md) | Cameras, mounting, network, Pi accessories, sample-image guidelines |
+| [design/deployment.md](design/deployment.md) | Dev Pi isolation rules, production topologies, multi-arch images, Compose, public entry, frontend hosting, backups, releases |
+| [design/hardware.md](design/hardware.md) | Cameras, mounting, network, compute hardware (dev Pi, production options), sample-image guidelines |
 | [design/security-privacy.md](design/security-privacy.md) | Threats, controls, secrets, public-repo rules, GDPR checklist |
 | [design/testing.md](design/testing.md) | Test layers, fixtures, CI, evaluation datasets, device matrix |
 
@@ -35,11 +35,11 @@ Phase guides **link to** the design specs instead of repeating them. If a spec a
 | 1 | [phases/phase-1-still-image.md](phases/phase-1-still-image.md) | No (one image) |
 | 2 | [phases/phase-2-backend.md](phases/phase-2-backend.md) | No |
 | 3 | [phases/phase-3-frontend.md](phases/phase-3-frontend.md) | No |
-| 4 | [phases/phase-4-occupancy-camera.md](phases/phase-4-occupancy-camera.md) | Yes: Camera B |
+| 4 | [phases/phase-4-occupancy-camera.md](phases/phase-4-occupancy-camera.md) | Yes: Camera B + vision host |
 | 5 | [phases/phase-5-flow-camera.md](phases/phase-5-flow-camera.md) | Yes: Camera A |
 | 6 | [phases/phase-6-notifications.md](phases/phase-6-notifications.md) | No |
 | 7 | [phases/phase-7-admin-stats.md](phases/phase-7-admin-stats.md) | No |
-| 8 | [phases/phase-8-hardening.md](phases/phase-8-hardening.md) | — |
+| 8 | [phases/phase-8-hardening.md](phases/phase-8-hardening.md): production deployment + hardening | Production machines |
 | 9 | [phases/phase-9-extras.md](phases/phase-9-extras.md) | Depends |
 
 ## Conventions
@@ -60,7 +60,7 @@ Every task in a phase guide has:
 5. PROGRESS.md is ticked and the session log updated.
 
 ### Git workflow
-- `main` is always deployable. Pushing to `main` redeploys GitHub Pages.
+- `main` is always deployable. Pushing to `main` redeploys the GitHub Pages **preview**. Production is deployed only from release tags (`v*`).
 - One branch per task or small group of tasks: `p1.5-occupancy`, `p3.4-live-screen`.
 - Commit messages start with the task ID: `P1.5: slot overlap scoring with mask/box modes`.
 - Open a PR to `main` so CI runs, then merge when it's green.
@@ -78,4 +78,8 @@ Every task in a phase guide has:
 | **SSE** | Server-Sent Events: the server keeps an HTTP connection open and pushes updates |
 | **PWA** | Progressive Web App: a website that can be installed to the home screen and receive push |
 | **VAPID** | The key pair that identifies our server to browser push services |
-| **NCNN** | A fast neural-network runtime for ARM CPUs, used to run YOLO on the Pi |
+| **NCNN** | A fast neural-network runtime for ARM CPUs; used on the dev Pi (production may use another runtime) |
+| **Dev Pi** | Iulian's Raspberry Pi 5, used **only** for development and testing |
+| **Production** | The real deployment, on machines not decided yet ([design/deployment.md §3](design/deployment.md#3-production-topologies-to-be-chosen)) |
+| **Vision host** | The machine that runs the camera workers in production (usually at the lot) |
+| **Preview** | The GitHub Pages copy of the frontend used for testing |

@@ -1,7 +1,8 @@
 # Phase 5: Entry/exit camera and combining levels
 
 **Goal:** count cars entering and leaving with Camera A, keep a correct running count for the level it covers, and combine all levels into one status.
-**Needs hardware:** Camera A (and maybe the AI HAT+, decided in P5.10).
+**Needs hardware:** Camera A, and the vision host from P4.1 (plus maybe an accelerator, decided in P5.10).
+**Where the work happens:** development and clip evaluation on the **dev Pi**; the speed check and the live drift week on the **vision host at the lot**.
 **Specs used:** [vision.md §7–8, §10](../design/vision.md), [api.md §4–5](../design/api.md), [data-model.md](../design/data-model.md), [config.md §3](../design/config.md#3-line-file-configlinescamerajson).
 
 ## Deliverables
@@ -97,18 +98,18 @@ Implement `TwoLineCounter` per [vision.md §7.3](../design/vision.md#73-two-line
 
 **Done when:** ≥ 98% event accuracy on all three clips, or the gap is understood (e.g. queued cars at the barrier) with a plan.
 
-## P5.10: Performance and the AI HAT+ decision
+## P5.10: Performance on the vision host and the accelerator decision
 **Steps**
-1. On the busiest clip, played in real time (`realtime=true`): record the achieved fps, CPU %, and temperature, with the occupancy worker and the Pi's other services also running.
-2. If fps drops below 8 while cars pass, or CPU temp > 80 °C: try a smaller ROI or `imgsz=480` first. If still short, order the **AI HAT+** and add a `HailoDetector` behind the `Detector` protocol (the Hailo model zoo has YOLO models compiled for Hailo-8/8L).
-3. Record the decision.
+1. On the **vision host** (not the dev Pi), with the runtime for that machine ([vision.md §11](../design/vision.md#11-runtimes-and-performance)), play the busiest clip in real time (`realtime=true`) with the occupancy worker also running. Record the achieved fps, CPU %, and temperature.
+2. If fps drops below 8 while cars pass, or the CPU runs hot: try a smaller ROI or `imgsz=480` first. If still short, add the accelerator that fits that machine: an **AI HAT+** with a `HailoDetector` on a Pi, or a faster runtime / GPU elsewhere. The `Detector` protocol keeps this a contained change.
+3. The dev Pi's numbers are only a worst-case reference. Record the vision host's numbers and the decision.
 
 **Done when:** the decision is recorded with numbers.
 
 ## P5.11: Live week drift test
 **Steps**
 1. Correct the count to the true value on day 0.
-2. Each day, at a time you can count the level (or check its occupancy camera if Option C), note true vs app value. **Don't correct** during the test.
+2. Run on the vision host (same temporary setup as P4.11). Each day, at a time you can count the level (or check its occupancy camera if Option C), note true vs app value. **Don't correct** during the test.
 3. Drift per day = |error change| / days.
 4. If drift is above target: check for a pattern (night? queues? pedestrians?) and use a clip of that situation to fix it. Consider enabling the scheduled reset.
 
@@ -120,4 +121,4 @@ Implement `TwoLineCounter` per [vision.md §7.3](../design/vision.md#73-two-line
 - [ ] ≥ 98% event accuracy on the three clips
 - [ ] ≤ 2 cars/day drift over a live week (or an accepted mitigation)
 - [ ] Corrections work from the command line, and the phone updates at once
-- [ ] CPU/fps budget OK, or the AI HAT+ installed
+- [ ] fps budget OK **on the vision host**, or an accelerator added

@@ -9,7 +9,8 @@
 | Count integrity | Wrong numbers send people to a full lot |
 | Push subscriptions | Could be abused to spam users |
 | Secrets (`.env`) | Camera passwords, VAPID private key, tunnel token |
-| The Pi | It also runs other software, which this app must never touch ([deployment.md §0](deployment.md#0-isolation-from-everything-else-on-the-pi)) |
+| The dev Pi | It also runs other software, which this app must never touch ([deployment.md §1](deployment.md#1-development-on-the-raspberry-pi)) |
+| Production machines | Public-facing; must stay patched and minimal |
 
 ## 2. Threats and controls
 
@@ -24,7 +25,7 @@
 | Push spam through our API | Rate limits on subscribe/test. Pushes only ever go to subscriptions the browser created. Content is generated server-side only |
 | Secrets leaked to the public repo | `.env`, `data/`, `models/` in `.gitignore`. **gitleaks** pre-commit hook + CI job. GitHub secret scanning and push protection switched on |
 | Compromised dependency | Dependabot (pip, npm, actions, docker). Lockfiles (`uv.lock`, `package-lock.json`). Images pinned to major versions |
-| Pi compromise spreads to the home stack | Containers run as non-root, internal networks, read-only mounts where possible, resource limits. Only the API is exposed (via the tunnel) |
+| A compromise spreads to other software on the same machine | Containers run as non-root, internal networks, read-only mounts where possible, resource limits. Only the API is exposed (via the public entry). Dev and production use **different secrets** |
 
 ## 3. Public-repo rules
 

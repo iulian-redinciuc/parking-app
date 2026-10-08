@@ -20,7 +20,7 @@
 | 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 0 / 11 | ⬜ | | |
 | 6 | [Notifications](docs/phases/phase-6-notifications.md) | 0 / 8 | ⬜ | | |
 | 7 | [Admin + stats](docs/phases/phase-7-admin-stats.md) | 0 / 8 | ⬜ | | |
-| 8 | [Hardening](docs/phases/phase-8-hardening.md) | 0 / 9 | ⬜ | | |
+| 8 | [Production deployment + hardening](docs/phases/phase-8-hardening.md) | 0 / 13 | ⬜ | | |
 | 9 | [Extras](docs/phases/phase-9-extras.md) | 0 / 7 | ⬜ | | |
 
 ---
@@ -46,7 +46,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] **P1.7** `parking analyze`
 - [ ] **P1.8** Ground-truth labels + `parking evaluate`
 - [ ] **P1.9** `parking bootstrap-slots`
-- [ ] **P1.10** Benchmark on the Pi 5
+- [ ] **P1.10** Benchmark on the dev Pi
 - [ ] **P1.11** Tune and decide
 
 ## Phase 2: Backend + simulated live feed ⬜
@@ -70,12 +70,12 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] **P3.5** Banners and edge states
 - [ ] **P3.6** i18n
 - [ ] **P3.7** PWA
-- [ ] **P3.8** Deploy to Pages with Actions
-- [ ] **P3.9** API over HTTPS (tunnel)
+- [ ] **P3.8** Deploy the preview to GitHub Pages with Actions
+- [ ] **P3.9** Dev API over HTTPS for phone testing
 - [ ] **P3.10** Tests + quality gates
 
 ## Phase 4: Live occupancy camera ⬜
-- [ ] **P4.1** Choose and buy the camera
+- [ ] **P4.1** Choose the production layout, the camera and the vision host
 - [ ] **P4.2** Install and network
 - [ ] **P4.3** Snapshot + RTSP sources
 - [ ] **P4.4** Health tuning on the real camera
@@ -85,7 +85,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] **P4.8** Validation set (~200 labelled frames)
 - [ ] **P4.9** Evaluate and tune
 - [ ] **P4.10** Per-slot classifier (only if needed)
-- [ ] **P4.11** 7-day soak test
+- [ ] **P4.11** 7-day soak test (on the vision host)
 
 ## Phase 5: Entry/exit camera + combining levels ⬜
 - [ ] **P5.1** Mount Camera A, draw lines
@@ -97,7 +97,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] **P5.7** FlowCounter in the API + corrections
 - [ ] **P5.8** Fusion update + confidence
 - [ ] **P5.9** Test clips, tally tool, `evaluate-flow`
-- [ ] **P5.10** Performance + AI HAT+ decision
+- [ ] **P5.10** Performance on the vision host + accelerator decision
 - [ ] **P5.11** Live week drift test
 
 ## Phase 6: Notifications ⬜
@@ -120,16 +120,20 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] **P7.7** Stats screen
 - [ ] **P7.8** Admin alerts
 
-## Phase 8: Hardening for production ⬜
-- [ ] **P8.1** Compose hardening
-- [ ] **P8.2** Watchdog for stuck workers
-- [ ] **P8.3** Backups + restore drill
-- [ ] **P8.4** Monitoring + external uptime check
-- [ ] **P8.5** Security review
-- [ ] **P8.6** Privacy deliverables
-- [ ] **P8.7** Load test
-- [ ] **P8.8** Power/network resilience
-- [ ] **P8.9** Runbook + README
+## Phase 8: Production deployment and hardening ⬜
+- [ ] **P8.1** Release pipeline (multi-arch images to GHCR)
+- [ ] **P8.2** Provision production machines + re-measure on production hardware
+- [ ] **P8.3** Production public entry + frontend hosting
+- [ ] **P8.4** Compose hardening
+- [ ] **P8.5** Watchdog for stuck workers
+- [ ] **P8.6** Backups + restore drill
+- [ ] **P8.7** Monitoring + external uptime check
+- [ ] **P8.8** Security review
+- [ ] **P8.9** Privacy deliverables
+- [ ] **P8.10** Load test
+- [ ] **P8.11** Power/network resilience
+- [ ] **P8.12** Runbook + README
+- [ ] **P8.13** 7-day staging run + go-live
 
 ## Phase 9: Optional extras ⬜
 - [ ] **P9.1** Native app with background geofencing
@@ -147,7 +151,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | # | Question | Answer | Status |
 |---|----------|--------|--------|
 | 1 | Sample image(s): normal, full, empty, night ([what to send](docs/design/hardware.md#1-sample-images-for-phase-1-what-to-send)) | | ⬜ waiting |
-| 2 | Where is the lot relative to the Pi? Power/internet there? | | ⬜ |
+| 2 | **Where will production run?** Topology T1 / T2 / T3 ([deployment.md §3](docs/design/deployment.md#3-production-topologies-to-be-chosen)); power and internet at the lot. Needed before Phase 4 | | ⬜ |
 | 3 | Spaces per level; marked spaces? One ramp? Separate in/out lanes? | | ⬜ |
 | 4 | Camera layout: Option A / B / C ([PLAN §5](PLAN.md#5-key-design-decisions)); existing cameras? | | ⬜ |
 | 5 | Who are the users (household / staff / public)? | | ⬜ |
@@ -163,31 +167,40 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | Date | Decision | Why |
 |------|----------|-----|
 | 2026-10-07 | Repo made public so GitHub Pages works on the free plan | Pages on private repos needs GitHub Pro |
-| 2026-10-07 | Stack: Python/FastAPI + YOLO11 (NCNN) + SQLite on the Pi 5; Vite/React/TS PWA on Pages; SSE; Web Push | [PLAN.md §4](PLAN.md#4-stack-summary) |
+| 2026-10-07 | Stack: Python/FastAPI + YOLO11 + SQLite; Vite/React/TS PWA; SSE; Web Push | [PLAN.md §4](PLAN.md#4-stack-summary) |
 | 2026-10-07 | Still image → simulated feed → real cameras | De-risks vision first; Phases 1–3 need no hardware |
 | 2026-10-07 | Notification tiers instead of a promised background geofence | Browsers can't track location in the background |
-| 2026-10-08 | **Fully isolated:** no Home Assistant, no message broker, nothing shared with existing software on the Pi. Workers send results to the API over HTTP on the app's own private Docker network | Owner's requirement; also fewer moving parts |
+| 2026-10-08 | **Fully isolated:** no Home Assistant, no message broker, nothing shared with existing software on the dev Pi. Workers send results to the API over HTTP on the app's own private Docker network | Owner's requirement; also fewer moving parts |
 | 2026-10-07 | Admin auth with bearer tokens, not cookies | Frontend and API are different sites; third-party cookies are blocked (Safari) and would need CSRF protection |
 | 2026-10-07 | HashRouter in the frontend | GitHub Pages has no SPA fallback |
-| 2026-10-07 | Python pinned to 3.12 (uv) instead of the host's 3.13 | ARM64 ML wheels lag behind new Python versions |
+| 2026-10-07 | Python pinned to 3.12 (uv) instead of the dev Pi's 3.13 | ML wheels lag behind new Python versions |
+| 2026-10-08 | **The Raspberry Pi is for development and testing only.** Production runs elsewhere (not decided; choose a topology before Phase 4). The design is portable: multi-arch images (amd64 + arm64), AI runtime per machine, machine-specific settings in config | Owner's requirement |
+| 2026-10-08 | GitHub Pages is the **preview** frontend; production frontend hosting decided in P8.3 | Keep options open |
+| 2026-10-08 | Phase 8 became "Production deployment + hardening" (13 tasks) | Deployment to the new environment needs its own steps |
 
 ## Metrics
 
 | Date | Phase | Metric | Value | Target | Notes |
 |------|-------|--------|-------|--------|-------|
 | | 1 | Slot accuracy (samples) | | ≥ 97% | |
-| | 1 | Inference time per image (Pi 5, chosen settings) | | < 2 s | |
+| | 1 | Inference time per image (dev Pi, chosen settings) | | < 2 s | worst-case reference |
 | | 4 | Slot accuracy (validation set) | | ≥ 97% | |
 | | 4 | Count error ≤ 1 (% of frames) | | ≥ 95% | |
 | | 5 | Flow event accuracy (3 clips) | | ≥ 98% | |
 | | 5 | Flow drift per day | | ≤ 2 cars | |
-| | 5 | Flow fps while active | | ≥ 8 | |
-| | 8 | SSE p95 delivery (500 clients) | | < 2 s | |
+| | 5 | Flow fps while active (vision host) | | ≥ 8 | |
+| | 8 | Slot accuracy on production hardware | | ≥ 97% | |
+| | 8 | Flow fps on production hardware | | ≥ 8 | |
+| | 8 | SSE p95 delivery (500 clients, production) | | < 2 s | |
 
 ## Session log
 
 ### 2026-10-07
 - Created the repo, enabled GitHub Pages, made the repo public (free-plan requirement).
-- Checked the hardware: Raspberry Pi 5 8 GB, Docker, Node 22, Python 3.13.
+- Checked the dev machine: Raspberry Pi 5 8 GB, Docker, Node 22, Python 3.13.
 - Wrote PLAN.md, then split the details into `docs/design/` (11 specs) and `docs/phases/` (10 guides, 94 tasks).
 - **Next:** P0.1–P0.7 skeleton; get P0.8 inputs (sample image + answers) to start Phase 1.
+
+### 2026-10-08
+- Removed Home Assistant and the message broker; the app is fully isolated on the dev Pi.
+- Clarified that the Pi is **dev/test only**: added production topologies (T1/T2/T3), multi-arch images, AI runtime per machine, preview vs production frontend, and turned Phase 8 into production deployment + hardening (98 tasks in total).

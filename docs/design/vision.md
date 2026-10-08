@@ -26,7 +26,7 @@ class YoloDetector:
 
 - Model: **YOLO11n** (boxes) or **YOLO11n-seg** (boxes + masks), COCO-pretrained.
 - COCO class IDs: car = 2, motorcycle = 3, bus = 5, truck = 7. Pass `classes=[2, 3, 5, 7]` to the model so it skips everything else (people, bicycles).
-- Export once with `parking models export`, which wraps `YOLO(name).export(format="ncnn", imgsz=…)`, into `models/<name>_ncnn_model/` (git-ignored). Load the exported folder with `YOLO(path, task="detect"|"segment")`.
+- Export once per machine with `parking models export --runtime <runtime>`, which wraps `YOLO(name).export(format=<runtime>, imgsz=…)`, into `models/` (git-ignored). The runtime depends on the machine's hardware: see §11. Load the exported model with `YOLO(path, task="detect"|"segment")`.
 - Masks come from `result.masks.xy` (already in original frame pixels).
 - **Small far-away cars:** use `imgsz=1280` for occupancy (one frame every 5 s, so speed isn't critical). If cars are still missed, add tiling: split into 2×2 overlapping tiles, detect each, merge with NMS (IoU 0.5).
 - Keep the detector behind the `Detector` protocol so a YOLOX (Apache-2.0) implementation can be swapped in if the AGPL licence becomes a problem.
@@ -182,7 +182,7 @@ occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
 - **Crops:** perspective-warp each slot polygon to 128×128 (`cv2.getPerspectiveTransform` on the 4 corners; polygons with more than 4 points use their minimum-area rectangle).
 - **Model:** MobileNetV3-Small (torchvision), 2 classes, ImageNet weights.
 - **Data:** pre-train on public datasets (PKLot, CNRPark-EXT; check their licences), then fine-tune on ≥ 300 crops labelled from our own camera (the labelling mode of the slot editor produces these).
-- **Export:** ONNX → run with onnxruntime. All slots in one batch is well under 50 ms on a Pi 5.
+- **Export:** ONNX → run with onnxruntime. All slots in one batch take well under 50 ms even on the dev Pi's CPU.
 - **Combining:** `taken = classifier_prob ≥ 0.5`, or an ensemble: average with the overlap score mapped through the threshold. Decide by measurement.
 
 ## 10. Evaluation (`parking/vision/evaluate.py`)
@@ -198,8 +198,28 @@ occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
 - Match predicted events to truth events with the same direction within **±2 s** (greedy, by time).
 - Report **TP, FP (extra counts), FN (missed)**, event accuracy = TP / (TP + FP + FN), and **net error** = (pred in − pred out) − (true in − true out). Net error is what causes drift.
 
-## 11. Performance notes for the Pi 5
-- Use the NCNN export and set `OMP_NUM_THREADS` / `torch.set_num_threads(2)` so each worker doesn't grab all 4 cores.
+## 11. Runtimes and performance
+
+The model is exported once **per machine** for the runtime that suits its hardware (`detector.runtime` in [config.md](config.md#1-configlotyaml)); the code path is the same.
+
+| Machine type | Runtime | Export (`parking models export --runtime …`) |
+|--------------|---------|-----------------------------------------------|
+| ARM CPU (dev Pi, other ARM boards) | **NCNN** | `ncnn` → `models/<name>_ncnn_model/` |
+| Intel x86 CPU (mini PC, server) | **OpenVINO** | `openvino` → `models/<name>_openvino_model/` |
+| Any CPU (fallback) | ONNX Runtime | `onnx` → `models/<name>.onnx` |
+| NVIDIA GPU / Jetson | CUDA / TensorRT | `engine` (built on that machine) |
+| Raspberry Pi + AI HAT+ (Hailo) | Hailo | compiled `.hef` from the Hailo model zoo, used via a `HailoDetector` |
+
+Guidelines on any machine:
+- Limit threads per worker (`OMP_NUM_THREADS`, `torch.set_num_threads`) so the workers don't fight each other or the API.
 - Occupancy: one inference every 5 s, so even 1–2 s at `imgsz=1280` with masks is fine.
-- Flow: aim for ≥ 8 fps while active. If the measured detect + track time is over 120 ms per frame, first shrink the ROI and use `imgsz=480`; then consider the AI HAT+.
-- Measure with `parking benchmark` and record results in PROGRESS.md → Metrics.
+- Flow: aim for ≥ 8 fps while active. If detect + track takes over 120 ms per frame, first shrink the ROI and use `imgsz=480`; then use a faster runtime or an accelerator for that machine.
+- Measure with `parking benchmark` and record results in PROGRESS.md → Metrics, **labelled with the machine**.
+
+### Reference numbers (estimates, to be measured)
+| Task | Dev Pi 5 (NCNN, CPU) |
+|------|----------------------|
+| YOLO11n @ 640 px | ~80–120 ms per frame |
+| YOLO11n-seg @ 640 px | ~1.5–2× the above |
+
+The **dev Pi is a worst case.** Production hardware is benchmarked again in P8.2 (and on the candidate vision host during Phase 5), and the settings are re-tuned there.

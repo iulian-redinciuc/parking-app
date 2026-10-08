@@ -49,7 +49,9 @@ cameras:
     # Phase 4:  "snapshot:${CAM_GROUND_SNAPSHOT_URL}"  or  "rtsp:${CAM_GROUND_RTSP_URL}"
     sample_every_s: 5
     slots_file: config/slots/cam-ground.json
+    control_url: http://vision-occupancy:9000   # how the API reaches this worker (VPN address in T2)
     detector:
+      runtime: ncnn                # ncnn | openvino | onnx | engine | hailo; per machine, see vision.md §11
       model: models/yolo11n-seg_ncnn_model
       imgsz: 1280
       conf: 0.35
@@ -74,7 +76,9 @@ cameras:
     source: "rtsp:${CAM_RAMP_RTSP_URL}"
     fps: 10
     lines_file: config/lines/cam-ramp.json
+    control_url: http://vision-flow:9000
     detector:
+      runtime: ncnn
       model: models/yolo11n_ncnn_model
       imgsz: 640
       conf: 0.4
@@ -190,12 +194,12 @@ video_time_s,direction,note
 | `LOT_LAT`, `LOT_LON` | `51.5007`, `-0.1246` (example) | API (lot location) |
 | `PARKING_DB_URL` | `sqlite:////app/data/db/parking.sqlite` | API |
 | `WORKER_TOKEN` | `openssl rand -hex 32` | API, workers (internal endpoints) |
-| `API_INTERNAL_URL` | `http://api:8000` | workers |
+| `API_INTERNAL_URL` | `http://api:8000` (same machine) or `http://<api-vpn-address>:8000` (T2) | workers |
 | `API_HOST_PORT` | `8000` (bound to 127.0.0.1 only) | compose |
 | `CAM_GROUND_SNAPSHOT_URL`, `CAM_GROUND_RTSP_URL` | `http://user:pass@10.0.20.11/...` | occupancy worker |
 | `CAM_RAMP_RTSP_URL` | `rtsp://user:pass@10.0.20.12:554/sub` | flow worker |
-| `CORS_ORIGINS` | `https://iulian-redinciuc.github.io` | API |
-| `PUBLIC_APP_URL` | `https://iulian-redinciuc.github.io/parking-app/` | API (notification links) |
+| `CORS_ORIGINS` | dev: `https://iulian-redinciuc.github.io`; prod: the production frontend origin | API |
+| `PUBLIC_APP_URL` | dev: `https://iulian-redinciuc.github.io/parking-app/`; prod: the production frontend URL | API (notification links) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | from `parking push vapid-keys` | API |
 | `VAPID_SUBJECT` | `mailto:you@example.com` | API |
 | `ADMIN_PASSWORD_HASH` | from `parking admin hash-password` | API |
@@ -205,8 +209,9 @@ video_time_s,direction,note
 | `TUNNEL_TOKEN` | from the Cloudflare dashboard | cloudflared |
 | `LOG_LEVEL` | `INFO` | all |
 
-Frontend build-time variables (GitHub repo **variables**, not secrets, because they end up in public JS):
+Frontend build-time variables (not secrets, because they end up in public JS; set per build: preview or production):
 
 | Variable | Example |
 |----------|---------|
-| `VITE_API_BASE` | `https://parking-api.example.com` or `mock` |
+| `VITE_BASE` | `/parking-app/` (GitHub Pages preview) or `/` (most other hosts) |
+| `VITE_API_BASE` | `https://parking-api-dev.example.com`, `https://parking-api.example.com` or `mock` |

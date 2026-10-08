@@ -8,7 +8,7 @@
 - Folder layout from [architecture.md §4–5](../design/architecture.md#4-backend-module-map-backendparking)
 - `parking --version` works; `pytest` and `npm test` pass; CI green
 - Secret scanning active
-- Answers to the open questions; first sample image on the Pi
+- Answers to the open questions; first sample image on the dev Pi
 
 ---
 
@@ -45,7 +45,7 @@
    !frontend/public/**/*.jpg
    !backend/tests/fixtures/**/*.jpg
    ```
-3. Remove the old root `index.html` only in Phase 3, when Pages switches to Actions. Until then it keeps the site up.
+3. Remove the old root `index.html` only in Phase 3, when the Pages preview switches to Actions. Until then it keeps the preview site up.
 
 **Done when:** `git status` shows the new folders, and `touch data/x.jpg && git status --porcelain data/` prints nothing.
 
@@ -68,7 +68,8 @@
      "pywebpush>=2.0", "apscheduler>=3.10,<4", "argon2-cffi>=23.1", "slowapi>=0.1.9", "httpx>=0.27",
    ]
    [project.optional-dependencies]
-   vision = ["ultralytics>=8.3", "ncnn>=1.0.20240410", "lap>=0.5"]
+   vision = ["ultralytics>=8.3", "lap>=0.5", "ncnn>=1.0.20240410", "onnxruntime>=1.18"]
+   openvino = ["openvino>=2024.3"]          # only if an Intel machine is chosen for production
    [project.scripts]
    parking = "parking.cli:app"
    [dependency-groups]
@@ -87,7 +88,7 @@
 4. A test that runs `CliRunner().invoke(app, ["--version"])` and checks the output.
 5. `uv sync && uv run parking --version && uv run pytest && uv run ruff check`.
 
-**Done when:** all three commands succeed on the Pi.
+**Done when:** all three commands succeed on the dev Pi.
 
 ## P0.3: Frontend scaffold
 **Files:** `frontend/**`
@@ -145,6 +146,6 @@ Sections: what it is, links to PLAN/PROGRESS/docs, prerequisites (uv, Node 22, D
 
 ## Exit criteria
 - [ ] CI green on `main`
-- [ ] `parking --version`, `pytest`, `npm test`, `npm run build` all pass on the Pi
+- [ ] `parking --version`, `pytest`, `npm test`, `npm run build` all pass on the dev Pi
 - [ ] Secret scanning + pre-commit active
 - [ ] Sample image available; layout questions answered

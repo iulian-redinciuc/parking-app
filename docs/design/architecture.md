@@ -1,19 +1,20 @@
 # Architecture
 
-## 0. Isolation rule
+## 0. Environments and isolation
 
-The parking app is **completely self-contained**. It does **not** use, connect to, or change anything already installed on the Pi (no existing message brokers, home-automation software, reverse proxies, databases or tunnels). Everything it needs runs in its **own Docker Compose project** (`parking`), on its **own Docker networks**, with its **own volumes** under this repo folder. Removing it is `docker compose down -v` plus deleting the folder.
+- **Development / testing** happens on Iulian's **Raspberry Pi 5**. There the app is **completely self-contained**: it does **not** use, connect to, or change anything already installed on the Pi. Everything runs in its **own Docker Compose project** (`parking`), on its **own Docker networks**, with its **own data** under this repo folder ([deployment.md §1](deployment.md#1-development-on-the-raspberry-pi)).
+- **Production** runs **somewhere else, not decided yet** ([deployment.md §3](deployment.md#3-production-topologies-to-be-chosen)). Nothing in the code may assume the Pi: CPU type, AI runtime, resource limits and public entry are all configuration.
 
 ## 1. Components
 
 | Component | Runs where | Responsibility | Talks to |
 |-----------|-----------|----------------|----------|
-| **vision-occupancy** worker | Pi (or edge box) | Grabs frames from Camera B, detects vehicles, scores each space, sends results to the API | Camera (RTSP/HTTP) → API (HTTP, internal) |
-| **vision-flow** worker | Pi (or edge box) | Reads Camera A's sub-stream, detects + tracks vehicles, sends in/out events to the API | Camera (RTSP) → API (HTTP, internal) |
-| **API** | Pi, Docker | Receives worker results, smoothing, flow counting, fusion into zone counts, SQLite history, REST + SSE, Web Push, admin | workers, SQLite, phones (through tunnel), push services |
-| **SQLite** | Pi, file in `data/db/` | History, subscriptions, corrections | API only |
-| **Tunnel** | Pi, Docker (its own `cloudflared` container) | Public HTTPS hostname for the API without opening router ports | API |
-| **Frontend (PWA)** | GitHub Pages | Live screen, notifications settings, stats, admin | API over HTTPS |
+| **vision-occupancy** worker | Dev: Pi. Prod: vision host (at the lot, or cloud in T3) | Grabs frames from Camera B, detects vehicles, scores each space, sends results to the API | Camera (RTSP/HTTP) → API (HTTP, internal) |
+| **vision-flow** worker | Dev: Pi. Prod: vision host | Reads Camera A's sub-stream, detects + tracks vehicles, sends in/out events to the API | Camera (RTSP) → API (HTTP, internal) |
+| **API** | Dev: Pi. Prod: lot box (T1) or server/VM (T2/T3) | Receives worker results, smoothing, flow counting, fusion into zone counts, SQLite history, REST + SSE, Web Push, admin | workers, SQLite, phones (through tunnel), push services |
+| **SQLite** | Same machine as the API, file in `data/db/` | History, subscriptions, corrections | API only |
+| **Public entry** | Same machine as the API: its own `parking-tunnel` container, or a `parking-caddy` reverse proxy | Public HTTPS hostname for the API; forwards only `/api/*` and `/healthz` | API |
+| **Frontend (PWA)** | Dev: GitHub Pages preview. Prod: decided in Phase 8 | Live screen, notifications settings, stats, admin | API over HTTPS |
 
 ## 2. Data flow
 
@@ -156,7 +157,7 @@ frontend/
 | Command | Phase | Purpose |
 |---------|-------|---------|
 | `parking --version` | 0 | Smoke test |
-| `parking models export --model yolo11n-seg --imgsz 640 --format ncnn` | 1 | Download + export weights to `models/` |
+| `parking models export --model yolo11n-seg --imgsz 640 --runtime ncnn` | 1 | Download + export weights to `models/` |
 | `parking analyze --image PATH --camera ID` | 1 | Analyse one image → JSON + annotated PNG |
 | `parking evaluate --images DIR --labels FILE --camera ID [--sweep 0.1:0.6:0.05]` | 1 | Accuracy metrics, threshold sweep |
 | `parking bootstrap-slots --image PATH --camera ID --out FILE` | 1 | Suggest slot polygons |
@@ -184,7 +185,7 @@ flowchart TB
   W1 -- "POST /internal/*" --> API
   W2 -- "POST /internal/*" --> API
   API -- "GET /control/*" --> W1
-  T["cloudflared (own container)"] -- "/api/*, /healthz only" --> API
+  T["public entry (tunnel or Caddy container)"] -- "/api/*, /healthz only" --> API
 ```
 
-Only these containers exist; nothing outside the `parking` project is used. Details in [deployment.md](deployment.md).
+Only these containers exist; nothing outside the `parking` project is used. On one machine, all of this runs together. In topology T2 the workers run on the lot box and reach the API over a private VPN ([deployment.md §9](deployment.md#9-workers-and-api-on-different-machines-t2)). Details in [deployment.md](deployment.md).

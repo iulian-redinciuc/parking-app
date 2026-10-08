@@ -1,29 +1,33 @@
 # Deployment
 
-## 0. Isolation from everything else on the Pi
+Two kinds of environment:
+- **Development / testing:** Iulian's **Raspberry Pi 5**. Used only to build and test. It also runs other software, which the app must never touch (§1).
+- **Production:** **not decided yet.** It's chosen before real cameras go in (P4.1) from the layouts in §3, and deployed in Phase 8. Nothing in the code may assume the Pi.
 
-The parking app **does not use, connect to, or modify anything already installed on the Pi**. In practice:
+## 1. Development on the Raspberry Pi
+
+### 1.1 Isolation rules (dev Pi)
+The app **does not use, connect to, or modify anything already installed on the Pi**:
 
 | Rule | How |
 |------|-----|
-| Own Compose project | `name: parking` in `deploy/docker-compose.yml`; every container is prefixed `parking-` |
-| Own networks | `parking_internal` (private, `internal: true`) and `parking_egress` (only for containers that must reach cameras or the internet) |
-| Own data | Everything lives under `~/workspace/parking-app/` (`config/`, `data/`, `models/`). No named volumes shared with other projects |
-| No shared services | No existing brokers, databases, reverse proxies, home-automation software or host tunnels are used. The tunnel runs in **its own** container |
-| Host ports | Only `127.0.0.1:8000` (API, loopback only). If 8000 is ever taken, change it in `.env` (`API_HOST_PORT`) |
-| Host Python | Untouched. `uv` installs Python 3.12 in the user's own uv folder, and the containers carry their own Python |
+| Own Compose project | `name: parking`; every container is prefixed `parking-` |
+| Own networks | `parking_internal` (private, `internal: true`) and `parking_egress` (outbound only) |
+| Own data | Everything lives under `~/workspace/parking-app/` (`config/`, `data/`, `models/`). No volumes shared with other projects |
+| No shared services | No existing brokers, databases, reverse proxies, home-automation software or host tunnels are used. Anything needed runs in its own `parking-*` container |
+| Host ports | Only `127.0.0.1:8000` (API, loopback only). Change it with `API_HOST_PORT` if needed |
+| Host Python | Untouched. `uv` installs Python 3.12 in the user's own uv folder, and containers carry their own Python |
 | Removal | `cd deploy && docker compose down -v --rmi local`, then delete the folder |
 
-## 1. Environments
+### 1.2 How development runs
 
-| Env | Where | How |
-|-----|-------|-----|
-| **Dev, backend** | Pi (or any Linux/Mac) | `uv` venv with Python 3.12 in `backend/`; API and workers run with `parking …` |
-| **Dev, frontend** | anywhere | `npm run dev` with `VITE_API_BASE=mock` or `http://<pi>:8000` |
-| **Production** | Pi, Docker Compose in `deploy/` | `docker compose up -d --build` from a checkout of `main` |
-| **Frontend production** | GitHub Pages | GitHub Actions on push to `main` |
-
-Pin the project to **Python 3.12** (`uv python install 3.12`), because some ML wheels for ARM64 lag behind new Python versions. The Docker images use 3.12 too.
+| What | How |
+|------|-----|
+| Backend | `uv` venv with Python 3.12 in `backend/`; API and workers run with `parking …`, or `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` (builds ARM64 images locally) |
+| Frontend | `npm run dev` with `VITE_API_BASE=mock` or `http://<pi>:8000` |
+| Camera input | Still images (`file:`), image folders (`folder:`), **recordings from the real cameras** (`video:`). A live camera only when one is reachable for testing |
+| Phone testing | Frontend **preview** on GitHub Pages (§6). The dev API is reachable over HTTPS through the `parking-tunnel` container **only while testing** (`docker compose --profile public up -d`, then `down` afterwards) |
+| Data | Test data only. `data/` on the Pi is disposable and not backed up |
 
 ## 2. Docker images (`backend/Dockerfile`, multi-stage)
 
@@ -43,18 +47,49 @@ USER 1000:1000
 CMD ["/app/backend/.venv/bin/parking", "api", "--host", "0.0.0.0", "--port", "8000"]
 
 FROM base AS vision
-RUN cd backend && uv sync --frozen --no-dev --extra vision   # ultralytics, ncnn, torch (cpu)
+ARG VISION_EXTRAS=vision                               # e.g. "vision,openvino" for Intel hosts
+RUN cd backend && uv sync --frozen --no-dev --extra ${VISION_EXTRAS}
 COPY backend/ ./backend/
 USER 1000:1000
 ENTRYPOINT ["/app/backend/.venv/bin/parking", "worker"]
 ```
 
 - The **api** image stays small (no PyTorch). Only **vision** carries the ML stack (expect ~2 GB).
-- Model weights are **not** baked in: they're mounted from `./models` (created by `parking models export`).
-- `opencv-python-headless` (not `opencv-python`) in `pyproject.toml`, since there's no GUI in containers.
+- **Multi-arch:** CI builds every image for `linux/amd64` **and** `linux/arm64` with `docker buildx`, so the same version runs on the dev Pi and on any production machine. On PRs, CI only builds them (both CPU types) to catch "works on ARM, breaks on x86" early. On a release tag (`v*`), CI pushes them to **GitHub Container Registry**: `ghcr.io/iulian-redinciuc/parking-api:<version>` and `parking-vision:<version>`.
+- **NVIDIA hosts** (if chosen) need a separate CUDA-based `vision` variant (`parking-vision:<version>-cuda`), built only if that hardware is picked.
+- Model weights are **not** baked in: they're mounted from `./models`, created on each machine with `parking models export --runtime <runtime>` (the export is tuned to that machine's runtime; see [vision.md §11](vision.md#11-runtimes-and-performance)).
+- `opencv-python-headless` (not `opencv-python`), since there's no GUI in containers.
 
-## 3. Compose (`deploy/docker-compose.yml`)
+## 3. Production topologies (to be chosen)
 
+Pick one before Phase 4 hardware goes in (open question #2). The code supports all three; only configuration differs.
+
+| | **T1: all on site** | **T2: split** (recommended) | **T3: all in the cloud** |
+|---|---|---|---|
+| Vision workers | Box at the lot | Box at the lot | Cloud VM |
+| API + database | Same box at the lot | Cloud VM or a server with good uptime | Same cloud VM |
+| Does video leave the lot? | No | No | **Yes** (camera streams over a VPN) |
+| Upload bandwidth from the lot | Tiny (only the public app traffic) | Tiny (results are a few KB/minute) | **~1–4 Mbit/s per camera, continuously** |
+| Public HTTPS entry | Tunnel from the lot box (works behind 4G/CGNAT) | VM public IP + reverse proxy, or a tunnel | Same as T2 |
+| If the lot's internet drops | The app is unreachable | Phones see "stale"; counting continues on site and flow events are delivered when the link returns (outbox) | No data at all |
+| Machines to run | 1 | 2 | 1 (with enough CPU or a GPU) |
+| Typical extra cost | Lowest | + a small VM | A bigger VM (inference in the cloud) |
+
+**Why T2 is recommended:** video stays on site (privacy, bandwidth), while the public part (API, push, database, backups) runs on reliable infrastructure with a fixed address. Choose T1 if one machine and minimum cost matter more. T3 only if nothing can be installed at the lot.
+
+On-site vision box options are in [hardware.md §4](hardware.md#4-compute-hardware).
+
+## 4. Compose (`deploy/`)
+
+Files:
+| File | Used for |
+|------|----------|
+| `docker-compose.yml` | Base definition (all services, using released images from GHCR) |
+| `docker-compose.dev.yml` | Dev Pi: builds images locally, mounts source for quick iteration |
+| `docker-compose.site.yml` | T2 lot box: vision services only, `API_INTERNAL_URL` = the API's VPN address |
+| `docker-compose.server.yml` | T2 server: API + public entry only |
+
+Base file (abridged):
 ```yaml
 name: parking
 
@@ -71,9 +106,9 @@ services:
   api:
     <<: *common
     container_name: parking-api
-    build: { context: .., dockerfile: backend/Dockerfile, target: api }
+    image: ghcr.io/iulian-redinciuc/parking-api:${PARKING_VERSION:-latest}
     ports: ["127.0.0.1:${API_HOST_PORT:-8000}:8000"]          # loopback only
-    networks: [internal, egress]                               # egress: Web Push to browser push services
+    networks: [internal, egress]                               # egress: Web Push
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 30s
@@ -83,23 +118,21 @@ services:
   vision-occupancy:
     <<: *common
     container_name: parking-vision-occupancy
-    build: { context: .., dockerfile: backend/Dockerfile, target: vision }
+    image: ghcr.io/iulian-redinciuc/parking-vision:${PARKING_VERSION:-latest}
     command: ["occupancy", "--camera", "cam-ground"]
-    depends_on: [api]
     networks: [internal, egress]                               # egress: reach the camera
-    deploy: { resources: { limits: { cpus: "1.0", memory: 1200M } } }
-    environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "http://api:8000" }
+    deploy: { resources: { limits: { cpus: "${VISION_CPUS:-1.0}", memory: 1200M } } }
+    environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
 
   vision-flow:
     <<: *common
     container_name: parking-vision-flow
-    build: { context: .., dockerfile: backend/Dockerfile, target: vision }
+    image: ghcr.io/iulian-redinciuc/parking-vision:${PARKING_VERSION:-latest}
     command: ["flow", "--camera", "cam-ramp"]
     profiles: ["flow"]                                         # enabled from Phase 5
-    depends_on: [api]
     networks: [internal, egress]
-    deploy: { resources: { limits: { cpus: "1.5", memory: 1200M } } }
-    environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "http://api:8000" }
+    deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: 1200M } } }
+    environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
 
   tunnel:
     container_name: parking-tunnel
@@ -108,45 +141,57 @@ services:
     environment: { TUNNEL_TOKEN: "${TUNNEL_TOKEN}" }
     restart: unless-stopped
     networks: [internal, egress]
-    profiles: ["public"]                                       # enabled from Phase 3
+    profiles: ["public"]
 
 networks:
-  internal: { internal: true }     # containers talk to each other here; no outside access
-  egress: {}                       # outbound only (cameras, push services, Cloudflare)
+  internal: { internal: true }
+  egress: {}
 ```
 
 Notes:
-- Workers reach the API at `http://api:8000/internal/*`; the API reaches workers at `http://vision-occupancy:9000/control/*`. Both use `WORKER_TOKEN`.
-- Workers need a route to the camera IPs. Docker's default bridge routing usually covers the LAN. If the cameras sit on a separate VLAN that Docker can't reach, set `network_mode: host` on the vision services only (they then reach the API at `http://127.0.0.1:${API_HOST_PORT}`).
-
-## 4. Worker ↔ API communication
-
-Plain HTTP on the private `internal` network. There's **no message broker**: see [api.md §5](api.md#5-internal-endpoints-workers--api). That means one less service to run and nothing that could be confused with other software on the Pi.
+- On one machine, workers reach the API at `http://api:8000/internal/*`, and the API reaches workers at `http://vision-occupancy:9000/control/*`. Both use `WORKER_TOKEN`.
+- Across machines (T2), see §9.
+- Workers need a route to the camera IPs. If Docker bridge routing can't reach the camera network, set `network_mode: host` on the vision services only.
+- CPU and memory limits come from `.env`, because they differ per machine.
 
 ## 5. Public access for the API
 
-Only `/api/*` and `/healthz` may be reachable from the internet. `/internal/*` must not be.
+Only `/api/*` and `/healthz` may be reachable from the internet. `/internal/*` and the workers' `/control/*` must never be.
 
-### Option A: Cloudflare Tunnel in its own container (recommended if you have a domain on Cloudflare)
-1. Cloudflare dashboard → Zero Trust → Networks → Tunnels → **Create tunnel** (cloudflared) → copy the **token** to `TUNNEL_TOKEN` in `deploy/.env`.
-2. Public hostnames for the tunnel (order matters):
-   - `parking-api.<domain>`, path `^/(api/|healthz$)` → service `http://api:8000`
-   - `parking-api.<domain>` (no path) → **HTTP 404** (the "catch-all" rule)
+### Option A: Cloudflare Tunnel (its own `parking-tunnel` container)
+Works on any machine, needs no inbound ports, and works behind 4G/CGNAT (good for T1). Requires a domain on Cloudflare.
+1. Cloudflare dashboard → Zero Trust → Networks → Tunnels → **Create tunnel** → copy the **token** to `TUNNEL_TOKEN`.
+2. Public hostnames (order matters):
+   - `<api-host>`, path `^/(api/|healthz$)` → `http://api:8000`
+   - `<api-host>` (no path) → **HTTP 404**
 3. `docker compose --profile public up -d`.
-4. Cloudflare Cache Rule: bypass the cache for `parking-api.<domain>/*`, so SSE and live data are never cached.
+4. Cache Rule: bypass the cache for `<api-host>/*` (SSE and live data must never be cached).
 
-This uses only the `parking-tunnel` container; any `cloudflared` installed on the host is neither used nor changed.
+Use **separate hostnames** for dev testing (e.g. `parking-api-dev.<domain>`) and production.
 
-### Option B: Tailscale Funnel in its own container (no domain needed)
-1. Add a `tailscale/tailscale` service to the compose file (its own state folder in `data/tailscale/`, an auth key in `.env`), with a serve config that publishes only `/api/` and `/healthz` to `http://api:8000`.
-2. Turn on Funnel for that node → `https://parking.<tailnet>.ts.net`.
-3. Use that as `VITE_API_BASE`.
+### Option B: reverse proxy on a machine with a public IP (T2/T3 server)
+A `parking-caddy` container (Caddy obtains HTTPS certificates automatically):
+```
+<api-host> {
+  @public path /api/* /healthz
+  handle @public { reverse_proxy api:8000 { flush_interval -1 } }   # -1: stream SSE immediately
+  handle { respond 404 }
+}
+```
+Open ports 80/443 on that server's firewall only.
 
-## 6. Frontend on GitHub Pages
+## 6. Frontend hosting
 
-`.github/workflows/pages.yml`:
+| Stage | Where | Build settings |
+|-------|-------|----------------|
+| **Preview** (development, now) | GitHub Pages: `https://iulian-redinciuc.github.io/parking-app/` | `VITE_BASE=/parking-app/`, `VITE_API_BASE` = dev API URL or `mock` |
+| **Production** (decided in Phase 8) | Options: keep GitHub Pages (custom domain possible); any static host (Cloudflare Pages, Netlify); or the production reverse proxy serving the built files (same origin as the API, so no CORS needed) | `VITE_BASE` and `VITE_API_BASE` for that host |
+
+The build is host-agnostic: `HashRouter` needs no server rewrite rules, and the base path and API URL are build variables.
+
+Preview workflow `.github/workflows/pages.yml`:
 ```yaml
-name: Deploy frontend
+name: Deploy preview frontend
 on:
   push: { branches: [main], paths: ["frontend/**", ".github/workflows/pages.yml"] }
   workflow_dispatch:
@@ -163,7 +208,7 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
-        env: { VITE_API_BASE: "${{ vars.API_BASE }}" }
+        env: { VITE_BASE: "/parking-app/", VITE_API_BASE: "${{ vars.API_BASE }}" }
       - uses: actions/upload-pages-artifact@v3
         with: { path: frontend/dist }
   deploy:
@@ -174,29 +219,32 @@ jobs:
       - id: d
         uses: actions/deploy-pages@v4
 ```
-
-One-time switch from "deploy from branch" to Actions:
-`gh api -X PUT repos/iulian-redinciuc/parking-app/pages -f build_type=workflow`
-
-Set the API URL: `gh variable set API_BASE --body "https://parking-api.<domain>"` (use `mock` until the tunnel exists).
+One-time switch from "deploy from branch" to Actions: `gh api -X PUT repos/iulian-redinciuc/parking-app/pages -f build_type=workflow`.
+Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-dev.<domain>"` (or `mock`).
 
 ## 7. Backups
 
-- Nightly at 03:30, from a host crontab entry that only runs `docker compose -p parking exec api parking backup --out /app/data/backups` (or a small `backup` service in the same compose project).
-- Keep 14 daily + 8 weekly copies. Copy them off the Pi (another disk or a cloud drive with `rclone`), because a backup on the same NVMe doesn't protect against the disk dying.
-- **Restore test** once per phase from Phase 8: stop the API, copy the backup over `data/db/parking.sqlite`, start, verify `/api/status`.
+- **Production only.** The dev Pi holds test data.
+- Nightly: `docker compose exec api parking backup --out /app/data/backups` (host cron or a small `backup` service in the same compose project).
+- Keep 14 daily + 8 weekly copies, and copy them **off the production machine** (object storage or another machine via `rclone`, encrypted).
+- **Restore drill** in Phase 8, onto a spare machine (the dev Pi works).
 
-## 8. Updating
+## 8. Releases and updating
 
-```bash
-cd ~/workspace/parking-app && git pull
-cd deploy && docker compose --profile public --profile flow up -d --build
-docker compose logs -f --tail=100 api
-```
-Migrations run automatically at API start-up. Roll back with `git checkout <previous-tag>` and the same command (and restore the DB if a migration was not backwards compatible).
+- **Release:** `git tag v0.x.y && git push --tags` → CI builds and pushes multi-arch images to GHCR.
+- **Deploy to production:**
+  ```bash
+  cd /opt/parking/deploy                       # a checkout of the repo's deploy/ + config/ on that machine
+  PARKING_VERSION=v0.x.y docker compose pull
+  PARKING_VERSION=v0.x.y docker compose --profile public --profile flow up -d
+  docker compose logs -f --tail=100 api
+  ```
+- Migrations run automatically at API start-up. **Roll back** by deploying the previous version (and restore the DB if a migration wasn't backwards compatible).
+- The dev Pi uses `docker-compose.dev.yml` (local builds) and never needs releases.
 
-## 9. Edge box variant (lot is elsewhere)
+## 9. Workers and API on different machines (T2)
 
-- At the lot: Pi 5 + PoE switch + cameras + router (4G/5G if there's no wired internet). Runs **only the vision services** with a compose override that sets `API_INTERNAL_URL` to the main Pi.
-- Link the two Pis with a private VPN (WireGuard or Tailscale, set up just for this), so `/internal/*` still never touches the public internet. Workers keep their flow-event outbox, so a flaky link loses nothing.
+- Connect the lot box and the API server with a **private VPN** (WireGuard or Tailscale, set up just for this app). Workers use `API_INTERNAL_URL=http://<api-vpn-address>:8000`, and the API reaches each worker's `/control/*` at its VPN address (config `cameras[].control_url`).
+- `/internal/*` therefore never crosses the public internet, and the public entry (§5) still forwards only `/api/*` and `/healthz`.
+- Workers keep their flow-event **outbox**, so a flaky lot connection loses nothing.
 - Video never leaves the site. Bandwidth is a few KB per minute.
