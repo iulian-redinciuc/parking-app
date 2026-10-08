@@ -93,7 +93,9 @@ Behaviour:
 5. `online`/`offline` events update `connection`.
 6. One shared connection for the whole app (module singleton), exposed through `useSyncExternalStore`.
 
-**Mock mode:** if `VITE_API_BASE === 'mock'`, `mock.ts` produces a realistic `LotStatus` that changes every 3–8 s (random walk within capacity, sometimes stale, sometimes low confidence). Used for UI work before the backend exists and in Playwright tests.
+The live manager and the mock share one interface (`src/api/types.ts`): `LiveFeed` = `getSnapshot(): LiveState`, `subscribe(listener): unsubscribe` (ready for `useSyncExternalStore`), `start()`, `stop()`. REST calls go through `src/api/client.ts` (`getStatus()`, `getLot()`, 10 s timeout); every failure is an `ApiRequestError` whose `error: ApiError` has the server's `code`/`message`/`details` plus `status` and `retryAfter`, or a client code `network` / `timeout` / `bad_response` (bodies are shape-checked by `src/api/validate.ts`).
+
+**Mock mode:** if `VITE_API_BASE === 'mock'` (also when unset), `mock.ts` `createMockFeed()` produces a realistic `LotStatus` that changes every 3–8 s (a random walk within capacity whose drift itself wanders, so trends appear; levels and trends use the server's rules; episodes of 2–4 updates: a zone stale (counts frozen) ~6 % of starts, low confidence 0.4–0.7 ~8 %, and rarely the whole lot `unavailable` = `status: null`, `error.code = 'unavailable'`, like a 503). `getStatus()`/`getLot()` return mock data too. The lot is the `lot-info.json` fixture (Ground 40 slots, Underground 60 flow). `seed` makes it repeatable. Used for UI work before the backend exists and in Playwright tests.
 
 ## 4. Styling and accessibility
 

@@ -1,0 +1,13 @@
+{
+  "error": {
+    "code": "bad_request",
+    "message": "query.lang: String should have at most 35 characters",
+    "details": [
+      {
+        "type": "string_too_long",
+        "loc": ["query", "lang"],
+        "msg": "String should have at most 35 characters"
+      }
+    ]
+  }
+}

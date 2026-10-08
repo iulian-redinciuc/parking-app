@@ -31,7 +31,7 @@
 1. `types.ts`: `LotStatus`, `ZoneStatus`, `Level`, `Trend`, `LotInfo`, `ApiError`, copied faithfully from [api.md](../design/api.md#lotstatus).
 2. `client.ts`: `API_BASE` from `import.meta.env.VITE_API_BASE`; `getStatus()`, `getLot()`; parse the error format; a 10 s timeout via `AbortController`.
 3. `mock.ts`: `createMockFeed()` producing a realistic `LotStatus` stream (random walk, trend, sometimes `stale`, sometimes low confidence, sometimes `unavailable`). Same interface as the real live manager.
-4. Copy JSON fixtures from the backend's tests so both sides share examples.
+4. Copy JSON fixtures from the backend's tests so both sides share examples (`backend/tests/fixtures/api/`, created in P3.2 because the backend had no response examples yet; both sides test them, see [testing.md §3](../design/testing.md#3-fixtures-public-repo-safe)).
 
 **Done when:** a unit test validates the fixtures against the TS types (a typed import + a runtime shape check).
 

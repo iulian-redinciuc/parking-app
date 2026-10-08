@@ -1,0 +1,43 @@
+{
+  "v": 1,
+  "lot": "main",
+  "updated_at": "2026-10-07T17:20:00.000Z",
+  "total": {
+    "capacity": 100,
+    "occupied": 98,
+    "free": 2,
+    "level": "almost_full",
+    "confidence": 0.5,
+    "stale": true
+  },
+  "zones": [
+    {
+      "id": "ground",
+      "name": "Parter",
+      "method": "slots",
+      "capacity": 40,
+      "occupied": 40,
+      "free": 0,
+      "level": "full",
+      "confidence": 0.5,
+      "stale": true,
+      "trend": "steady",
+      "updated_at": "2026-10-07T17:12:41.250Z",
+      "slots": { "G01": true, "G02": true }
+    },
+    {
+      "id": "underground",
+      "name": "Subsol",
+      "method": "flow",
+      "capacity": 60,
+      "occupied": 58,
+      "free": 2,
+      "level": "almost_full",
+      "confidence": 0.86,
+      "stale": true,
+      "trend": "steady",
+      "updated_at": null,
+      "slots": null
+    }
+  ]
+}

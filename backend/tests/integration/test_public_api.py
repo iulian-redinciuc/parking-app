@@ -7,6 +7,7 @@ import json
 import socket
 import threading
 import time
+from pathlib import Path
 
 import httpx
 import pytest
@@ -19,6 +20,7 @@ TOKEN = "test-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 SLOTS = ["G01", "G02", "G03"]
 SQUARE = [[0, 0], [10, 0], [10, 10], [0, 10]]
+FIXTURES = Path(__file__).parents[1] / "fixtures" / "api"
 
 LOT_YAML = """
 version: 1
@@ -296,3 +298,35 @@ async def test_ingest_then_status_and_stream_in_two_languages(server):
             assert new_en["zones"][0]["free"] == new_ro["zones"][0]["free"] == 1
             assert new_en["zones"][0]["name"] == "Ground" and new_ro["zones"][0]["name"] == "Parter"
             assert new_en == (await client.get("/api/status")).json()
+
+
+def shape(value):
+    """Keys and JSON types, recursively (list items by their first element)."""
+    if isinstance(value, dict):
+        return {k: shape(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [shape(value[0])] if value else []
+    return (
+        "number"
+        if isinstance(value, int | float) and not isinstance(value, bool)
+        else type(value).__name__
+    )
+
+
+async def test_shared_fixtures_match_the_real_responses(lot):
+    """`tests/fixtures/api/` (copied to the frontend, P3.2) has the real shapes and errors."""
+
+    def fixture(name):
+        return json.loads((FIXTURES / name).read_text())
+
+    async with client_for(make_app(lot)) as client:
+        assert (await client.get("/api/status")).json() == fixture("error-unavailable.json")
+        r = await client.get("/api/status", params={"lang": "x" * 36})
+        assert r.json() == fixture("error-bad-request.json")
+        assert shape((await client.get("/api/lot")).json()) == shape(fixture("lot-info.json"))
+        await client.post("/internal/observations", json=obs({"G01"}), headers=AUTH)
+        status = (await client.get("/api/status")).json()
+        expected = fixture("lot-status.json")
+        assert status.keys() == expected.keys()
+        assert status["total"].keys() == expected["total"].keys()
+        assert all(z.keys() == expected["zones"][0].keys() for z in status["zones"])

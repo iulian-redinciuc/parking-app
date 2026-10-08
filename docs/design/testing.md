@@ -37,7 +37,7 @@ Use `core/clock.py` (`Clock` protocol with `now()` returning aware UTC; `SystemC
 ## 3. Fixtures (public repo safe)
 
 - **Synthetic lot images**: `tests/fixtures/make_synthetic.py` draws a grey "asphalt" image with white slot lines and pastes **public-domain car images** (or simple rendered car shapes) into chosen slots. This is good enough to smoke-test the pipeline end to end with the real model, though not for accuracy.
-- JSON fixtures: slot files, line files, observation/flow payloads, LotStatus samples (also used by the frontend: `frontend/src/api/__fixtures__/`).
+- JSON fixtures: slot files, line files, observation/flow payloads. API response examples (`LotStatus` live and stale, `LotInfo`, error bodies) live in `backend/tests/fixtures/api/`: backend tests check them against the Pydantic models and the real responses, and the frontend keeps **identical copies** in `frontend/src/api/__fixtures__/` (`fixtures.test.ts` fails if they drift, and checks them against the TS types). Change both together.
 - **Real images never go into `tests/`.**
 
 ## 4. Evaluation datasets (local, git-ignored)

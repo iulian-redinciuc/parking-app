@@ -1,0 +1,43 @@
+{
+  "v": 1,
+  "lot": "main",
+  "updated_at": "2026-10-07T17:05:12.000Z",
+  "total": {
+    "capacity": 100,
+    "occupied": 77,
+    "free": 23,
+    "level": "plenty",
+    "confidence": 0.86,
+    "stale": false
+  },
+  "zones": [
+    {
+      "id": "ground",
+      "name": "Ground",
+      "method": "slots",
+      "capacity": 40,
+      "occupied": 28,
+      "free": 12,
+      "level": "plenty",
+      "confidence": 1.0,
+      "stale": false,
+      "trend": "filling",
+      "updated_at": "2026-10-07T17:05:12.000Z",
+      "slots": { "G01": true, "G02": false }
+    },
+    {
+      "id": "underground",
+      "name": "Underground",
+      "method": "flow",
+      "capacity": 60,
+      "occupied": 49,
+      "free": 11,
+      "level": "filling",
+      "confidence": 0.86,
+      "stale": false,
+      "trend": "steady",
+      "updated_at": "2026-10-07T17:04:58.000Z",
+      "slots": null
+    }
+  ]
+}

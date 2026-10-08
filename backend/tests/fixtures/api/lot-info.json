@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "id": "main",
+  "name": "Parking",
+  "location": { "lat": 51.5007, "lon": -0.1246 },
+  "notify_radius_m": 500,
+  "timezone": "Europe/Bucharest",
+  "zones": [
+    { "id": "ground", "name": "Ground", "method": "slots", "capacity": 40 },
+    { "id": "underground", "name": "Underground", "method": "flow", "capacity": 60 }
+  ],
+  "levels": { "plenty": 0.2, "filling": 0.05 }
+}

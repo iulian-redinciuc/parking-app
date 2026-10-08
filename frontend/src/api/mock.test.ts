@@ -1,0 +1,113 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createMockFeed, createMockLot, levelFor, mockStatus, trendFor } from './mock'
+import type { LotStatus } from './types'
+import { isLotStatus } from './validate'
+
+function run(steps: number, seed = 1) {
+  const sim = createMockLot({ seed, now: () => Date.UTC(2026, 9, 9, 8) })
+  return Array.from({ length: steps }, () => sim.step())
+}
+
+describe('mock feed', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('uses the server rules for level and trend', () => {
+    expect(levelFor(23, 100)).toBe('plenty')
+    expect(levelFor(12, 100)).toBe('filling')
+    expect(levelFor(1, 100)).toBe('almost_full')
+    expect(levelFor(0, 100)).toBe('full')
+    expect(levelFor(5, 0)).toBe('full')
+    expect(trendFor(-3, 60)).toBe('filling')
+    expect(trendFor(3, 60)).toBe('emptying')
+    expect(trendFor(2, 60)).toBe('steady')
+  })
+
+  it('is repeatable with a seed', () => {
+    expect(run(20, 7)).toEqual(run(20, 7))
+    expect(run(20, 7)).not.toEqual(run(20, 8))
+  })
+
+  it('produces valid, consistent statuses with every edge state', () => {
+    const results = run(500)
+    const statuses = results.filter((s): s is LotStatus => s !== null)
+    expect(statuses.length).toBeGreaterThan(400)
+    for (const s of statuses) {
+      expect(isLotStatus(s)).toBe(true)
+      expect(s.total.free).toBe(s.zones.reduce((n, z) => n + z.free, 0))
+      expect(s.total.confidence).toBe(Math.min(...s.zones.map((z) => z.confidence)))
+      expect(s.total.stale).toBe(s.zones.some((z) => z.stale))
+      for (const z of s.zones) {
+        expect(z.free).toBe(z.capacity - z.occupied)
+        expect(z.level).toBe(levelFor(z.free, z.capacity))
+        if (z.slots) expect(Object.values(z.slots).filter(Boolean)).toHaveLength(z.occupied)
+        else expect(z.method).not.toBe('slots')
+      }
+    }
+    const zones = statuses.flatMap((s) => s.zones)
+    // it walks: counts change, trends appear, and edge states show up sometimes, not always
+    expect(new Set(statuses.map((s) => s.total.free)).size).toBeGreaterThan(5)
+    expect(new Set(zones.map((z) => z.trend))).toEqual(new Set(['filling', 'emptying', 'steady']))
+    const share = (n: number) => n / zones.length
+    expect(share(zones.filter((z) => z.stale).length)).toBeGreaterThan(0.05)
+    expect(share(zones.filter((z) => z.stale).length)).toBeLessThan(0.4)
+    expect(share(zones.filter((z) => z.confidence < 0.8).length)).toBeGreaterThan(0.05)
+    expect(share(zones.filter((z) => z.confidence < 0.8).length)).toBeLessThan(0.5)
+    expect(results).toContain(null)
+  })
+
+  it('mockStatus() always returns a status', () => {
+    for (let seed = 0; seed < 50; seed++) expect(isLotStatus(mockStatus(seed))).toBe(true)
+  })
+
+  it('publishes through the LiveFeed interface every 3–8 s', () => {
+    vi.useFakeTimers()
+    const feed = createMockFeed({ seed: 3 })
+    const listener = vi.fn()
+    const unsubscribe = feed.subscribe(listener)
+    expect(feed.getSnapshot()).toMatchObject({ status: null, connection: 'connecting' })
+
+    feed.start()
+    expect(listener).toHaveBeenCalledTimes(1)
+    const first = feed.getSnapshot()
+    expect(first.connection).toBe('live')
+    expect(first.lastMessageAt).toBe(Date.now())
+    feed.start() // already running: no second timer
+    vi.advanceTimersByTime(2_999)
+    expect(listener).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(5_001)
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(feed.getSnapshot()).not.toBe(first)
+
+    vi.advanceTimersByTime(80_000)
+    const calls = listener.mock.calls.length
+    expect(calls).toBeGreaterThanOrEqual(2 + 10)
+    expect(calls).toBeLessThanOrEqual(2 + 27)
+
+    feed.stop()
+    vi.advanceTimersByTime(60_000)
+    expect(listener).toHaveBeenCalledTimes(calls)
+    unsubscribe()
+    feed.start()
+    expect(listener).toHaveBeenCalledTimes(calls)
+    feed.stop()
+  })
+
+  it('reports `unavailable` like a 503 from the server', () => {
+    vi.useFakeTimers()
+    const feed = createMockFeed({ seed: 1, minDelayMs: 10, maxDelayMs: 10 })
+    feed.start()
+    let snapshot = feed.getSnapshot()
+    for (let i = 0; i < 500 && snapshot.status; i++) {
+      vi.advanceTimersByTime(10)
+      snapshot = feed.getSnapshot()
+    }
+    feed.stop()
+    expect(snapshot).toMatchObject({
+      status: null,
+      connection: 'live',
+      error: { code: 'unavailable' },
+    })
+  })
+})
