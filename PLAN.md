@@ -70,8 +70,8 @@ Alternatives and reasons: [architecture.md](docs/design/architecture.md), [deplo
 
 ## 5. Key design decisions
 
-1. **Camera layout.** Recommended **Option A**: Camera A on the underground ramp (in/out counting), Camera B over the ground level (per-space detection). Options B and C are in [vision.md §1–2](docs/design/vision.md) and need your input.
-2. **Space detection.** Vehicle masks overlapping hand-drawn space polygons, with a per-space classifier as a fallback ([vision.md §2, §9](docs/design/vision.md)).
+1. **Camera layout.** Working assumption **Option A**: Camera A on the underground ramp (in/out counting), Camera B over the ground level (per-space detection). Options B and C are in [vision.md §1–2](docs/design/vision.md). The sample photo's straight-down view is **not** the final camera; the real position is chosen in Phase 4.
+2. **Space detection.** Chosen per camera: vehicle masks overlapping hand-drawn space polygons for angled views; for straight-down views (like the sample photo) the **MVP** scores each space by how much it differs from empty pavement, to be replaced by a trained per-space classifier once the real camera gives enough photos ([vision.md §2, §2.1, §9](docs/design/vision.md)).
 3. **Entry/exit.** Tracking plus **two counting lines**, so cars that stop or reverse aren't miscounted. Drift is handled by admin corrections, an optional nightly reset, and a "≈" display ([vision.md §7–8](docs/design/vision.md)).
 4. **No silent failures.** Stale data and low confidence are always visible in the UI ([frontend.md §2.1](docs/design/frontend.md)).
 5. **Notifications.** A website can't watch location in the background, and this is **web only**, so there are three tiers: a proximity alert while the app is open, "I'm on my way" pushes, and scheduled pushes ([notifications.md](docs/design/notifications.md)).
@@ -79,6 +79,12 @@ Alternatives and reasons: [architecture.md](docs/design/architecture.md), [deplo
 7. **Portable by default.** Nothing in the code assumes the Raspberry Pi. Machine-specific choices (AI runtime, CPU limits, public entry point) are configuration ([deployment.md](docs/design/deployment.md)).
 
 ## 6. Roadmap
+
+### MVP
+**The MVP is Phases 0–3:** a phone web app showing the live number of free spaces, fed by a simulated camera that replays the sample photo, end to end (vision → API → live updates → installable web app). It uses only what exists today: one straight-down sample photo, the dev Pi, and working assumptions for the open questions. It needs **no input from Iulian**: technical choices are made and recorded in the decision log as the work goes.
+
+**Build order** (the agent loop follows PROGRESS.md top to bottom): MVP (0 → 1 → 2 → 3), then the phases that need no hardware (6 notifications, 7 admin + stats), then the ones that need the real cameras or production machines (4, 5, 8; their software parts are built against recordings and simulations, and only the on-site checks wait for hardware), then 9.
+
 
 | Phase | Guide | Outcome | Runs on | Hardware? |
 |-------|-------|---------|---------|-----------|
@@ -104,13 +110,14 @@ flowchart LR
   P7 --> P8 --> P9
 ```
 
-Phases 1–3 need no camera hardware; Phase 6 can run alongside 4–5.
+Phases 1–3 (the MVP), 6 and 7 need no camera hardware, so they're built first. Phases 4, 5 and 8 need the real cameras and production machines for their final checks.
 
 ## 7. Risks (top)
 
 | Risk | Mitigation |
 |------|-----------|
 | Bad camera angle (cars hide each other) | Mount high; per-space classifier; a second camera ([hardware.md](docs/design/hardware.md)) |
+| Straight-down view: off-the-shelf detectors don't recognise cars from above (seen on the sample photo) | MVP appearance scoring ([vision.md §2.1](docs/design/vision.md)); angled real camera or the trained per-space classifier later |
 | Night or underground lighting | IR/low-light camera, lighting, tuning on night images |
 | Flow-count drift | Two-line logic, corrections, scheduled reset, "≈" display; Option C if budget allows |
 | No background location on the web (web app only) | "I'm on my way" and scheduled pushes work with the app closed; the proximity alert works while it's open; the UI explains this |
@@ -123,4 +130,4 @@ Phases 1–3 need no camera hardware; Phase 6 can run alongside 4–5.
 
 ## 8. Open questions
 
-Tracked in [PROGRESS.md → Open questions](PROGRESS.md#open-questions). The most important for starting: **the sample image**, **spaces per level**, and **camera layout (A/B/C)**. Needed before Phase 4: **where production will run**.
+Tracked in [PROGRESS.md → Open questions](PROGRESS.md#open-questions). **None of them block the MVP**: undecided ones use the working assumptions recorded there. Needed only later: the real camera position (Phase 4) and where production runs (Phase 8).

@@ -62,17 +62,21 @@ Plain HTML and JavaScript with no build step, served with `python3 -m http.serve
 
 **Done when:** you can draw all ground spaces on `data/reference/cam-ground.jpg`, export `config/slots/cam-ground.json`, re-import it unchanged, and it passes `load_slots()`.
 
-## P1.4: Detector module and model export
-**Files:** `backend/parking/vision/detector.py`, `backend/parking/cli.py` (`models export`), `backend/tests/unit/test_detector_filter.py`
+## P1.4: Detector module, model export and the top-down scorer (MVP)
+**Files:** `backend/parking/vision/detector.py`, `backend/parking/vision/appearance.py`, `backend/parking/vision/pipeline.py`, `backend/parking/config.py`, `backend/parking/cli.py` (`models export`), `config/lot.yaml`, `config/lot.example.yaml`, tests in `backend/tests/unit/`
+
+**Already done (first attempt, 2026-10-08):** `YoloDetector`, `FakeDetector`, class mapping/filter, `parking models export`, NCNN exports of `yolo11n-seg` @ 1280 and `yolo11n` @ 640, `test_detector_filter.py`. The detector works (it finds the bus in Ultralytics' `bus.jpg`) but the COCO models see 0–1 of the 5 cars in `ground-01.jpg`, because the sample is shot **straight down**.
+
+**MVP decision (owner, 2026-10-08):** the sample view is **not** the final camera. Build the MVP with what we have: score slots seen from above by **how much they differ from empty pavement** ([vision.md §2.1](../design/vision.md#21-top-down-appearance-scoring-mvp-parkingvisionappearancepy)), selected per camera with `occupancy.method: appearance`. The YOLO path stays for angled cameras (`method: detector`, the default), and a trained per-slot classifier ([vision.md §9](../design/vision.md#9-per-slot-classifier)) replaces the heuristic once the real camera gives enough photos. Don't block on the camera choice.
 
 **Steps**
-1. `uv sync --extra vision` (installs ultralytics + torch CPU + ncnn + onnxruntime; takes a while on the dev Pi).
-2. `parking models export --model yolo11n-seg --imgsz 1280 --runtime ncnn` (NCNN suits the dev Pi's ARM CPU; other machines use other runtimes, see [vision.md §11](../design/vision.md#11-runtimes-and-performance)) → `models/yolo11n-seg_ncnn_model/`. Also export `yolo11n` at 640 (used in Phase 5 and for benchmarking).
-3. `YoloDetector` per [vision.md §1](../design/vision.md#1-detector): load once, `detect(frame)` → `list[Detection]`, mapping class ids ↔ names, with masks from `result.masks.xy`.
-4. `FakeDetector(json_path)` returning detections from a JSON sidecar (for tests and CI).
-5. A unit test for the class-filter/mapping logic using `FakeDetector`. A `@pytest.mark.slow` test that runs the real model on a synthetic fixture and expects ≥ 1 car.
+1. Keep the detector work above; fix anything still failing.
+2. `appearance.py`: `score_slots_appearance(...)` per vision.md §2.1, returning the same `SlotResult`s as `score_slots`.
+3. Config: `occupancy.method: detector | appearance` (default `detector`) plus the `occupancy.appearance` parameters (config.md §1). `cam-ground` in `config/lot.yaml` uses `appearance`, with a comment saying why.
+4. `analyze_frame`: with `method: appearance` don't load or run the detector (`detections = []`, `detect_ms = 0`), score with the appearance scorer, and keep the rest (totals, observation, annotation) unchanged. `parking analyze` and `parking evaluate` work for both methods; `evaluate` needs no detection cache for `appearance`. `--fake-detector` still works for `detector` cameras.
+5. Unit tests on **synthetic images** (no real photos in the repo): a textured "pavement" with painted lines; dark, coloured and grey "cars" in some slots; a car shadow and some dark specks (moss) in free slots; a car poking a bit into a neighbour. Expect taken/free correctly, scores in 0..1, the threshold boundary, and that `method: appearance` never builds a detector.
 
-**Done when:** `uv run python -c "from parking.vision.detector import YoloDetector; ..."` on `ground-01.jpg` prints a sensible number of cars.
+**Done when:** `uv run parking evaluate --images data/samples/ground-01.jpg --labels data/labels/cam-ground.json --camera cam-ground` gives **17/17** slots right (5 taken, 12 free) with the chosen defaults, `parking analyze` on `ground-01.jpg` prints `ground: 12 free / 17 (5 taken)`, and the annotated PNG looks right. (`ground-02.jpg` is a second shot with slightly different framing, so the slot file doesn't line up with it; it's for the camera-shift work in P4.6, not for this check.)
 
 ## P1.5: Geometry and occupancy scoring
 **Files:** `backend/parking/geometry.py`, `backend/parking/vision/occupancy.py`, `backend/tests/unit/test_occupancy.py`, `backend/tests/unit/test_geometry.py`
@@ -128,24 +132,24 @@ Plain HTML and JavaScript with no build step, served with `python3 -m http.serve
 
 **Steps:** implement [vision.md §4](../design/vision.md#4-bootstrapping-slots-parking-bootstrap-slots). Output a valid slot file. Never overwrite an existing file unless `--force` is given.
 
-**Done when:** running it on the busy sample produces a slot file that opens in the editor, needing only adjustments rather than drawing from scratch.
+**Done when:** tests with `FakeDetector` detections produce a valid slot file that opens in the editor. (MVP note: the only sample is a straight-down view where the COCO detector finds no cars, and its slots are already drawn by hand in P1.3, so there is no real-photo check here. Re-check it on the real camera's view in Phase 4.)
 
 ## P1.10: Benchmark on the dev Pi
 **Files:** CLI `benchmark`, results in PROGRESS.md → Metrics
 
 **Steps**
-1. `parking benchmark --image data/samples/ground-01.jpg --runs 20`: for each combination of {PyTorch, NCNN} × {640, 1280} × {yolo11n, yolo11n-seg}, warm up 3 runs, then report median and p95 ms, plus peak RSS memory.
+1. `parking benchmark --image data/samples/ground-01.jpg --runs 20`: for each combination of {PyTorch, NCNN} × {640, 1280} × {yolo11n, yolo11n-seg}, warm up 3 runs, then report median and p95 ms, plus peak RSS memory. Also time the **appearance scorer** (`method: appearance`, the MVP setting for `cam-ground`) on the same image.
 2. Run it with nothing else heavy running. Note the CPU temperature (`vcgencmd measure_temp`) before and after; if it's over 80 °C, the active cooler is needed.
 
 **Done when:** a results table is pasted into PROGRESS.md.
 
 ## P1.11: Tune and decide
 **Steps**
-1. Run `evaluate --sweep --mode both` with the seg and non-seg models at 640 and 1280.
-2. Pick the combination with the best **free-precision**, then the best slot accuracy, that runs in < 2 s.
+1. **MVP camera (`cam-ground`, `method: appearance`):** sweep the threshold and the main appearance parameters with `evaluate --sweep` on `ground-01.jpg`; keep settings with margin (not just barely 17/17) and note the score gap between the lowest taken and highest free slot.
+2. **Detector path (for future angled cameras):** run `evaluate --sweep --mode both` with the seg and non-seg models at 640 and 1280 on any angled image available (none yet: then just record that the top-down sample can't be used for it), and pick the combination with the best **free-precision**, then the best slot accuracy, that runs in < 2 s.
 3. If small far-away cars are missed even at 1280: try tiling (2×2) and note the effect.
 4. If accuracy is clearly poor because of the angle (heavy occlusion), note it. It informs camera mounting in Phase 4 and whether the per-slot classifier will be needed.
-5. Write the chosen `model / imgsz / mode / threshold` into `config/lot.yaml` and the Decision log, with the numbers.
+5. Write the chosen settings into `config/lot.yaml` and the Decision log, with the numbers. Note what the MVP heuristic can't handle yet (night, rain, a nearly full lot) and that the trained per-slot classifier (vision.md §9) replaces it once the real camera gives enough photos.
 
 **Done when:** the decision is recorded, and `parking analyze` on every sample gives the hand-counted free number (or the remaining errors are understood and explained).
 

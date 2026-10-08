@@ -58,8 +58,16 @@ cameras:
       classes: [car, motorcycle, bus, truck]
       use_masks: true
     occupancy:
-      threshold: 0.30              # overlap ratio above which a slot is "taken"
-      mode: mask                   # mask | box_bottom
+      method: detector             # detector | appearance (straight-down views, vision.md §2.1)
+      threshold: 0.30              # score above which a slot is "taken"
+      mode: mask                   # mask | box_bottom (detector only)
+      appearance:                  # appearance only; defaults shown, tuned in P1.11
+        inset: 0.12
+        k_mad: 3.0
+        min_delta_e: 12
+        shadow_l_range: [0.35, 0.9]
+        morph_frac: 0.06
+        reference_empty: null      # optional path to an image of the empty lot
     smoothing:
       consistent_readings: 3
     health:

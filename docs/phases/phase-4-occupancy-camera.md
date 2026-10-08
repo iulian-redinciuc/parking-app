@@ -101,7 +101,7 @@
 ## P4.10: Per-slot classifier (only if P4.9 misses the target)
 **Files:** `parking/vision/slot_classifier.py`, `scripts/train_slot_classifier.py`
 
-**Steps:** follow [vision.md §9](../design/vision.md#9-fallback-per-slot-classifier-only-if-phase-4-accuracy--target). Train on a laptop or desktop with a GPU (or Google Colab), not on the dev Pi or the vision host. Export ONNX into `models/`. Add `occupancy.mode: classifier | ensemble`. Re-evaluate on the **same** validation set; keep 20% of frames held out from fine-tuning.
+**Steps:** follow [vision.md §9](../design/vision.md#9-per-slot-classifier). Train on a laptop or desktop with a GPU (or Google Colab), not on the dev Pi or the vision host. Export ONNX into `models/`. Add `classifier` and `ensemble` to `occupancy.method` (it replaces `appearance` on top-down views). Re-evaluate on the **same** validation set; keep 20% of frames held out from fine-tuning.
 
 **Done when:** targets are met, or the gap and next steps are documented.
 

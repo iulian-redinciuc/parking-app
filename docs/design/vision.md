@@ -68,6 +68,24 @@ def count_in_zones(detections, count_zones, frame_size, image_size=None) -> dict
 - At an angle, a car's **bounding box** covers the neighbouring slot behind it. The **mask** follows the car's real outline and overlaps far less. `box_bottom` is the cheap fallback.
 - A threshold around 0.3 tolerates cars parked off-centre while ignoring a neighbour's mirror or bumper poking in. Tune it with `parking evaluate --sweep`.
 
+### 2.1 Top-down appearance scoring (MVP) (`parking/vision/appearance.py`)
+
+For cameras looking **straight down** at marked spaces, where COCO detectors don't recognise cars (the only sample photo, `ground-01.jpg`, is like this). Selected per camera with `occupancy.method: appearance`; `detector` stays the default. It needs no model and no training, so it's an **MVP stand-in**: the trained per-slot classifier (§9) replaces it once the real camera gives enough labelled photos.
+
+```python
+def score_slots_appearance(frame, slots, frame_size, image_size=None, threshold=0.30,
+                           params: AppearanceParams = AppearanceParams()) -> list[SlotResult]: ...
+```
+
+1. Rescale slot polygons as in §2 (honour EXIF orientation when reading files).
+2. Warp each slot to an upright crop (4 corners; more points → minimum-area rectangle, as in §9) and shrink it by `inset` (default 12% per side) to drop the painted lines and a neighbour's mirror.
+3. **Pavement model:** convert the frame to Lab and blur lightly (removes the paver joints). The pavement colour is the median of the pixels of all slot crops pooled together (robust while at least about half the slots are free), or of `reference_empty` (an image of the empty lot) if one is configured. Its spread is the MAD.
+4. A pixel is **non-pavement** when its colour distance (ΔE) from the pavement colour exceeds `max(k_mad × spread, min_delta_e)`. **Shadow suppression:** pixels that are only darker (similar chroma, lightness ratio within `shadow_l_range`) count as pavement, so a neighbour's shadow doesn't make a free space taken; dark neutral pixels (black cars) stay non-pavement because their chroma differs from the brownish/grey pavement. Tune by measurement.
+5. Clean the mask with a morphological open then close (kernel ≈ `morph_frac` of the crop's short side) and keep the **largest connected blob**, so moss spots, leaves and paint flecks don't add up.
+6. `score = blob area / crop area` (0..1), `taken = score >= threshold`. Same `SlotResult` as §2, so smoothing, totals, the annotated image and evaluation are unchanged.
+
+Limits (MVP): tuned on one daytime photo; night, rain, snow and a nearly full lot (the median then drifts towards car colours) are untested. `reference_empty` and the §9 classifier are the fixes.
+
 ### Count mode
 `count_in_zones`: a vehicle counts toward a zone if the **bottom-centre point of its box** is inside the zone polygon. occupied = count, free = capacity − count (clamped at 0). Several polygons for the same zone are combined; a vehicle counts once per zone. Every zone in `count_zones` appears in the result, with 0 if no vehicle is in it.
 
@@ -195,7 +213,10 @@ occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
 - **Level**: computed from free/capacity (see [api.md](api.md#levels)).
 - The UI shows **"≈"** before a number when confidence < 0.8.
 
-## 9. Fallback: per-slot classifier (only if Phase 4 accuracy < target)
+## 9. Per-slot classifier
+
+Replaces the MVP appearance scorer (§2.1) for top-down views once the real camera has given enough labelled photos, and is the fallback for angled views if Phase 4 accuracy is below target.
+
 
 - **Crops:** perspective-warp each slot polygon to 128×128 (`cv2.getPerspectiveTransform` on the 4 corners; polygons with more than 4 points use their minimum-area rectangle).
 - **Model:** MobileNetV3-Small (torchvision), 2 classes, ImageNet weights.
