@@ -10,6 +10,7 @@ from fastapi import Depends, Request
 from sqlalchemy import Engine
 
 from parking.api.ingest import Ingestor
+from parking.api.sse import Broadcaster
 from parking.config import LotConfig, Settings
 from parking.core.fusion import StateStore
 
@@ -34,6 +35,7 @@ class Runtime:
     engine: Engine
     store: StateStore
     ingestor: Ingestor
+    broadcaster: Broadcaster
 
 
 def runtime(request: Request) -> Runtime:

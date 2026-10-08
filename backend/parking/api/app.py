@@ -1,8 +1,9 @@
 """`create_app()`: the FastAPI app with its lifespan (architecture.md §4).
 
 Start-up: `db upgrade`, load lot.yaml and the slot files, restore the `StateStore` from the
-DB (stale until fresh data, data-model.md §2) and start the 1 s `tick()` task. CORS, rate
-limits and the public `/api/*` routes come with P2.8–P2.9.
+DB (stale until fresh data, data-model.md §2) and start the 1 s `tick()` task. Every new
+status goes to the SSE `Broadcaster` (`/api/stream`). CORS, rate limits and the other public
+`/api/*` routes come with P2.9.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from parking import __version__
 from parking.api.deps import ApiError, Runtime
 from parking.api.ingest import Ingestor
 from parking.api.routes import internal, public
+from parking.api.sse import Broadcaster
 from parking.config import LotConfig, Settings, SlotFile, cli_env, load_config, load_slots
 from parking.core.clock import Clock, SystemClock
 from parking.db.engine import default_url, make_engine, upgrade
@@ -86,8 +88,9 @@ def create_app(
         await anyio.to_thread.run_sync(upgrade, url)
         engine = make_engine(url)
         store = StateStore(config, clock or SystemClock(), load_slot_files(config, root))
-        ingestor = Ingestor(store, engine)
-        app.state.runtime = Runtime(settings, config, engine, store, ingestor)
+        broadcaster = Broadcaster()
+        ingestor = Ingestor(store, engine, broadcaster.publish)
+        app.state.runtime = Runtime(settings, config, engine, store, ingestor, broadcaster)
         if settings.worker_token is None:
             log.warning("WORKER_TOKEN is not set: every /internal/* request gets 401")
         await ingestor.restore()

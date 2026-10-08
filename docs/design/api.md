@@ -63,7 +63,7 @@ Codes: `bad_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
 
 | Method | Path | Phase | Description |
 |--------|------|-------|-------------|
-| GET | `/healthz` | 2 | `{"status":"ok","db":true,"cameras":{"cam-ground":"ok","cam-ramp":"unknown"},"ingest":{"observations":n,"flow_events":n,"health":n,"rejected":n,"db_errors":n}}`. `unknown` = no health message since start-up; counters since start-up. HTTP 200 even when cameras are down, because the API itself is alive |
+| GET | `/healthz` | 2 | `{"status":"ok","db":true,"cameras":{"cam-ground":"ok","cam-ramp":"unknown"},"ingest":{"observations":n,"flow_events":n,"health":n,"rejected":n,"db_errors":n},"stream":{"clients":n,"published":n,"dropped":n}}`. `unknown` = no health message since start-up; counters since start-up (`stream.dropped` = events dropped from full SSE client queues). HTTP 200 even when cameras are down, because the API itself is alive |
 | GET | `/api/lot` | 2 | Static lot info (below) |
 | GET | `/api/status` | 2 | `LotStatus`; `503 unavailable` before the first observation |
 | GET | `/api/stream` | 2 | SSE (see §3) |
@@ -126,7 +126,8 @@ data: {…}
 - **Heartbeat:** a `: ping` comment every `sse_ping_s` (15 s), which keeps proxies and tunnels from closing idle connections.
 - `id` is a monotonic counter. Clients don't need `Last-Event-ID` replay, because the first event is always the full current state.
 - Server side: one `Broadcaster` holding an `asyncio.Queue(maxsize=10)` per client. If a client's queue is full, drop its oldest message. One slow phone must never block others.
-- Implementation: `sse-starlette` `EventSourceResponse`.
+- Implementation: `sse-starlette` `EventSourceResponse` (`parking/api/sse.py` `Broadcaster`, P2.8). The `Ingestor` publishes after every change (and once at start-up after the restore), so the "current status" exists from start-up on; restored or never-fed zones show `stale: true`. The status is serialised once per publish; `id` restarts at 1 when the API restarts. The current status is read together with the subscribe, so a client never misses or repeats an event.
+- **Limits:** at most 1000 clients per API process; above that `503 unavailable` (`{"error": …}`, the browser's `EventSource` retries). A client that can't take an event or ping for 30 s is dropped. On a disconnect its queue is removed at once (`stream.clients` in `/healthz`).
 
 ---
 
