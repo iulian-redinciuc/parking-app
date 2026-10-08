@@ -2,7 +2,7 @@
 // paint, then `EventSource` on `/api/stream`. A 30 s watchdog falls back to polling every 10 s
 // while SSE is retried every 60 s; hidden tabs close the stream, `online`/`offline` are followed.
 import { API_BASE, ApiRequestError, IS_MOCK, apiUrl, getStatus } from './client'
-import { createMockFeed } from './mock'
+import { createMockFeed, mockScenarioFrom } from './mock'
 import type { ApiError, Connection, LiveFeed, LiveState, LotStatus } from './types'
 import { isLotStatus } from './validate'
 
@@ -229,8 +229,13 @@ export function createLiveFeed(options: LiveOptions = {}): LiveFeed {
 
 let shared: LiveFeed | null = null
 
-/** The app's one connection: the mock feed when `VITE_API_BASE` is `mock` (or unset). */
+/**
+ * The app's one connection: the mock feed when `VITE_API_BASE` is `mock` (or unset), where
+ * `?mock=<scenario>` forces an edge state (`?mock=offline`, `?mock=stale`, …).
+ */
 export function liveFeed(): LiveFeed {
-  shared ??= IS_MOCK ? createMockFeed() : createLiveFeed()
+  shared ??= IS_MOCK
+    ? createMockFeed({ scenario: mockScenarioFrom(window.location.search) })
+    : createLiveFeed()
   return shared
 }

@@ -7,14 +7,18 @@ import LevelBar from './LevelBar'
 export const ANNOUNCE_EVERY_MS = 30_000
 
 // The lot's free count, the level word and a bar. The visible numbers change at once; the
-// aria-live copy is throttled so a screen reader isn't interrupted by every update.
-export default function BigCount({ total }: { total: Totals }) {
+// aria-live copy is throttled so a screen reader isn't interrupted by every update. `dimmed` greys
+// the last known numbers while the connection is down.
+export default function BigCount({ total, dimmed = false }: { total: Totals; dimmed?: boolean }) {
   const level = levelInfo(total.level)
   const count = formatFree(total)
   const unit = total.free === 1 ? 'free space' : 'free spaces'
   const announced = useThrottled(`${count} ${unit}, ${level.label}`, ANNOUNCE_EVERY_MS)
   return (
-    <section className="flex flex-col items-center gap-1 py-8">
+    <section
+      className={`flex flex-col items-center gap-1 py-8 ${dimmed ? 'dimmed' : ''}`}
+      data-dimmed={dimmed || undefined}
+    >
       <div aria-hidden="true" className="flex flex-col items-center">
         <span className="text-[5rem] leading-none font-bold tabular-nums" data-testid="big-count">
           {count}

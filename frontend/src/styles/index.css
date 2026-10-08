@@ -44,6 +44,16 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Old numbers (offline, server unreachable, stale zone): greyed, not hidden. Unlayered, so it
+   wins over the colour utilities; --muted keeps AA contrast. */
+.dimmed,
+.dimmed * {
+  color: var(--muted);
+}
+.dimmed [data-percent] {
+  background-color: var(--muted);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

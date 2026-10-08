@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createMockFeed, createMockLot, levelFor, mockStatus, trendFor } from './mock'
+import {
+  MOCK_SCENARIOS,
+  type MockScenario,
+  createMockFeed,
+  createMockLot,
+  levelFor,
+  mockScenarioFrom,
+  mockStatus,
+  trendFor,
+} from './mock'
 import type { LotStatus } from './types'
 import { isLotStatus } from './validate'
 
@@ -109,5 +118,90 @@ describe('mock feed', () => {
       connection: 'live',
       error: { code: 'unavailable' },
     })
+  })
+})
+
+describe('mock scenarios (?mock=…)', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('reads the scenario from the query string', () => {
+    expect(mockScenarioFrom('?mock=stale')).toBe('stale')
+    expect(mockScenarioFrom('?mock=server_unreachable')).toBe('unreachable')
+    expect(mockScenarioFrom('?mock=nope')).toBeUndefined()
+    expect(mockScenarioFrom('')).toBeUndefined()
+    for (const s of MOCK_SCENARIOS) expect(mockScenarioFrom(`?x=1&mock=${s}`)).toBe(s)
+  })
+
+  it('freezes the connection-down and loading states', () => {
+    vi.useFakeTimers()
+    let now = 0
+    const snapshot = (scenario: MockScenario) => {
+      now = Date.now()
+      const feed = createMockFeed({ seed: 1, scenario })
+      feed.start()
+      const first = feed.getSnapshot()
+      vi.advanceTimersByTime(60_000)
+      expect(feed.getSnapshot()).toBe(first) // never updates
+      feed.stop()
+      return first
+    }
+    expect(snapshot('loading')).toMatchObject({ status: null, connection: 'connecting' })
+    const offline = snapshot('offline')
+    expect(offline).toMatchObject({ connection: 'offline', lastMessageAt: now - 60_000 })
+    expect(isLotStatus(offline.status)).toBe(true)
+    expect(snapshot('unreachable')).toMatchObject({
+      connection: 'error',
+      error: { code: 'network' },
+      lastMessageAt: now - 60_000,
+    })
+    expect(snapshot('unavailable')).toMatchObject({
+      status: null,
+      connection: 'live',
+      error: { code: 'unavailable' },
+    })
+  })
+
+  it('stale keeps the first zone frozen and 5 min old; estimated lowers the last zone', () => {
+    vi.useFakeTimers()
+    const start = Date.now()
+    const feed = createMockFeed({ seed: 2, scenario: 'stale', minDelayMs: 10, maxDelayMs: 10 })
+    feed.start()
+    const first = feed.getSnapshot().status!
+    for (let i = 0; i < 30; i++) {
+      vi.advanceTimersByTime(10)
+      const s = feed.getSnapshot().status!
+      expect(isLotStatus(s)).toBe(true)
+      expect(s.zones[0]).toEqual(first.zones[0])
+      expect(s.zones[0]).toMatchObject({ stale: true })
+      expect(Date.parse(s.zones[0].updated_at!)).toBe(start - 5 * 60_000)
+      expect(s.zones[1].stale).toBe(false)
+      expect(s.total.stale).toBe(true)
+      expect(s.total.free).toBe(s.zones[0].free + s.zones[1].free)
+    }
+    feed.stop()
+
+    const est = createMockFeed({ seed: 2, scenario: 'estimated', minDelayMs: 10, maxDelayMs: 10 })
+    est.start()
+    for (let i = 0; i < 30; i++) {
+      vi.advanceTimersByTime(10)
+      const s = est.getSnapshot().status!
+      expect(s.zones.map((z) => z.confidence)).toEqual([1, 0.6])
+      expect(s.total).toMatchObject({ confidence: 0.6, stale: false })
+    }
+    est.stop()
+  })
+
+  it('follows the browser going offline and back online', () => {
+    vi.useFakeTimers()
+    const feed = createMockFeed({ seed: 4 })
+    feed.start()
+    window.dispatchEvent(new Event('offline'))
+    expect(feed.getSnapshot().connection).toBe('offline')
+    expect(feed.getSnapshot().status).not.toBeNull()
+    window.dispatchEvent(new Event('online'))
+    expect(feed.getSnapshot().connection).toBe('live')
+    feed.stop()
+    window.dispatchEvent(new Event('offline'))
+    expect(feed.getSnapshot().connection).toBe('live')
   })
 })

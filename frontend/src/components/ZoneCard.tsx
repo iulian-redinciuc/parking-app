@@ -4,14 +4,16 @@ import LevelBar from './LevelBar'
 import TrendIcon from './TrendIcon'
 
 // One zone: name, free / capacity, trend, a bar with the level word, and a note when estimated.
-export default function ZoneCard({ zone }: { zone: ZoneStatus }) {
+// `dimmed` greys the numbers: they're old (stale zone, or the connection is down).
+export default function ZoneCard({ zone, dimmed = false }: { zone: ZoneStatus; dimmed?: boolean }) {
   const level = levelInfo(zone.level)
   const nameId = `zone-${zone.id}`
   return (
     <li
-      className="flex flex-col gap-2 rounded-xl bg-surface p-4"
+      className={`flex flex-col gap-2 rounded-xl bg-surface p-4 ${dimmed ? 'dimmed' : ''}`}
       aria-labelledby={nameId}
       data-testid={`zone-${zone.id}`}
+      data-dimmed={dimmed || undefined}
     >
       <div className="flex items-baseline justify-between gap-3">
         <h2 id={nameId} className="truncate text-lg font-semibold">
@@ -32,6 +34,23 @@ export default function ZoneCard({ zone }: { zone: ZoneStatus }) {
           {level.label}
         </span>
       </div>
+      {zone.stale && (
+        <p className="flex items-center gap-1.5 text-sm">
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            className="size-4 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          No fresh camera data: last known numbers
+        </p>
+      )}
       {isEstimated(zone.confidence) && (
         <p className="flex items-center gap-1.5 text-sm text-muted">
           <span aria-hidden="true">ⓘ</span>
