@@ -137,6 +137,8 @@ Run on every frame before detection. Unhealthy frames are skipped and reported i
 
 A camera is **`degraded`** if more than 50% of the last 20 frames were unhealthy, and **`down`** if there's been no healthy frame for `stale_after_s`.
 
+Checks run in the table's order and the first match wins (`connect_failed` → `black` → `frozen` → `blurry`). The `frozen` run counts consecutive frame pairs that differ by less than `frozen_diff_max`. **Replay sources** (`file:`, `folder:`) repeat stored images on purpose, so the worker turns the `frozen` check off for them (`FrameHealth(check_frozen=False)`, driven by `FrameSource.replay`). `down` is counted from worker start-up if there has never been a healthy frame.
+
 ## 6. Camera shift detection (`parking/vision/shift.py`)
 
 A bumped camera makes every slot polygon point at the wrong pixels.

@@ -133,6 +133,8 @@ api:
 | `rtsp:` | `rtsp:rtsp://user:pass@10.0.20.12:554/sub` | Continuous stream on a reader thread that keeps only the latest frame |
 | `video:` | `video:data/recordings/ramp-2026-11-02.mp4` | Plays a file at its native fps (for flow tests) |
 
+Relative paths resolve against the repo root. `folder:` reads `.jpg`/`.jpeg`/`.png`/`.bmp`/`.webp` files, re-scans the folder at the start of every pass, and only parses `interval` (default 5 s; the worker loop does the waiting). With `loop=false`, `read()` returns nothing after the last image and the source reports `exhausted`. A missing or unreadable image is a failed read (`connect_failed`), not an error. Unknown schemes and options are rejected; error messages never echo the URI (it may hold camera credentials).
+
 ---
 
 ## 2. Slot file: `config/slots/<camera>.json`
