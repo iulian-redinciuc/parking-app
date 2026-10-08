@@ -162,7 +162,7 @@ frontend/
 | `parking evaluate --images DIR --labels FILE --camera ID [--sweep 0.1:0.6:0.05] [--mode both]` | 1 | Accuracy metrics, threshold sweep |
 | `parking bootstrap-slots --image PATH --camera ID [--out FILE] [--force]` | 1 | Suggest slot polygons (vision.md §4) |
 | `parking benchmark --image PATH [--runs 20] [--warmup 3] [--runtimes pytorch,ncnn] [--imgsz 640,1280] [--models yolo11n,yolo11n-seg] [--camera cam-ground]` | 1 | Median/p95 ms and peak RSS per runtime × size × model, plus the appearance scorer ([vision.md §11](vision.md#11-runtimes-and-performance)) |
-| `parking worker occupancy --camera ID` | 2 | Run the occupancy worker |
+| `parking worker occupancy --camera ID [--print] [--fake-detector] [--control-port 9000] [--control-host 0.0.0.0] [--max-frames N]` | 2 | Run the occupancy worker (`--print`: JSON lines to stdout, nothing sent; `--fake-detector` / `PARKING_FAKE_DETECTOR=1`: `<image>.json` sidecars next to replayed images) |
 | `parking worker flow --camera ID` | 5 | Run the flow worker |
 | `parking api` | 2 | Run the API (uvicorn) |
 | `parking db upgrade` | 2 | Apply Alembic migrations |

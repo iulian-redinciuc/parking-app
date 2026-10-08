@@ -637,3 +637,61 @@ def benchmark(
     json_path = out / f"benchmark-{stamp}.json"
     json_path.write_text(json.dumps(report, indent=2) + "\n")
     typer.echo(f"report -> {json_path}")
+
+
+@worker_app.command("occupancy")
+def worker_occupancy(
+    camera: Annotated[str, typer.Option(help="Occupancy camera id in the config.")],
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    print_mode: Annotated[
+        bool,
+        typer.Option(
+            "--print", help="Print observations and health as JSON lines instead of sending."
+        ),
+    ] = False,
+    fake_detector: Annotated[
+        bool,
+        typer.Option(
+            "--fake-detector",
+            help="Read detections from <image>.json next to each replayed image "
+            "(also env PARKING_FAKE_DETECTOR=1).",
+        ),
+    ] = False,
+    control_port: Annotated[
+        int, typer.Option(help="Port of the /control/* server (0 = off).")
+    ] = 9000,
+    control_host: Annotated[str, typer.Option(help="Address the control server binds.")] = (
+        "0.0.0.0"
+    ),
+    max_frames: Annotated[int, typer.Option(help="Stop after this many frames (0 = never).")] = 0,
+) -> None:
+    """Run the occupancy worker: analyse a frame every interval and send observations."""
+    import logging
+
+    from parking.workers.base import WorkerError, load_settings
+    from parking.workers.occupancy_worker import OccupancyWorker
+
+    if not 0 <= control_port <= 65535:
+        raise typer.BadParameter("must be 0..65535", param_hint="--control-port")
+    if max_frames < 0:
+        raise typer.BadParameter("must be >= 0", param_hint="--max-frames")
+
+    config = _find_config(config)
+    settings = load_settings(config.resolve().parent.parent)
+    logging.basicConfig(
+        level=settings.log_level.upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    try:
+        worker = OccupancyWorker(
+            config,
+            camera,
+            fake_detector=_fake_detector_on(fake_detector),
+            print_mode=print_mode,
+            settings=settings,
+            control_port=control_port or None,
+            control_host=control_host,
+        )
+        worker.run(max_frames or None)
+    except WorkerError as e:
+        _fail(str(e))

@@ -33,6 +33,7 @@ LATER = {"snapshot": "Phase 4 (P4.3)", "rtsp": "Phase 4 (P4.3)", "video": "Phase
 class Frame(NamedTuple):
     image: np.ndarray  # BGR, as read by OpenCV
     ts: datetime  # UTC, when the frame was read
+    path: Path | None = None  # the image file, for replay sources (fake-detector sidecars)
 
 
 @runtime_checkable
@@ -71,7 +72,7 @@ class FileSource:
             self._image = _imread(self.path)
             if self._image is None:
                 return None
-        return Frame(self._image.copy(), _now())
+        return Frame(self._image.copy(), _now(), self.path)
 
     def close(self) -> None:
         self._image = None
@@ -114,7 +115,7 @@ class FolderReplaySource:
         path = self._files[self._pos]
         self._pos += 1
         img = _imread(path)
-        return None if img is None else Frame(img, _now())
+        return None if img is None else Frame(img, _now(), path)
 
     def close(self) -> None:
         self._files = []

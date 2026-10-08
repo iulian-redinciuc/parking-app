@@ -57,6 +57,7 @@ class ApiClient:
         self.camera_id = camera_id
         self.print_mode = print_mode
         self._out = out or sys.stdout
+        self._print_lock = threading.Lock()  # the loop and the heartbeat both print
         self._backoff_min = backoff_min
         self._backoff_max = backoff_max
         self._stop = threading.Event()
@@ -107,8 +108,9 @@ class ApiClient:
             return False
 
     def _print(self, msg: BaseModel) -> None:
-        self._out.write(msg.model_dump_json() + "\n")
-        self._out.flush()
+        with self._print_lock:
+            self._out.write(msg.model_dump_json() + "\n")
+            self._out.flush()
 
     # --- flow events (outbox) ---
 

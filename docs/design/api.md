@@ -184,6 +184,12 @@ Each worker runs a tiny HTTP server on port **9000**, reachable only inside the 
 | POST | `/control/reload` | Re-read config and the slot/line file |
 | POST | `/control/save-reference` | Save the current frame as the shift-detection reference |
 
+Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `parking worker … --control-port` (default 9000, `0` = off) and `--control-host` (default `0.0.0.0`; the port is never published outside the Docker network). **Without `WORKER_TOKEN` the server isn't started** (a warning is logged), so there is never an open control port. Responses:
+- `snapshot`: `annotated` accepts `true/1/yes/on`; the latest frame read (also an unhealthy one, so an admin can see why), annotated with the last analysis of that frame; `503 unavailable` before the first frame.
+- `reload`: `200 {"camera_id", "slots", "interval_s"}`; re-reads lot.yaml (this camera's section), the slot file and `reference_empty`; the detector and source are rebuilt only if their config changed. Anything invalid → `400 bad_request` and the old setup keeps running.
+- `save-reference`: `200 {"saved": "data/reference/<camera>.jpg", "ts"}`; `409 conflict` before the first frame.
+- Missing/wrong token `401 unauthorized`, unknown route `404 not_found`; errors use the §1 format.
+
 ### observation
 ```json
 {
