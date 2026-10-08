@@ -81,7 +81,7 @@
 **Done when:** a schedule set 2 minutes ahead fires once; nothing fires in quiet hours.
 
 ## P6.8: Device test matrix
-**Steps:** fill in the [test matrix](../design/notifications.md#7-test-matrix-phase-6) on a real Android phone, a real iPhone (installed PWA) and a desktop browser. Note the OS and browser versions in PROGRESS.md.
+**Steps:** fill in the [test matrix](../design/notifications.md#6-test-matrix-phase-6) on a real Android phone, a real iPhone (installed PWA) and a desktop browser. Note the OS and browser versions in PROGRESS.md.
 
 **Done when:** every "expected ✅" cell is confirmed.
 

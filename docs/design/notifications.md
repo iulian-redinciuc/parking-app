@@ -2,14 +2,13 @@
 
 ## 1. The constraint
 
-**A web page cannot read the phone's location while it is closed or in the background.** That's true for Chrome on Android and Safari on iPhone. So "notify me automatically when I drive near the lot, without opening anything" is impossible for a pure web app. The tiers below get as close as possible, and Tier 4 (native wrapper) removes the limit.
+**A web page cannot read the phone's location while it is closed or in the background.** That's true for Chrome on Android and Safari on iPhone. So "notify me automatically when I drive near the lot, without opening anything" is impossible for a web app, and this project is **web only** (no native or app-store app). The three tiers below get as close as possible, and the app explains the limitation to users.
 
 | Tier | Trigger | Works with app closed? | Who | Phase |
 |------|---------|-----------------------|-----|-------|
 | 1 | Phone is within the radius **while the app is open** | No | Everyone | 6 |
 | 2 | User tapped **"I'm on my way"** | ✅ (server push) | Everyone with push | 6 |
 | 3 | **Scheduled reminder** (e.g. weekdays 08:30) | ✅ | Everyone with push | 6 |
-| 4 | **Native geofence** (Capacitor app) | ✅ | Users of the native app | 9 |
 
 ## 2. Web Push basics
 
@@ -68,14 +67,7 @@ After that, on every status change, for each subscription with `on_my_way_until 
 ### "Almost full" alerts (`prefs.alert_when_almost_full`)
 - When a preferred zone's level becomes `almost_full` or `full`, push to subscribers with this pref, at most once per 2 h per subscription, respecting quiet hours.
 
-## 6. Tier 4: native app (Phase 9 summary)
-
-- Capacitor project in `mobile/` that loads the built frontend.
-- Geofencing plugin (e.g. `@capacitor-community/background-geolocation` or a dedicated geofence plugin; evaluate licences and maintenance status at the time).
-- On geofence enter → fetch `/api/status` → local notification.
-- Android: APK sideload or Play Store (one-time fee). iPhone: Apple Developer Program (99 USD/year) for TestFlight or the App Store; needs "Always" location permission and a justification text.
-
-## 7. Test matrix (Phase 6)
+## 6. Test matrix (Phase 6)
 
 | Device | Browser | Install? | Push | Tier 1 | Tier 2 | Tier 3 |
 |--------|---------|----------|------|--------|--------|--------|

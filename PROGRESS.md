@@ -21,7 +21,7 @@
 | 6 | [Notifications](docs/phases/phase-6-notifications.md) | 0 / 8 | ⬜ | | |
 | 7 | [Admin + stats](docs/phases/phase-7-admin-stats.md) | 0 / 8 | ⬜ | | |
 | 8 | [Production deployment + hardening](docs/phases/phase-8-hardening.md) | 0 / 13 | ⬜ | | |
-| 9 | [Extras](docs/phases/phase-9-extras.md) | 0 / 7 | ⬜ | | |
+| 9 | [Extras](docs/phases/phase-9-extras.md) | 0 / 6 | ⬜ | | |
 
 ---
 
@@ -136,13 +136,12 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] **P8.13** 7-day staging run + go-live
 
 ## Phase 9: Optional extras ⬜
-- [ ] **P9.1** Native app with background geofencing
-- [ ] **P9.2** Ground-level slot map
-- [ ] **P9.3** Special spaces (accessible, EV)
-- [ ] **P9.4** Barrier / induction-loop integration
-- [ ] **P9.5** Fine-tuned detector / licence swap
-- [ ] **P9.6** Multiple lots
-- [ ] **P9.7** Smarter forecast
+- [ ] **P9.1** Ground-level slot map
+- [ ] **P9.2** Special spaces (accessible, EV)
+- [ ] **P9.3** Barrier / induction-loop integration
+- [ ] **P9.4** Fine-tuned detector / licence swap
+- [ ] **P9.5** Multiple lots
+- [ ] **P9.6** Smarter forecast
 
 ---
 
@@ -175,6 +174,8 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-07 | HashRouter in the frontend | GitHub Pages has no SPA fallback |
 | 2026-10-07 | Python pinned to 3.12 (uv) instead of the dev Pi's 3.13 | ML wheels lag behind new Python versions |
 | 2026-10-08 | **The Raspberry Pi is for development and testing only.** Production runs elsewhere (not decided; choose a topology before Phase 4). The design is portable: multi-arch images (amd64 + arm64), AI runtime per machine, machine-specific settings in config | Owner's requirement |
+| 2026-10-08 | **Web app only.** No native or app-store app; the native-app extra was removed | Owner's requirement |
+| 2026-10-08 | Production target: **the cloud or another Raspberry Pi** (exact topology chosen before Phase 4) | Owner's requirement |
 | 2026-10-08 | GitHub Pages is the **preview** frontend; production frontend hosting decided in P8.3 | Keep options open |
 | 2026-10-08 | Phase 8 became "Production deployment + hardening" (13 tasks) | Deployment to the new environment needs its own steps |
 
@@ -203,4 +204,5 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 
 ### 2026-10-08
 - Removed Home Assistant and the message broker; the app is fully isolated on the dev Pi.
-- Clarified that the Pi is **dev/test only**: added production topologies (T1/T2/T3), multi-arch images, AI runtime per machine, preview vs production frontend, and turned Phase 8 into production deployment + hardening (98 tasks in total).
+- Clarified that the Pi is **dev/test only**: added production topologies (T1/T2/T3), multi-arch images, AI runtime per machine, preview vs production frontend, and turned Phase 8 into production deployment + hardening.
+- Web app only: removed the native-app extra (97 tasks in total). Production will be the cloud or another Raspberry Pi.

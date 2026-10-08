@@ -2,7 +2,7 @@
 
 Two kinds of environment:
 - **Development / testing:** Iulian's **Raspberry Pi 5**. Used only to build and test. It also runs other software, which the app must never touch (§1).
-- **Production:** **not decided yet.** It's chosen before real cameras go in (P4.1) from the layouts in §3, and deployed in Phase 8. Nothing in the code may assume the Pi.
+- **Production:** **the cloud or another Raspberry Pi.** The exact layout is chosen before real cameras go in (P4.1) from §3, and deployed in Phase 8. Nothing in the code may assume the dev Pi.
 
 ## 1. Development on the Raspberry Pi
 
@@ -64,10 +64,10 @@ ENTRYPOINT ["/app/backend/.venv/bin/parking", "worker"]
 
 Pick one before Phase 4 hardware goes in (open question #2). The code supports all three; only configuration differs.
 
-| | **T1: all on site** | **T2: split** (recommended) | **T3: all in the cloud** |
+| | **T1: one Raspberry Pi at the lot** | **T2: Pi at the lot + cloud** (recommended) | **T3: all in the cloud** |
 |---|---|---|---|
-| Vision workers | Box at the lot | Box at the lot | Cloud VM |
-| API + database | Same box at the lot | Cloud VM or a server with good uptime | Same cloud VM |
+| Vision workers | Raspberry Pi at the lot | Raspberry Pi at the lot | Cloud VM |
+| API + database | Same Raspberry Pi | Cloud VM | Same cloud VM |
 | Does video leave the lot? | No | No | **Yes** (camera streams over a VPN) |
 | Upload bandwidth from the lot | Tiny (only the public app traffic) | Tiny (results are a few KB/minute) | **~1–4 Mbit/s per camera, continuously** |
 | Public HTTPS entry | Tunnel from the lot box (works behind 4G/CGNAT) | VM public IP + reverse proxy, or a tunnel | Same as T2 |

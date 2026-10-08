@@ -53,7 +53,7 @@ Requirements:
 Used only to build and test. Recommended: an **active cooler**, because long benchmark and evaluation runs throttle a bare Pi 5. Nothing else is needed for development.
 
 ### 4.2 Production vision host (at the lot; topologies T1/T2)
-Chosen in P4.1, once the topology is decided ([deployment.md §3](deployment.md#3-production-topologies-to-be-chosen)). Candidates:
+Chosen in P4.1, once the topology is decided ([deployment.md §3](deployment.md#3-production-topologies-to-be-chosen)). The default is **another Raspberry Pi 5** (the same kind as the dev Pi). The other rows are fallbacks only if a Pi turns out too slow in P5.10:
 
 | Option | AI runtime | Notes |
 |--------|-----------|-------|

@@ -19,13 +19,15 @@ A mobile-friendly web app that shows **how many parking spaces are free, in real
 | F4 | Mobile web UI, installable to the home screen (PWA) | [frontend.md](docs/design/frontend.md) |
 | F5 | "You're close" notification with the free count | [notifications.md](docs/design/notifications.md) |
 
-**Not in scope:** reservations, payments, licence-plate recognition, identifying people.
+**Web app only.** No native or app-store app.
+
+**Not in scope:** native apps, reservations, payments, licence-plate recognition, identifying people.
 
 ## 2. Environments: development vs production
 
 | | **Development / testing** | **Production** |
 |---|---|---|
-| Machine | Iulian's **Raspberry Pi 5** (8 GB, ARM64, CPU only) | **Not decided yet**: chosen before real cameras go in (Phase 4), deployed in Phase 8 |
+| Machine | Iulian's **Raspberry Pi 5** (8 GB, ARM64, CPU only) | **The cloud or another Raspberry Pi** (exact setup chosen before real cameras go in, Phase 4); deployed in Phase 8 |
 | Purpose | Build and test everything; run the still-image, replay-feed and recorded-clip tests | Run the real system for real users |
 | Rules | The app is **isolated** from everything else on the Pi: own containers, networks and data; nothing existing is used or changed ([deployment.md §1](docs/design/deployment.md#1-development-on-the-raspberry-pi)) | Its own dedicated environment |
 | Frontend | **Preview** on GitHub Pages: https://iulian-redinciuc.github.io/parking-app/ | Production web hosting decided in Phase 8 (it can stay on Pages or move) |
@@ -34,7 +36,7 @@ Because production is undecided, the design is **portable**:
 - Docker images are built for both **x86-64** (normal PCs, servers, cloud) and **ARM64** (Pi-class boards), so the same release runs anywhere with Docker.
 - The **AI runtime is chosen per machine** (NCNN on ARM CPUs like the dev Pi; OpenVINO on Intel CPUs; CUDA/TensorRT on NVIDIA; Hailo on a Pi with an AI HAT+). It's a config setting, not a code change.
 - **Speed numbers measured on the dev Pi are a worst case.** They are measured again on the production hardware.
-- **Production layouts** to choose from ([deployment.md §3](docs/design/deployment.md#3-production-topologies-to-be-chosen)): everything in one box at the lot; **recommended** a box at the lot for vision plus a server or cloud VM for the API; or everything in the cloud.
+- **Production layouts** to choose from ([deployment.md §3](docs/design/deployment.md#3-production-topologies-to-be-chosen)): one Raspberry Pi at the lot doing everything; **recommended** a Raspberry Pi at the lot for the cameras plus a cloud server for the API; or everything in the cloud.
 
 ## 3. Architecture
 
@@ -62,7 +64,7 @@ Full detail: [architecture.md](docs/design/architecture.md).
 | Frontend | **Vite + React + TS + Tailwind + vite-plugin-pwa**, HashRouter, i18next | Large ecosystem; static build that any web host can serve |
 | Hosting | **Dev:** API on the Pi; frontend preview on GitHub Pages. **Production:** to be chosen (Phase 8) | Keep options open until the production location is known |
 | Packaging | **Docker Compose** + **multi-arch images** (amd64 + arm64) published to GitHub's container registry | The same release runs on the dev Pi and on any production machine |
-| Optional | A hardware AI accelerator for the flow camera (depends on the production machine); Capacitor for native geofencing | Only if needed |
+| Optional | A hardware AI accelerator for the flow camera (e.g. an AI HAT+ on a production Pi) | Only if needed |
 
 Alternatives and reasons: [architecture.md](docs/design/architecture.md), [deployment.md](docs/design/deployment.md).
 
@@ -72,7 +74,7 @@ Alternatives and reasons: [architecture.md](docs/design/architecture.md), [deplo
 2. **Space detection.** Vehicle masks overlapping hand-drawn space polygons, with a per-space classifier as a fallback ([vision.md §2, §9](docs/design/vision.md)).
 3. **Entry/exit.** Tracking plus **two counting lines**, so cars that stop or reverse aren't miscounted. Drift is handled by admin corrections, an optional nightly reset, and a "≈" display ([vision.md §7–8](docs/design/vision.md)).
 4. **No silent failures.** Stale data and low confidence are always visible in the UI ([frontend.md §2.1](docs/design/frontend.md)).
-5. **Notifications.** A website can't watch location in the background, so there are tiers: proximity while open, "I'm on my way", schedules, and an optional native app later ([notifications.md](docs/design/notifications.md)).
+5. **Notifications.** A website can't watch location in the background, and this is **web only**, so there are three tiers: a proximity alert while the app is open, "I'm on my way" pushes, and scheduled pushes ([notifications.md](docs/design/notifications.md)).
 6. **Privacy.** Frames are processed in memory and discarded; only numbers are public; location is computed on the phone ([security-privacy.md](docs/design/security-privacy.md)).
 7. **Portable by default.** Nothing in the code assumes the Raspberry Pi. Machine-specific choices (AI runtime, CPU limits, public entry point) are configuration ([deployment.md](docs/design/deployment.md)).
 
@@ -89,7 +91,7 @@ Alternatives and reasons: [architecture.md](docs/design/architecture.md), [deplo
 | 6 | [Notifications](docs/phases/phase-6-notifications.md) | Push + proximity tiers | dev Pi + Pages preview | No |
 | 7 | [Admin + stats](docs/phases/phase-7-admin-stats.md) | Fix things from the phone; history and forecast | dev Pi | No |
 | 8 | [Production deployment + hardening](docs/phases/phase-8-hardening.md) | Deployed to production; unattended, backed up, secure, documented | production | Production machines |
-| 9 | [Extras](docs/phases/phase-9-extras.md) | Native app, slot map, special spaces… | — | Depends |
+| 9 | [Extras](docs/phases/phase-9-extras.md) | Slot map, special spaces, multiple lots… | — | Depends |
 
 ```mermaid
 flowchart LR
@@ -111,7 +113,7 @@ Phases 1–3 need no camera hardware; Phase 6 can run alongside 4–5.
 | Bad camera angle (cars hide each other) | Mount high; per-space classifier; a second camera ([hardware.md](docs/design/hardware.md)) |
 | Night or underground lighting | IR/low-light camera, lighting, tuning on night images |
 | Flow-count drift | Two-line logic, corrections, scheduled reset, "≈" display; Option C if budget allows |
-| No background location on the web | Notification tiers; native app later |
+| No background location on the web (web app only) | "I'm on my way" and scheduled pushes work with the app closed; the proximity alert works while it's open; the UI explains this |
 | iPhone push needs a home-screen install | Detect it and show instructions |
 | Something works on the dev Pi but not in production (different CPU type, network, speed) | Multi-arch images built and tested in CI for both CPU types; benchmarks and evaluation re-run on production hardware (P8.2); a staging run before go-live |
 | Production machine too slow for the flow camera | Measure early (Phase 5 recordings on the candidate hardware); motion gating; accelerator for that machine |

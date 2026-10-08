@@ -13,7 +13,7 @@
 | Frontend E2E | `frontend/e2e/` | Playwright (`iPhone 13`, `Pixel 7`) with `VITE_API_BASE=mock` | ✅ |
 | Quality | — | Lighthouse CI (PWA, a11y ≥ 90) | ✅ on frontend PRs |
 | Load | `scripts/load/sse.py` | asyncio + httpx, 500 clients | manual, Phase 8 |
-| Device checks | — | Real Android + iPhone, [notifications.md §8](notifications.md#7-test-matrix-phase-6) | manual |
+| Device checks | — | Real Android + iPhone, [notifications.md §8](notifications.md#6-test-matrix-phase-6) | manual |
 
 ## 2. What must have unit tests
 
