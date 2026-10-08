@@ -351,13 +351,6 @@ def test_benchmark_errors(tmp_path, monkeypatch, extra, message):
     assert message in result.output
 
 
-def test_api_help_lists_reload():
-    result = runner.invoke(app, ["api", "--help"])
-    assert result.exit_code == 0
-    for option in ("--host", "--port", "--reload", "--config"):
-        assert option in result.output
-
-
 def test_api_runs_the_factory(tmp_path, monkeypatch):
     import uvicorn
 
@@ -367,11 +360,14 @@ def test_api_runs_the_factory(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(uvicorn, "run", lambda target, **kw: calls.append((target, kw)))
     monkeypatch.setenv("PARKING_CONFIG", "unset")  # undone after the test
-    result = runner.invoke(app, ["api", "--config", str(lot), "--port", "8123", "--reload"])
+    result = runner.invoke(
+        app, ["api", "--config", str(lot), "--host", "0.0.0.0", "--port", "8123", "--reload"]
+    )
     assert result.exit_code == 0, result.output
     ((target, kw),) = calls
     assert target == "parking.api.app:create_app_from_env"
     assert kw["factory"] is True and kw["reload"] is True and kw["port"] == 8123
+    assert kw["host"] == "0.0.0.0"
     import os
 
     assert os.environ["PARKING_CONFIG"] == str(lot.resolve())
