@@ -697,6 +697,31 @@ def worker_occupancy(
         _fail(str(e))
 
 
+@app.command("api")
+def api(
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    host: Annotated[str, typer.Option(help="Address to bind.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port to listen on.")] = 8000,
+) -> None:
+    """Run the API (uvicorn): ingest from the workers, live status for the app."""
+    import logging
+
+    import uvicorn
+
+    from parking.api.app import create_app
+    from parking.workers.base import load_settings
+
+    config = _find_config(config)
+    if not config.is_file():
+        _fail(f"config not found: {config}")
+    settings = load_settings(config.resolve().parent.parent)
+    logging.basicConfig(
+        level=settings.log_level.upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    uvicorn.run(create_app(config, settings), host=host, port=port, log_config=None)
+
+
 @db_app.command("upgrade")
 def db_upgrade(
     url: Annotated[

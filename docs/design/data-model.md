@@ -17,7 +17,7 @@
 | occupied | int | |
 | free | int | |
 | confidence | real | |
-| source | text | the `StateStore` change source `observation \| health \| tick`; later `flow \| correction \| reset`. `startup` changes are not written (they republish restored rows) |
+| source | text | the `StateStore` change source `observation \| flow \| health \| tick`; later `correction \| reset`. `startup` changes are not written (they republish restored rows) |
 
 ### `slot_state`: a slot's smoothed state, written only when it flips
 | Column | Type | Notes |
@@ -95,7 +95,7 @@
 |--------|-------|--------------------------|
 | `SlotSmoother` | smoothed state + pending counter per slot | latest `slot_state` per slot (pending counters start empty) |
 | `FlowCounter` per flow zone | occupied, events/hours since correction | latest `zone_state` per flow zone; the latest `correction` for confidence counters |
-| `StateStore` | current `LotStatus`, ring buffer of (ts, free) per zone for trend | latest `zone_state` rows; trend buffer from `zone_minute` of the last 15 min |
+| `StateStore` | current `LotStatus`, ring buffer of (ts, free) per zone for trend | latest `zone_state` rows; trend buffer from the `zone_state` rows of the last `trend_window_min` (`zone_minute` once it exists, P7.5) |
 | `Broadcaster` | SSE client queues | — |
 
 At start-up, before any new observation arrives, the restored state is published with `stale=true`. It becomes live when fresh observations arrive.

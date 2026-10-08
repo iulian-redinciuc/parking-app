@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 
 from sqlalchemy import func
 from sqlmodel import Session, select
 
 from parking.core.fusion import Change, SlotChange, ZoneChange
-from parking.db.models import CameraHealth, SlotState, ZoneState
-from parking.messages import CameraHealthMsg
+from parking.db.models import CameraHealth, FlowEvent, SlotState, ZoneState
+from parking.messages import CameraHealthMsg, FlowEventMsg
 
 
 def record_changes(session: Session, changes: Iterable[Change]) -> int:
@@ -60,6 +61,39 @@ def latest_slot_states(session: Session) -> dict[str, dict[str, bool]]:
     for row in session.exec(select(SlotState).where(SlotState.id.in_(newest))):
         out.setdefault(row.camera_id, {})[row.slot_id] = row.taken
     return out
+
+
+def zone_samples_since(session: Session, since: datetime) -> dict[str, list[tuple[datetime, int]]]:
+    """zone id -> (ts, free) of its `zone_state` rows from `since` on, oldest first (trend)."""
+    out: dict[str, list[tuple[datetime, int]]] = {}
+    rows = session.exec(select(ZoneState).where(ZoneState.ts >= since).order_by(ZoneState.id))
+    for row in rows:
+        out.setdefault(row.zone_id, []).append((row.ts, row.free))
+    return out
+
+
+def known_flow_event_ids(session: Session, event_ids: Iterable[str]) -> set[str]:
+    """The ids among `event_ids` that already have a `flow_event` row (retried deliveries)."""
+    ids = list(event_ids)
+    if not ids:
+        return set()
+    return set(session.exec(select(FlowEvent.event_id).where(FlowEvent.event_id.in_(ids))))
+
+
+def add_flow_event(session: Session, msg: FlowEventMsg, zone_id: str, applied: bool) -> None:
+    """One `flow_event` row; `applied=False` when the counter clamped it."""
+    session.add(
+        FlowEvent(
+            event_id=msg.event_id,
+            ts=msg.ts,
+            camera_id=msg.camera_id,
+            zone_id=zone_id,
+            direction=msg.direction,
+            track_id=msg.track_id,
+            confidence=msg.confidence,
+            applied=applied,
+        )
+    )
 
 
 def upsert_camera_health(session: Session, msg: CameraHealthMsg) -> CameraHealth:

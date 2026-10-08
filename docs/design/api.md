@@ -63,7 +63,7 @@ Codes: `bad_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
 
 | Method | Path | Phase | Description |
 |--------|------|-------|-------------|
-| GET | `/healthz` | 2 | `{"status":"ok","db":true,"cameras":{"cam-ground":"ok"}}`. HTTP 200 even when cameras are down, because the API itself is alive |
+| GET | `/healthz` | 2 | `{"status":"ok","db":true,"cameras":{"cam-ground":"ok","cam-ramp":"unknown"},"ingest":{"observations":n,"flow_events":n,"health":n,"rejected":n,"db_errors":n}}`. `unknown` = no health message since start-up; counters since start-up. HTTP 200 even when cameras are down, because the API itself is alive |
 | GET | `/api/lot` | 2 | Static lot info (below) |
 | GET | `/api/status` | 2 | `LotStatus`; `503 unavailable` before the first observation |
 | GET | `/api/stream` | 2 | SSE (see §3) |
@@ -172,6 +172,7 @@ Delivery rules:
 - **Flow events:** must not be lost. The worker keeps an **outbox** (in memory, plus `data/outbox/<camera>.jsonl` on disk so it survives a worker restart). It retries with backoff (1 → 30 s) and removes events once the API accepts them. `event_id` makes retries safe: duplicates are ignored.
 - **Client** (`parking/workers/api_client.py`, P2.1): 5 s timeout; the outbox file is rewritten atomically after each accepted batch and deleted when empty; on start-up a torn last line (crash mid-write) and repeated `event_id`s are skipped. Every failure (network, 5xx, also 4xx) is retried with backoff, so a misconfigured token never loses events. Print mode writes each payload (flow events as a `{"events": […]}` batch) as one JSON line to stdout and sends nothing.
 - **Payload models:** `parking/messages.py`. Unknown fields are ignored (forward compatibility); timestamps are serialised as UTC with milliseconds and `Z`, and a timestamp without a zone is read as UTC.
+- **API side** (`parking/api/routes/internal.py` → `parking/api/ingest.py`, P2.7): the token is checked first (constant-time; no `WORKER_TOKEN` set = every request 401), then the body is parsed, so a request without the token always gets `401 unauthorized`. A payload that doesn't validate, or names a camera that isn't in lot.yaml with the right role, gets **422** `{"error": {"code": "bad_request", "message", "details"}}`; it's logged and counted in `/healthz` (`ingest.rejected`). Every payload goes through one lock: `StateStore` → DB rows (in a thread; a DB error is logged and counted, the in-memory state is kept) → publish the status. Flow-event duplicates are ids already in memory **or** in `flow_event` (survives restarts); clamped events are stored with `applied=false` and count as accepted.
 - **Crashed worker:** there's no "last will" message. The API marks a camera `down` when it hasn't received a health message for 30 s, and its zones become `stale` after `stale_after_s`.
 
 ### 5.2 API → workers (control)

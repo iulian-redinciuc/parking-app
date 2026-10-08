@@ -7,9 +7,9 @@
 >
 > The [agent loop](tools/agent-loop/README.md) works through the unticked tasks in order. A task marked `⏸️` is skipped until its need is met: **delete the `⏸️ ` from its line to unblock it** (editing on GitHub works too).
 
-**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 2: P2.7.
+**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 2: P2.8.
 **Build order:** 0 → 1 → 2 → 3 (MVP) → 6 → 7 (no hardware needed) → 4 → 5 → 8 (need the real cameras / production machines) → 9.
-**Last updated:** 2026-10-08
+**Last updated:** 2026-10-09
 
 ## Waiting on Iulian
 
@@ -22,7 +22,7 @@
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) (MVP) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 11 / 11 | ✅ | 2026-10-08 | 2026-10-08 |
-| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 6 / 11 | 🟡 | 2026-10-08 | |
+| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 7 / 11 | 🟡 | 2026-10-08 | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) (MVP) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
 | 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 0 / 11 | ⬜ | | |
@@ -64,7 +64,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P2.4** Smoothing
 - [x] **P2.5** State store + fusion
 - [x] **P2.6** Database (SQLModel + Alembic)
-- [ ] **P2.7** Internal ingest endpoints
+- [x] **P2.7** Internal ingest endpoints
 - [ ] **P2.8** SSE broadcaster + `/api/stream`
 - [ ] **P2.9** REST endpoints, CORS, errors
 - [ ] **P2.10** Docker images + Compose
@@ -215,6 +215,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | P2.3: `workers/base.py` (`Worker`, `Schedule` on a monotonic grid: next = previous scheduled start + interval, runs > 1 interval late are skipped and counted) + `workers/control.py` + `workers/occupancy_worker.py`. The control server **isn't started without `WORKER_TOKEN`** (never open); `--control-port 0` turns it off, binds `0.0.0.0` by default (not published outside Docker). For `folder:` sources the URI's `interval` is the sampling interval (replaces `sample_every_s`). `Frame` got an optional `path` so `--fake-detector` reads `<image>.json` per replayed frame (no sidecar = no detections). Observation `ts` = when the frame was read. Snapshot returns the latest frame even if unhealthy. `reload` keeps the old setup on any error and reuses the detector/source if unchanged. Health `fps`/`inference_ms_avg` over the last 20 analysed frames; final health on shutdown is `down`. Analysis exceptions are logged and the loop goes on. `--max-frames` for tests. Recorded in api.md §5.2, config.md, architecture.md §6 | The guide left these open; a token-less control port would let anyone on the LAN pull camera frames |
 | 2026-10-08 | P2.5: `StateStore` returns `SlotChange`/`ZoneChange` lists (`ZoneChange.count_changed` decides `zone_state` rows; `source` adds `health`/`tick` for non-count changes). Stale = never had data, a camera `down`, or no fresh data for `stale_after_s` measured by the API clock at receipt; flow zones count non-`down` health heartbeats as fresh. Confidence `ok` before any health message, any `degraded` camera lowers the zone, `down` keeps the last value. Trend from a change-only `(ts, free)` step buffer (20 min); `tick()` also reports trend flips. Unknown slots ignored, occupied clamped to capacity, unknown cameras raise `UnknownCameraError`. `FlowCounter` skeleton already counts/clamps/dedups/corrects so P5.7 only wires it. Recorded in vision.md §8 | The guide left change shapes, freshness and the no-health/no-data cases open; receipt time avoids worker clock skew |
 | 2026-10-08 | P2.6: `alembic.ini` + `migrations/` live in `backend/` (first revision `0001`, hand-checked; batch mode on for SQLite); `parking db upgrade [--url] [--revision]` uses `PARKING_DB_URL` (env or `deploy/.env`), else `data/db/parking.sqlite` under the repo root (also from `backend/`). Timestamps are a `UtcDateTime` type stored as fixed-width ISO text (rendered as `String(32)` in migrations so they never import app code). `repo.py` functions take a `Session` (callers own the transaction, `session_scope` commits): `record_changes` writes a `slot_state` row per `SlotChange` and a `zone_state` row per `ZoneChange` with `count_changed`, **skipping `startup`** (it republishes restored rows); "latest" = max `id` per zone / per `(camera_id, slot_id)`; `camera_health()` reader added. Recorded in data-model.md | The guide left the file locations, the URL default, the change → row mapping and the timestamp storage open |
+| 2026-10-09 | P2.7: `parking/api/` = `app.py` (`create_app(config_path, settings, clock, db_url, tick)` with the lifespan; CORS/limits stay for P2.9), `deps.py` (`Runtime` on `app.state`, `ApiError` → api.md error format, `require_worker_token` constant-time), `ingest.py` (`Ingestor`, one `asyncio.Lock`, DB in a thread, `publish` callback for the P2.8 broadcaster), `routes/internal.py`, minimal `routes/public.py` `/healthz` (with `ingest` counters and `unknown` cameras) and a minimal `parking api` (P2.9 adds `--reload`). Bodies parsed **after** the token check, so no-token is always 401; bad payload / unknown camera → **422 `bad_request`** with `details`. Flow events are applied now (`StateStore.apply_flow_event`, change source `flow`, `flow_event` rows, duplicates = memory or DB id) so worker outboxes never get stuck; corrections stay P5.7. A camera with no health for 30 s gets a synthetic `down` (logged, `camera_health` updated); cameras never heard from aren't timed. Trend restored from the last `trend_window_min` of `zone_state` (no `zone_minute` until P7.5). Recorded in api.md §2/§5.1, architecture.md §6, data-model.md | The guide left the error shape, the auth/validation order, the flow-event handling before Phase 5 and how the API runs before P2.9 open |
 
 ## Metrics
 
@@ -291,3 +292,6 @@ NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occup
 - P2.4: `parking/core/smoothing.py` (`SlotSmoother` k-consecutive flip with first-reading-direct and `restore()`, `CountSmoother` median of last k) + `parking/core/clock.py` (`Clock`, `SystemClock`, `FakeClock`). `test_smoothing.py` (15) covers every testing.md §2 smoothing case (first reading sets state, k−1 don't flip, k do, alternating noise never flips); pytest 297 passed, ruff clean, 100% branch coverage of `core/`.
 - P2.5: `parking/core/fusion.py` (`StateStore`: observation/health/tick/restore → `SlotChange`/`ZoneChange`, `status()` → `LotStatus` with level, trend, confidence, stale, totals; `level_for`, `trend_for`, `TrendBuffer`) + `parking/core/flow_counter.py` skeleton (clamp, dedup, correct, restore, confidence). `test_fusion.py` (36, fake clock: level boundaries, totals, stale on/off, camera down/degraded, trend filling/emptying/steady, restore, flow confidence); pytest 333 passed, ruff clean; coverage fusion 99% (branch), flow_counter 100%.
 - P2.6: `parking/db/` (`engine.py` WAL engine + `upgrade()`, `models.py` zone_state/slot_state/camera_health/flow_event/correction, `repo.py` record_changes/latest_zone_states/latest_slot_states/upsert_camera_health) + Alembic revision `0001` + `parking db upgrade`. Done-when on the dev Pi: `parking db upgrade` created `data/db/parking.sqlite` with the 5 tables, `journal_mode=wal`, version `0001`. New `tests/integration/test_db.py` (10: upgrade, migration = models, write/read back, health upsert, UTC text order, CLI); pytest 342 passed, ruff clean; coverage repo 100%, models 97%, engine 89%.
+
+### 2026-10-09
+- P2.7: internal ingest (`parking/api/`: `create_app` lifespan with db upgrade + restore (stale) + 1 s tick that marks cameras `down` after 30 s silent, `Ingestor` → StateStore → DB → publish, `/internal/observations|flow-events|health` with worker token, `/healthz`, `parking api`). Done-when on the dev Pi: with `parking worker occupancy` (no `--print`) the API logged `zone ground: 12 free, 5 occupied …` and requests without / with a wrong token got 401. `tests/integration/test_ingest.py` (10); pytest 352 passed, ruff clean; coverage `parking/api` 95%.

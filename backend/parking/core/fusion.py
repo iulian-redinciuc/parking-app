@@ -5,6 +5,7 @@ buffer per zone. Every mutating call returns the `Change`s it caused, for the DB
 rows when a count changed, `slot_state` rows when a slot flipped) and the SSE broadcaster:
 
 - `apply_observation(obs)`: smooths the slots/counts, recomputes that camera's zones.
+- `apply_flow_event(msg)`: one line crossing -> the flow zone's `FlowCounter`.
 - `apply_health(msg)`: camera state -> confidence (`degraded`) and staleness (`down`).
 - `tick()`: once a second; staleness (`stale_after_s` without data) and trend flips.
 - `restore(...)`: seeds the state from the DB at start-up; restored zones stay stale until
@@ -30,6 +31,7 @@ from parking.core.smoothing import CountSmoother, SlotSmoother
 from parking.messages import (
     CameraHealthMsg,
     CameraState,
+    FlowEventMsg,
     Level,
     LotStatus,
     Observation,
@@ -44,7 +46,7 @@ TREND_BUFFER = timedelta(minutes=20)
 # (confidence when the camera is ok, when it's degraded) per zone method (vision.md §8)
 CAMERA_CONFIDENCE = {"slots": (1.0, 0.6), "count": (0.9, 0.5)}
 
-ChangeSource = Literal["observation", "health", "tick", "startup"]
+ChangeSource = Literal["observation", "flow", "health", "tick", "startup"]
 
 
 class UnknownCameraError(ValueError):
@@ -223,6 +225,25 @@ class StateStore:
             if self.config.zone(zone_id).method in ("slots", "count"):
                 self._updated_at[zone_id] = now
         return changes + self._diff("observation")
+
+    def flow_zone(self, camera_id: str) -> str:
+        """The `flow` zone a flow camera counts for (lot.yaml allows exactly one per zone)."""
+        camera = self._camera(camera_id, "flow")
+        zone_id = next((z for z in camera.zones if z in self.flow), None)
+        if zone_id is None:
+            raise UnknownCameraError(f"flow camera '{camera_id}' has no 'flow' zone")
+        return zone_id
+
+    def apply_flow_event(self, msg: FlowEventMsg) -> tuple[bool | None, list[Change]]:
+        """Apply one crossing: (None = duplicate, False = clamped, True = applied; changes)."""
+        zone_id = self.flow_zone(msg.camera_id)
+        result = self.flow[zone_id].apply(msg.event_id, msg.direction)
+        if result is None:
+            return None, []
+        now = self.clock.now()
+        self._last_data[msg.camera_id] = now
+        self._updated_at[zone_id] = now
+        return result, self._diff("flow")
 
     def apply_health(self, msg: CameraHealthMsg) -> list[Change]:
         camera = self._camera(msg.camera_id)
