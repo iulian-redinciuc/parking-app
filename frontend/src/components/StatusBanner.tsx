@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import type { Banner } from '../lib/banner'
 
 // Full class names, so Tailwind finds them.
@@ -50,6 +51,7 @@ function Icon({ kind }: { kind: Banner['kind'] }) {
 // The one banner at the top of the Live screen (frontend.md §2.1): the highest-priority edge
 // state, always as words with an icon, never only a colour.
 export default function StatusBanner({ banner }: { banner: Banner }) {
+  useTranslation() // re-render on a language change; the words are in `banner`
   const tone = TONE[banner.tone]
   return (
     <div
@@ -71,10 +73,11 @@ export default function StatusBanner({ banner }: { banner: Banner }) {
 
 // Grey placeholders the shape of the Live screen while nothing has arrived yet.
 export function LiveSkeleton() {
+  const { t } = useTranslation()
   const block = 'animate-pulse rounded-lg bg-muted/20'
   return (
     <div role="status" aria-busy="true" data-testid="live-skeleton" className="flex flex-col gap-3">
-      <span className="sr-only">Loading the parking status…</span>
+      <span className="sr-only">{t('loading')}</span>
       <div aria-hidden="true" className="flex flex-col items-center gap-3 py-8">
         <div className={`h-20 w-28 ${block}`} />
         <div className={`h-5 w-24 ${block}`} />

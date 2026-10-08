@@ -1,6 +1,7 @@
 // The live connection (docs/design/frontend.md §3): one `GET /api/status` for a fast first
 // paint, then `EventSource` on `/api/stream`. A 30 s watchdog falls back to polling every 10 s
 // while SSE is retried every 60 s; hidden tabs close the stream, `online`/`offline` are followed.
+import i18n from '../i18n'
 import { API_BASE, ApiRequestError, IS_MOCK, apiUrl, getStatus } from './client'
 import { createMockFeed, mockScenarioFrom } from './mock'
 import type { ApiError, Connection, LiveFeed, LiveState, LotStatus } from './types'
@@ -236,6 +237,6 @@ let shared: LiveFeed | null = null
 export function liveFeed(): LiveFeed {
   shared ??= IS_MOCK
     ? createMockFeed({ scenario: mockScenarioFrom(window.location.search) })
-    : createLiveFeed()
+    : createLiveFeed({ lang: i18n.language })
   return shared
 }

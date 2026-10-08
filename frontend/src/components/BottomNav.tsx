@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { NavLink } from 'react-router'
 
 // Outline icons on a 24×24 grid; the label below always says what the tab is.
@@ -22,7 +23,7 @@ function Icon({ children }: { children: ReactNode }) {
 const TABS = [
   {
     to: '/',
-    label: 'Live',
+    label: 'nav.live',
     icon: (
       <Icon>
         <rect x="4" y="3" width="16" height="18" rx="2" />
@@ -32,7 +33,7 @@ const TABS = [
   },
   {
     to: '/alerts',
-    label: 'Alerts',
+    label: 'nav.alerts',
     icon: (
       <Icon>
         <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
@@ -42,7 +43,7 @@ const TABS = [
   },
   {
     to: '/stats',
-    label: 'Stats',
+    label: 'nav.stats',
     icon: (
       <Icon>
         <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
@@ -52,9 +53,10 @@ const TABS = [
 ]
 
 export default function BottomNav() {
+  const { t } = useTranslation()
   return (
     <nav
-      aria-label="Main"
+      aria-label={t('nav.label')}
       className="fixed inset-x-0 bottom-0 z-10 border-t border-surface bg-bg pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]"
     >
       <ul className="mx-auto grid h-16 max-w-xl grid-cols-3">
@@ -70,7 +72,7 @@ export default function BottomNav() {
               }
             >
               {icon}
-              {label}
+              {t(label)}
             </NavLink>
           </li>
         ))}

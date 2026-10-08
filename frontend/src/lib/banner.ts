@@ -1,13 +1,14 @@
 // Which edge state the Live screen is in (frontend.md §2.1): one banner, highest priority wins
 // (offline > server_unreachable > unavailable > stale), plus whether the numbers are shown,
-// greyed or replaced by the loading skeleton. Strings become i18n keys in P3.6.
+// greyed or replaced by the loading skeleton. The words are translated here, in the current language.
 import type { LiveState, LotStatus } from '../api/types'
+import { t } from '../i18n'
 
 export type BannerKind = 'offline' | 'server_unreachable' | 'unavailable' | 'stale'
 
 export interface Banner {
   kind: BannerKind
-  /** i18n key for P3.6. */
+  /** i18n key of the title. */
   key: string
   title: string
   detail?: string
@@ -43,8 +44,8 @@ function staleBanner(status: LotStatus, now: number): Banner {
   return {
     kind: 'stale',
     key: minutes === null ? 'banner.stale_no_data' : 'banner.stale',
-    title: minutes === null ? 'No camera data yet' : `Camera data is ${minutes} min old`,
-    detail: zones.length > 0 ? `Affected: ${zones.join(', ')}` : undefined,
+    title: minutes === null ? t('banner.stale_no_data') : t('banner.stale', { count: minutes }),
+    detail: zones.length > 0 ? t('banner.affected', { zones: zones.join(', ') }) : undefined,
     tone: 'warn',
   }
 }
@@ -55,16 +56,14 @@ function staleBanner(status: LotStatus, now: number): Banner {
  */
 export function liveView(live: LiveState, now: number, since: number): LiveView {
   const { status, connection, error, lastMessageAt } = live
-  const lastKnown = status
-    ? 'Showing the last known numbers.'
-    : 'Numbers will appear once we reconnect.'
+  const lastKnown = t(status ? 'banner.last_known' : 'banner.no_numbers')
 
   if (connection === 'offline') {
     return {
       banner: {
         kind: 'offline',
         key: 'banner.offline',
-        title: "You're offline",
+        title: t('banner.offline'),
         detail: lastKnown,
         tone: 'bad',
       },
@@ -82,7 +81,7 @@ export function liveView(live: LiveState, now: number, since: number): LiveView 
       banner: {
         kind: 'server_unreachable',
         key: 'banner.server_unreachable',
-        title: "Can't reach the parking server",
+        title: t('banner.server_unreachable'),
         detail: lastKnown,
         tone: 'bad',
       },
@@ -97,8 +96,8 @@ export function liveView(live: LiveState, now: number, since: number): LiveView 
       banner: {
         kind: 'unavailable',
         key: 'banner.unavailable',
-        title: 'Waiting for the first camera reading',
-        detail: 'The server is up; numbers appear as soon as a camera reports.',
+        title: t('banner.unavailable'),
+        detail: t('banner.unavailable_detail'),
         tone: 'info',
       },
       loading: false,

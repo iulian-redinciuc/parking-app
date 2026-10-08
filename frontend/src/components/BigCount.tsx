@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import type { Totals } from '../api/types'
 import { useThrottled } from '../hooks/useThrottled'
 import { TONE_TEXT, formatFree, levelInfo } from '../lib/status'
@@ -10,10 +11,14 @@ export const ANNOUNCE_EVERY_MS = 30_000
 // aria-live copy is throttled so a screen reader isn't interrupted by every update. `dimmed` greys
 // the last known numbers while the connection is down.
 export default function BigCount({ total, dimmed = false }: { total: Totals; dimmed?: boolean }) {
+  const { t } = useTranslation()
   const level = levelInfo(total.level)
   const count = formatFree(total)
-  const unit = total.free === 1 ? 'free space' : 'free spaces'
-  const announced = useThrottled(`${count} ${unit}, ${level.label}`, ANNOUNCE_EVERY_MS)
+  const unit = t('count.free', { count: total.free })
+  const announced = useThrottled(
+    t('count.announce', { count, unit, level: level.label }),
+    ANNOUNCE_EVERY_MS,
+  )
   return (
     <section
       className={`flex flex-col items-center gap-1 py-8 ${dimmed ? 'dimmed' : ''}`}

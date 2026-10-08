@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import type { ZoneStatus } from '../api/types'
 import { TONE_TEXT, formatFree, isEstimated, levelInfo } from '../lib/status'
 import LevelBar from './LevelBar'
@@ -6,6 +7,7 @@ import TrendIcon from './TrendIcon'
 // One zone: name, free / capacity, trend, a bar with the level word, and a note when estimated.
 // `dimmed` greys the numbers: they're old (stale zone, or the connection is down).
 export default function ZoneCard({ zone, dimmed = false }: { zone: ZoneStatus; dimmed?: boolean }) {
+  const { t } = useTranslation()
   const level = levelInfo(zone.level)
   const nameId = `zone-${zone.id}`
   return (
@@ -23,7 +25,7 @@ export default function ZoneCard({ zone, dimmed = false }: { zone: ZoneStatus; d
           <span className="text-lg font-semibold tabular-nums">
             {formatFree(zone)}
             <span className="font-normal text-muted"> / {zone.capacity}</span>
-            <span className="sr-only"> free</span>
+            <span className="sr-only"> {t('zone.free')}</span>
           </span>
           <TrendIcon trend={zone.trend} />
         </span>
@@ -48,15 +50,13 @@ export default function ZoneCard({ zone, dimmed = false }: { zone: ZoneStatus; d
             <circle cx="12" cy="12" r="9" />
             <path d="M12 7v5l3 2" />
           </svg>
-          No fresh camera data: last known numbers
+          {t('zone.stale')}
         </p>
       )}
       {isEstimated(zone.confidence) && (
         <p className="flex items-center gap-1.5 text-sm text-muted">
           <span aria-hidden="true">ⓘ</span>
-          {zone.method === 'flow'
-            ? 'Estimated from entry/exit counts'
-            : 'Estimated: the camera view is unclear'}
+          {t(zone.method === 'flow' ? 'zone.estimated_flow' : 'zone.estimated_camera')}
         </p>
       )}
     </li>

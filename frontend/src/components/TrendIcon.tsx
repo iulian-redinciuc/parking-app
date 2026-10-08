@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import type { Trend } from '../api/types'
 import { TRENDS } from '../lib/status'
 
@@ -5,7 +6,8 @@ import { TRENDS } from '../lib/status'
 const ROTATION: Record<Trend, string> = { filling: 'rotate-45', emptying: '-rotate-45', steady: '' }
 
 export default function TrendIcon({ trend }: { trend: Trend }) {
-  const { label } = TRENDS[trend]
+  const { t, i18n } = useTranslation()
+  const label = t(TRENDS[trend].key)
   return (
     <span className="inline-flex shrink-0 text-muted" title={label}>
       <svg
@@ -20,7 +22,9 @@ export default function TrendIcon({ trend }: { trend: Trend }) {
       >
         <path d="M4 12h15M13 6l6 6-6 6" />
       </svg>
-      <span className="sr-only">Trend: {label.toLowerCase()}</span>
+      <span className="sr-only">
+        {t('trend.sr', { trend: label.toLocaleLowerCase(i18n.language) })}
+      </span>
     </span>
   )
 }

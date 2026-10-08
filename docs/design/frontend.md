@@ -8,7 +8,7 @@
 | UI | **React 19 + TypeScript** (strict) | |
 | Routing | **react-router `HashRouter`** | Works on any static host without server rewrite rules (GitHub Pages has none), so `#/stats` never 404s on reload |
 | Styling | **Tailwind CSS v4** + CSS custom properties for tokens | Light and dark |
-| i18n | **i18next + react-i18next** | `en` first; files in `src/i18n/locales/*.json` |
+| i18n | **i18next + react-i18next** | `en` first; files in `src/i18n/locales/*.json` (§7) |
 | PWA | **vite-plugin-pwa**, `strategies: 'injectManifest'` | A custom `src/sw.ts`, because we need push handlers |
 | Charts (Phase 7) | **Recharts** | Lazy-loaded with the Stats screen |
 | Tests | **Vitest + Testing Library**, **Playwright** | Playwright projects: `iPhone 13`, `Pixel 7` |
@@ -160,3 +160,12 @@ Install UX:
 Scripts: `npm run dev`, `npm run build`, `npm run preview`, `npm run test`, `npm run e2e`, `npm run lint`.
 
 Budget: initial JS ≤ 150 KB gzip (Live screen). Stats and Admin are lazy chunks.
+
+## 7. Languages (i18n)
+
+- `src/i18n/index.ts` initialises i18next once (imported by `main.tsx` and the test setup) with the locale files **bundled** and `initAsync: false`, so `t()` works on the first render and in plain helpers (`liveView`, `levelInfo`, `formatUpdatedAgo` use the exported `t`; components call `useTranslation()`).
+- **Language** = the first entry of `navigator.languages` whose primary subtag (`ro-RO` → `ro`) has a locale file, else **`en`** (also the fallback for missing keys). `<html lang>` follows it, and the live feed asks the API for zone names in it (`?lang=`, api.md §1).
+- **Languages:** only `en` until open question #9 is answered. Adding one = `locales/<lang>.json` with the same keys + one line in `RESOURCES`.
+- **Plurals** use i18next plural keys (`count.free_one` "free space" / `count.free_other` "free spaces", `banner.stale_one/_other`), called with `{ count }`. Relative times ("Updated 3 seconds ago") come from `Intl.RelativeTimeFormat` in the UI language inside the `updated.ago` key.
+- Keys are grouped by place: `app`, `connection.<state>`, `nav`, `screen`, `count`, `level.<level>`, `trend.<trend>`, `zone`, `updated`, `banner`, `loading`.
+- **Lint:** `eslint-plugin-i18next` `no-literal-string` in `jsx-only` mode on `src/**/*.tsx` (tests excluded), also for the `alt`, `aria-label`, `placeholder` and `title` attributes; the symbols `≈ ⓘ /` are allowed. A visible string literal in JSX fails `npm run lint`.

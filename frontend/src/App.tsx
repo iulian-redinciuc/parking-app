@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { HashRouter, Navigate, Route, Routes } from 'react-router'
 import BottomNav from './components/BottomNav'
 import Header from './components/Header'
@@ -7,6 +8,7 @@ import PlaceholderScreen from './screens/PlaceholderScreen'
 
 export default function App() {
   const { connection } = useLiveStatus()
+  const { t } = useTranslation()
   return (
     <HashRouter>
       <div className="flex min-h-dvh flex-col">
@@ -16,33 +18,26 @@ export default function App() {
             <Route index element={<LiveScreen />} />
             <Route
               path="alerts"
-              element={<PlaceholderScreen title="Alerts" note="Notifications are coming soon." />}
+              element={
+                <PlaceholderScreen title={t('screen.alerts')} note={t('screen.alerts_note')} />
+              }
             />
             <Route
               path="stats"
               element={
-                <PlaceholderScreen
-                  title="Stats"
-                  note="Charts of typical free spaces are coming soon."
-                />
+                <PlaceholderScreen title={t('screen.stats')} note={t('screen.stats_note')} />
               }
             />
             <Route
               path="privacy"
               element={
-                <PlaceholderScreen
-                  title="Privacy"
-                  note="What we process and store will be described here."
-                />
+                <PlaceholderScreen title={t('screen.privacy')} note={t('screen.privacy_note')} />
               }
             />
             <Route
               path="admin/*"
               element={
-                <PlaceholderScreen
-                  title="Admin"
-                  note="Camera and zone administration is coming soon."
-                />
+                <PlaceholderScreen title={t('screen.admin')} note={t('screen.admin_note')} />
               }
             />
             <Route path="*" element={<Navigate to="/" replace />} />

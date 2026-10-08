@@ -1,0 +1,70 @@
+{
+  "app": {
+    "name": "Parking"
+  },
+  "connection": {
+    "connecting": "Connecting",
+    "live": "Live",
+    "polling": "Updating",
+    "offline": "Offline",
+    "error": "No connection"
+  },
+  "nav": {
+    "label": "Main",
+    "live": "Live",
+    "alerts": "Alerts",
+    "stats": "Stats"
+  },
+  "screen": {
+    "live": "Live",
+    "alerts": "Alerts",
+    "alerts_note": "Notifications are coming soon.",
+    "stats": "Stats",
+    "stats_note": "Charts of typical free spaces are coming soon.",
+    "privacy": "Privacy",
+    "privacy_note": "What we process and store will be described here.",
+    "admin": "Admin",
+    "admin_note": "Camera and zone administration is coming soon."
+  },
+  "count": {
+    "free_one": "free space",
+    "free_other": "free spaces",
+    "announce": "{{count}} {{unit}}, {{level}}"
+  },
+  "level": {
+    "plenty": "Plenty of space",
+    "filling": "Filling up",
+    "almost_full": "Almost full",
+    "full": "Full"
+  },
+  "trend": {
+    "filling": "Getting fuller",
+    "emptying": "Emptying",
+    "steady": "Steady",
+    "sr": "Trend: {{trend}}"
+  },
+  "zone": {
+    "list": "Zones",
+    "free": "free",
+    "stale": "No fresh camera data: last known numbers",
+    "estimated_flow": "Estimated from entry/exit counts",
+    "estimated_camera": "Estimated: the camera view is unclear"
+  },
+  "updated": {
+    "just_now": "Updated just now",
+    "ago": "Updated {{ago}}"
+  },
+  "banner": {
+    "offline": "You're offline",
+    "server_unreachable": "Can't reach the parking server",
+    "last_known": "Showing the last known numbers.",
+    "no_numbers": "Numbers will appear once we reconnect.",
+    "unavailable": "Waiting for the first camera reading",
+    "unavailable_detail": "The server is up; numbers appear as soon as a camera reports.",
+    "stale_one": "Camera data is {{count}} min old",
+    "stale_other": "Camera data is {{count}} min old",
+    "stale_no_data": "No camera data yet",
+    "affected": "Affected: {{zones}}"
+  },
+  "loading": "Loading the parking status…"
+}
