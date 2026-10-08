@@ -54,7 +54,7 @@
 
 **Steps**
 1. Install uv and Python 3.12: `curl -LsSf https://astral.sh/uv/install.sh | sh && uv python install 3.12`.
-2. `cd backend && uv init --package --name parking --python 3.12`, then edit `pyproject.toml`:
+2. `cd backend && uv init --package --name parking --python 3.12`, move `src/parking/` to `parking/` (flat layout, see [architecture.md](../design/architecture.md)), then edit `pyproject.toml` (keep uv's `[build-system]` and add `[tool.uv.build-backend] module-root = ""`):
    ```toml
    [project]
    name = "parking"

@@ -18,7 +18,7 @@
 
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
-| 0 | [Foundations](docs/phases/phase-0-foundations.md) | 1 / 8 | 🟡 | 2026-10-07 | |
+| 0 | [Foundations](docs/phases/phase-0-foundations.md) | 2 / 8 | 🟡 | 2026-10-07 | |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 0 / 11 | ⬜ | | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | 0 / 10 | ⬜ | | |
@@ -34,7 +34,7 @@
 ## Phase 0: Foundations 🟡
 Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P0.1** Repo layout and `.gitignore`
-- [ ] **P0.2** Backend project (uv, Python 3.12, Typer CLI, ruff, pytest)
+- [x] **P0.2** Backend project (uv, Python 3.12, Typer CLI, ruff, pytest)
 - [ ] **P0.3** Frontend scaffold (Vite, React, TS, Tailwind, Vitest)
 - [ ] **P0.4** Config templates (`lot.example.yaml`, `lot.yaml`, `.env.example`)
 - [ ] **P0.5** CI workflow
@@ -184,6 +184,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | Production target: **the cloud or another Raspberry Pi** (exact topology chosen before Phase 4) | Owner's requirement |
 | 2026-10-08 | GitHub Pages is the **preview** frontend; production frontend hosting decided in P8.3 | Keep options open |
 | 2026-10-08 | Phase 8 became "Production deployment + hardening" (13 tasks) | Deployment to the new environment needs its own steps |
+| 2026-10-08 | Backend uses a flat layout (`backend/parking/`, not `src/`) with `uv_build` and `module-root = ""`; uv is installed per user in `~/.local/bin` | Matches the module map in architecture.md; `uv init` defaults to `src/` |
 
 ## Metrics
 
@@ -213,3 +214,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - Clarified that the Pi is **dev/test only**: added production topologies (T1/T2/T3), multi-arch images, AI runtime per machine, preview vs production frontend, and turned Phase 8 into production deployment + hardening.
 - Web app only: removed the native-app extra (97 tasks in total). Production will be the cloud or another Raspberry Pi.
 - P0.1: repo layout (`backend/`, `frontend/`, `config/`, `deploy/`, `data/`, `models/`) and `.gitignore`; checked that `data/` and `models/` contents, `out/`, `deploy/.env` and stray `.jpg` files are ignored while test-fixture `.jpg` files are not.
+- P0.2: backend project with uv + Python 3.12.15 (`backend/pyproject.toml`, `uv.lock`), Typer CLI with `--version` and empty `models`/`worker`/`db`/`push`/`admin` sub-apps; `uv sync`, `uv run parking --version`, `pytest` (2 passed) and `ruff check` all pass on the dev Pi.
