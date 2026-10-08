@@ -98,3 +98,31 @@ def test_zone_totals_clamps_free_at_zero():
     )
     assert (totals["ground"].free, totals["ground"].capacity) == (0, 1)
     assert (totals["yard"].free, totals["yard"].taken) == (0, 9)
+
+
+class ExplodingDetector:
+    def detect(self, frame):
+        raise AssertionError("appearance scoring must not run the detector")
+
+
+def test_appearance_method_never_runs_the_detector():
+    frame = np.full((200, 400, 3), (115, 135, 155), np.uint8)
+    frame[10:90, 110:190] = (20, 20, 25)  # a dark car in G02 (frame px 100..200 × 0..100)
+    cam = camera(method="appearance")
+    for det in (None, ExplodingDetector()):
+        r = analyze_frame(frame, cam, SLOT_FILE, det)
+        assert [(s.id, s.taken) for s in r.slots] == [
+            ("G01", False),
+            ("G02", True),
+            ("G03", False),
+        ]
+        assert r.detections == []
+        assert r.zone_counts == {"yard": 0}
+        assert r.timings["detect_ms"] == 0
+        assert r.inference_ms == r.timings["score_ms"] > 0
+        assert r.totals["ground"].free == 2
+
+
+def test_detector_method_needs_a_detector():
+    with pytest.raises(ValueError, match="uses the detector"):
+        analyze_frame(FRAME, camera(), SLOT_FILE, None)

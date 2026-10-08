@@ -153,6 +153,23 @@ def test_threshold_between_0_and_1(raw, threshold):
     invalid(raw, r"occupancy\.threshold")
 
 
+def test_occupancy_method_and_appearance(raw):
+    occ = LotConfig.model_validate(raw).camera("cam-ground").occupancy
+    assert occ.method == "detector"
+    assert occ.appearance.k_mad == 2.0
+    raw["cameras"][0]["occupancy"]["method"] = "magic"
+    invalid(raw, r"occupancy\.method")
+    raw["cameras"][0]["occupancy"]["method"] = "appearance"
+    raw["cameras"][0]["occupancy"]["appearance"]["shadow_l_range"] = [0.9, 0.2]
+    invalid(raw, "shadow_l_range")
+
+
+def test_committed_ground_camera_uses_appearance(env):
+    assert load_config(REPO / "config" / "lot.yaml").camera("cam-ground").occupancy.method == (
+        "appearance"
+    )
+
+
 def test_consistent_readings_at_least_1(raw):
     raw["cameras"][0]["smoothing"]["consistent_readings"] = 0
     invalid(raw, r"smoothing\.consistent_readings")

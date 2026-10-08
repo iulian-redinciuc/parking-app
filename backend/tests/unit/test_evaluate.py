@@ -267,3 +267,25 @@ def test_load_labels(tmp_path):
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="tken"):
         load_labels(path)
+
+
+def test_appearance_frames_score_once_and_rethreshold(tmp_path):
+    from parking.config import AppearanceCfg
+    from parking.vision import evaluate as ev
+
+    rect = [(0, 0), (50, 0), (50, 50), (0, 50)]
+    right = [(50, 0), (100, 0), (100, 50), (50, 50)]
+    sf = SlotFile(
+        version=1,
+        camera_id="c",
+        image_size=(100, 50),
+        slots=[Slot(id="A", zone="z", polygon=rect), Slot(id="B", zone="z", polygon=right)],
+    )
+    img = np.full((50, 100, 3), (115, 135, 155), np.uint8)
+    img[10:40, 60:90] = (20, 20, 25)  # dark car in B
+    [f] = ev.appearance_frames([tmp_path / "a.jpg"], lambda p: img, sf, AppearanceCfg())
+    assert f.detections == [] and f.frame_size == (100, 50)
+    assert [r.taken for r in ev.score_frame(f, sf, "mask", 0.3)] == [False, True]
+    assert [r.taken for r in ev.score_frame(f, sf, "mask", 0.999)] == [False, False]
+    with pytest.raises(ValueError, match="can't read image"):
+        ev.appearance_frames([tmp_path / "b.jpg"], lambda p: None, sf, AppearanceCfg())

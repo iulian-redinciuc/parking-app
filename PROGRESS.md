@@ -7,7 +7,7 @@
 >
 > The [agent loop](tools/agent-loop/README.md) works through the unticked tasks in order. A task marked `⏸️` is skipped until its need is met: **delete the `⏸️ ` from its line to unblock it** (editing on GitHub works too).
 
-**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 1: P1.4 top-down scoring for the sample photo, then P1.9–P1.11.
+**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 1: P1.9–P1.11.
 **Build order:** 0 → 1 → 2 → 3 (MVP) → 6 → 7 (no hardware needed) → 4 → 5 → 8 (need the real cameras / production machines) → 9.
 **Last updated:** 2026-10-08
 
@@ -21,7 +21,7 @@
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) (MVP) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
-| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 7 / 11 | 🟡 | 2026-10-08 | |
+| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 8 / 11 | 🟡 | 2026-10-08 | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) (MVP) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
@@ -48,7 +48,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P1.1** Sample data layout
 - [x] **P1.2** Config loader
 - [x] **P1.3** Slot editor (slots / lines / label modes)
-- [ ] **P1.4** Detector module + model export, plus top-down appearance scoring for the MVP (detector part done; the sample is shot straight down, see the guide)
+- [x] **P1.4** Detector module + model export, plus top-down appearance scoring for the MVP (detector part done; the sample is shot straight down, see the guide)
 - [x] **P1.5** Geometry + occupancy scoring
 - [x] **P1.6** Annotated output image
 - [x] **P1.7** `parking analyze`
@@ -202,6 +202,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | P1.7: `analyze_frame` takes an optional `capacities` (zone → capacity) for the totals; the JSON adds `totals` and `timings` to the observation; `parking analyze` also has `--fake-detector` (sidecar `<image>.json`); paths in lot.yaml resolve against the repo root, and CLI tools read `${VAR}` from `deploy/.env.example` < `deploy/.env` < environment (`cli_env`). Recorded in vision.md §2 and config.md loader rules | `lot.yaml` needs `LOT_LAT`/`TZ`/`CAM_RAMP_RTSP_URL` even for offline tools, and the dev checkout has no `deploy/.env`; the guide didn't say where count-zone capacities come from |
 | 2026-10-08 | **MVP defined: Phases 0–3** (live free-space count on the phone from the sample photo replayed as a simulated camera). The sample's straight-down view is **not** the final camera. Open questions without answers use the recorded working assumptions; nothing waits on Iulian for the MVP | Owner: "work with what you have", no more questions |
 | 2026-10-08 | **Top-down MVP scoring:** `occupancy.method: appearance` (each space scored by how much it differs from empty pavement, vision.md §2.1) for `cam-ground`; the YOLO detector stays the default for angled cameras; the trained per-slot classifier (vision.md §9) replaces the heuristic once the real camera gives enough photos. P1.4 unblocked with this scope | COCO detectors don't see cars from straight above (0–1 of 5); one photo is too little to train a model; marked spaces on uniform pavers make a no-training heuristic workable for the MVP |
+| 2026-10-08 | P1.4 appearance scorer: Lab ΔE from the pooled median of all slot crops; defaults `k_mad 2.0` (spec draft said 3.0) and a new `shadow_chroma_max: 3` (a pixel is shadow only if `\|ab − r·ab_pavement\| ≤ 3` with `r = L/L_pavement` in `shadow_l_range`), measured on `ground-01.jpg`: free ≤ 0.01, taken ≥ 0.42, threshold stays 0.30 (0.05–0.40 all 17/17). `AppearanceParams` is `config.AppearanceCfg`; `reference_empty` is loaded by the CLI and passed as `reference`. `analyze`/`evaluate` got `--method`; `evaluate --images` also takes one image; with no detector, `inference_ms` reports the scoring time. Recorded in vision.md §2.1/§10 and config.md §1 | A looser chroma test (6) let the grey car pass as shadow (0.16); `k_mad 3` scored it 0.16–0.31; the Done-when passes a single image; a banner reading "0 ms" was misleading |
 | 2026-10-08 | **Build order:** MVP (0–3) → 6 → 7 → 4 → 5 → 8 → 9; PROGRESS.md sections reordered (the loop works top to bottom) | Phases 6–7 need no hardware; 4, 5, 8 need the real cameras / production machines |
 | 2026-10-08 | Agent loop: technical and design choices are made by the agent and recorded here, never sent to Iulian as a question; tasks are only blocked for physical things (hardware, installation, accounts, payments) | Owner's requirement |
 | 2026-10-08 | `data/IMG_8093.jpeg` (a lot photo uploaded on GitHub, so public) stays; the owner is fine with it. Agents still never commit images | Owner's decision |
@@ -211,6 +212,8 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | Date | Phase | Metric | Value | Target | Notes |
 |------|-------|--------|-------|--------|-------|
 | 2026-10-08 | 1 | Slot accuracy (samples) | 70.6% (24/34; free-precision 70.6%, count error 5) | ≥ 97% | dev Pi, `yolo11n-seg` NCNN @ 1280, mask, 0.30 (best of the 0.1–0.6 sweep, all tie); 2 photos of the same scene. 0 cars detected, so every taken space is said free (P1.4 blocker) |
+| 2026-10-08 | 1 | Slot accuracy (`ground-01.jpg`, appearance) | **100% (17/17)**; free-precision 100%, count error 0 | ≥ 97% | `method: appearance`, threshold 0.30; any threshold 0.05–0.40 gives 17/17. One photo only (`ground-02.jpg` doesn't line up with the slot file, P4.6) |
+| 2026-10-08 | 1 | Scoring time per image (dev Pi, appearance) | ~0.3 s | < 2 s | 1932×2576 frame, 17 slots, no model; full benchmark in P1.10 |
 | | 1 | Inference time per image (dev Pi, chosen settings) | | < 2 s | worst-case reference |
 | | 4 | Slot accuracy (validation set) | | ≥ 97% | |
 | | 4 | Count error ≤ 1 (% of frames) | | ≥ 95% | |
@@ -250,3 +253,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - P1.7: `parking/vision/pipeline.py` (`analyze_frame` → `AnalysisResult` with detections, slot results, zone counts, totals, timings; `to_observation()`) + `parking analyze` (config overrides, `--fake-detector`, JSON + annotated PNG). `uv run parking analyze --image data/samples/ground-01.jpg --camera cam-ground` prints `ground: 17 free / 17 (0 taken) in 1.9 s` and writes both files; 0 taken because the COCO model still sees no top-down cars (P1.4). New `test_pipeline.py` (5, 100% branch coverage), CLI tests with the fake detector (6), `cli_env` tests (3); pytest (97 passed incl. slow) and ruff pass.
 - P1.8: `parking/vision/evaluate.py` (per-image comparison with unsure excluded, overall + per-condition summary, free-precision/recall, count error, sweep, best threshold, detection cache `out/cache/<image>.<model>.<imgsz>.json`), `LabelFile`/`load_labels`, `highlight_slots` and `parking evaluate`. Labelled `ground-01.jpg` and `ground-02.jpg` by eye (taken G05 G06 G09 G12 G14). `parking evaluate --images data/samples --labels data/labels/cam-ground.json --camera cam-ground --sweep 0.1:0.6:0.05` prints slot accuracy 70.6%, free-precision 70.6%, count error 5.00, best threshold 0.30 (second run: 2 from cache, no model load), and writes the report + mistake PNGs to `out/eval/`. The 5 misses are the top-down cars COCO YOLO doesn't see (P1.4). New `test_evaluate.py` (16) + 10 CLI tests, 100% branch coverage of `evaluate.py`; pytest (123 passed) and ruff pass.
 - Defined the MVP (Phases 0–3) and the build order (0–3, 6, 7, 4, 5, 8, 9); P1.4 unblocked with top-down appearance scoring; labels checked; nothing waits on Iulian for the MVP; agents now decide technical choices themselves.
+- P1.4: top-down appearance scoring `parking/vision/appearance.py` (warped slot crops, Lab ΔE vs the pooled pavement median, shadow suppression, open/close + largest blob), `occupancy.method: detector | appearance` + `occupancy.appearance` params, `cam-ground` uses `appearance`; `analyze_frame` skips the detector for it; `analyze`/`evaluate` got `--method`, evaluate needs no cache for appearance and takes a single image. `parking evaluate --images data/samples/ground-01.jpg …` gives 17/17 (5 taken, 12 free), `parking analyze` prints `ground: 12 free / 17 (5 taken)` in 0.3 s and the PNG marks G05 G06 G09 G12 G14. New `test_appearance.py` (9, synthetic pavement with black/blue/grey cars, shadow, moss, overhang, reference image) + pipeline/CLI/config/evaluate tests; pytest 141 passed (+1 slow), ruff clean, 100% branch coverage of `appearance.py`/`pipeline.py`/`evaluate.py`.

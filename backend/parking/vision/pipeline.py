@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from parking.config import Camera, SlotFile
+from parking.vision.appearance import score_slots_appearance
 from parking.vision.detector import Detection, Detector
 from parking.vision.occupancy import SlotResult, count_in_zones, score_slots
 
@@ -38,7 +39,8 @@ class AnalysisResult:
 
     @property
     def inference_ms(self) -> float:
-        return self.timings.get("detect_ms", 0.0)
+        """The detector's time; with appearance scoring (no detector) the scoring time."""
+        return self.timings.get("detect_ms") or self.timings.get("score_ms", 0.0)
 
     def banner_totals(self) -> dict[str, tuple[int, int]]:
         """`{zone: (free, capacity)}` as `annotate_occupancy` wants it."""
@@ -94,11 +96,16 @@ def analyze_frame(
     frame: np.ndarray,
     camera_cfg: Camera,
     slot_file: SlotFile,
-    detector: Detector,
+    detector: Detector | None,
     capacities: Mapping[str, int] | None = None,
+    reference: np.ndarray | None = None,
 ) -> AnalysisResult:
-    """Detect vehicles, score the slots, count the count zones and total each zone.
+    """Score the slots, count the count zones and total each zone.
 
+    `occupancy.method: detector` detects vehicles and scores slots by overlap;
+    `appearance` (straight-down views, vision.md §2.1) never touches `detector` (it may be
+    None), finds no vehicles and scores slots by how unlike pavement they look, using
+    `reference` (the empty lot) if given.
     `capacities` (zone -> capacity, e.g. from `LotConfig.zone_capacity`) is optional; without
     it slot zones use their number of slots and count zones get no total.
     """
@@ -108,16 +115,31 @@ def analyze_frame(
     occ = camera_cfg.occupancy
 
     t0 = time.perf_counter()
-    detections = detector.detect(frame)
-    t1 = time.perf_counter()
-    slots = score_slots(
-        detections,
-        slot_file.slots,
-        frame_size,
-        mode=occ.mode,
-        threshold=occ.threshold,
-        image_size=slot_file.image_size,
-    )
+    if occ.method == "appearance":
+        detections: list[Detection] = []
+        t1 = t0  # no detector: detect_ms = 0
+        slots = score_slots_appearance(
+            frame,
+            slot_file.slots,
+            frame_size,
+            slot_file.image_size,
+            occ.threshold,
+            occ.appearance,
+            reference,
+        )
+    else:
+        if detector is None:
+            raise ValueError(f"camera '{camera_cfg.id}' uses the detector but none was given")
+        detections = detector.detect(frame)
+        t1 = time.perf_counter()
+        slots = score_slots(
+            detections,
+            slot_file.slots,
+            frame_size,
+            mode=occ.mode,
+            threshold=occ.threshold,
+            image_size=slot_file.image_size,
+        )
     counts = count_in_zones(detections, slot_file.count_zones, frame_size, slot_file.image_size)
     t2 = time.perf_counter()
 

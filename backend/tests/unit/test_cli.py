@@ -211,3 +211,54 @@ def test_evaluate_rejects_bad_options(tmp_path, monkeypatch, extra):
     _write_labels(tmp_path, ["G01"])
     args = ["evaluate", "--images", ".", "--camera", "cam-ground", "--fake-detector", *extra]
     assert runner.invoke(app, args).exit_code == 2
+
+
+def test_analyze_appearance_loads_no_model(tmp_path, monkeypatch):
+    import json
+
+    _write_lot(tmp_path, monkeypatch)  # models/none doesn't exist
+    args = ["analyze", "--image", "img.jpg", "--camera", "cam-ground", "--method", "appearance"]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("ground: 2 free / 2 (0 taken)")
+    obs = json.loads((tmp_path / "out" / "analyze" / "img.json").read_text())
+    assert obs["detections"] == 0
+
+
+def test_analyze_appearance_reference_errors(tmp_path, monkeypatch):
+    _write_lot(tmp_path, monkeypatch)
+    lot = tmp_path / "config" / "lot.yaml"
+    lot.write_text(
+        lot.read_text()
+        + "    occupancy: {method: appearance, appearance: {reference_empty: nope.jpg}}\n"
+    )
+    result = runner.invoke(app, ["analyze", "--image", "img.jpg", "--camera", "cam-ground"])
+    assert result.exit_code == 1
+    assert "can't read reference_empty image" in result.output
+    # a readable reference works
+    (tmp_path / "nope.jpg").write_bytes((tmp_path / "img.jpg").read_bytes())
+    result = runner.invoke(app, ["analyze", "--image", "img.jpg", "--camera", "cam-ground"])
+    assert result.exit_code == 0, result.output
+
+
+def test_evaluate_appearance_single_image(tmp_path, monkeypatch):
+    import json
+
+    _write_lot(tmp_path, monkeypatch)
+    _write_labels(tmp_path, [])
+    args = ["evaluate", "--images", "img.jpg", "--camera", "cam-ground", "--method", "appearance"]
+    result = runner.invoke(app, [*args, "--sweep", "0.1:0.5:0.2"])
+    assert result.exit_code == 0, result.output
+    assert "appearance scoring (no detector)" in result.output
+    assert "slot accuracy 100.0% (2/2)" in result.output
+    assert "best threshold (appearance)" in result.output
+    assert not (tmp_path / "out" / "cache").exists()
+    [report] = (tmp_path / "out" / "eval").glob("cam-ground-*.json")
+    assert set(json.loads(report.read_text())["modes"]) == {"appearance"}
+
+
+def test_bad_method_rejected(tmp_path, monkeypatch):
+    _write_lot(tmp_path, monkeypatch)
+    for cmd in (["analyze", "--image", "img.jpg"], ["evaluate"]):
+        result = runner.invoke(app, [*cmd, "--camera", "cam-ground", "--method", "x"])
+        assert result.exit_code == 2

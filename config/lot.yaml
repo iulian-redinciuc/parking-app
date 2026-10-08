@@ -46,8 +46,20 @@ cameras:
       classes: [car, motorcycle, bus, truck]
       use_masks: true
     occupancy:
-      threshold: 0.30              # overlap ratio above which a slot is "taken"
-      mode: mask                   # mask | box_bottom
+      # The sample photo is shot straight down; COCO detectors don't see cars from above
+      # (0-1 of 5), so this camera scores spaces by how unlike empty pavement they look
+      # (vision.md §2.1). Switch back to `detector` for an angled camera.
+      method: appearance           # detector | appearance
+      threshold: 0.30              # score above which a slot is "taken"
+      mode: mask                   # mask | box_bottom (detector only)
+      appearance:                  # defaults tuned on ground-01.jpg (P1.4)
+        inset: 0.12
+        k_mad: 2.0
+        min_delta_e: 12
+        shadow_l_range: [0.35, 0.9]
+        shadow_chroma_max: 3
+        morph_frac: 0.06
+        reference_empty: null      # optional path to an image of the empty lot
     smoothing:
       consistent_readings: 3
     health:

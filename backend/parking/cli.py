@@ -135,6 +135,24 @@ def _yolo_detector(det_cfg, root: Path):
     return YoloDetector(str(model), det_cfg.imgsz, det_cfg.conf, det_cfg.classes, det_cfg.use_masks)
 
 
+def _reference(occ, root: Path):
+    """The empty-lot image for appearance scoring (`occupancy.appearance.reference_empty`)."""
+    if occ.method != "appearance" or occ.appearance.reference_empty is None:
+        return None
+    import cv2
+
+    path = _resolve(occ.appearance.reference_empty, root)
+    ref = cv2.imread(str(path))
+    if ref is None:
+        _fail(f"can't read reference_empty image {path}")
+    return ref
+
+
+def _check_method(method: str | None) -> None:
+    if method is not None and method not in ("detector", "appearance"):
+        raise typer.BadParameter("must be detector or appearance", param_hint="--method")
+
+
 @app.command()
 def analyze(
     image: Annotated[Path, typer.Option(help="Image to analyse.")],
@@ -150,6 +168,9 @@ def analyze(
         str | None, typer.Option(help="Override occupancy.mode: mask | box_bottom.")
     ] = (None),
     imgsz: Annotated[int | None, typer.Option(help="Override detector.imgsz.")] = None,
+    method: Annotated[
+        str | None, typer.Option(help="Override occupancy.method: detector | appearance.")
+    ] = None,
     fake_detector: Annotated[
         bool,
         typer.Option(
@@ -171,13 +192,13 @@ def analyze(
         raise typer.BadParameter("must be mask or box_bottom", param_hint="--mode")
     if imgsz is not None and imgsz <= 0:
         raise typer.BadParameter("must be positive", param_hint="--imgsz")
+    _check_method(method)
 
     lot, cam, root = _occupancy_camera(config, camera, "analyze")
 
     # CLI flags override the config for experiments
-    occ = cam.occupancy.model_copy(
-        update={k: v for k, v in {"threshold": threshold, "mode": mode}.items() if v is not None}
-    )
+    overrides = {"threshold": threshold, "mode": mode, "method": method}
+    occ = cam.occupancy.model_copy(update={k: v for k, v in overrides.items() if v is not None})
     det_cfg = cam.detector.model_copy(update={"imgsz": imgsz} if imgsz else {})
     cam = cam.model_copy(update={"occupancy": occ, "detector": det_cfg})
 
@@ -189,7 +210,10 @@ def analyze(
     if frame is None:
         _fail(f"can't read image {image}")
 
-    if _fake_detector_on(fake_detector):
+    detector = None
+    if occ.method == "appearance":
+        pass  # no model: vision.md §2.1
+    elif _fake_detector_on(fake_detector):
         from parking.vision.detector import FakeDetector
 
         sidecar = image.with_suffix(".json")
@@ -199,7 +223,7 @@ def analyze(
     else:
         detector = _yolo_detector(det_cfg, root)
 
-    result = analyze_frame(frame, cam, slot_file, detector, capacities)
+    result = analyze_frame(frame, cam, slot_file, detector, capacities, _reference(occ, root))
     png = annotate_occupancy(
         frame,
         slot_file.slots,
@@ -225,7 +249,9 @@ def analyze(
 @app.command()
 def evaluate(
     camera: Annotated[str, typer.Option(help="Camera id in the config, e.g. cam-ground.")],
-    images: Annotated[Path, typer.Option(help="Folder of labelled images.")] = Path("data/samples"),
+    images: Annotated[Path, typer.Option(help="Folder of labelled images, or one image.")] = Path(
+        "data/samples"
+    ),
     labels: Annotated[
         Path | None, typer.Option(help="Labels file (default data/labels/<camera>.json).")
     ] = None,
@@ -240,6 +266,9 @@ def evaluate(
         float | None, typer.Option(help="Override occupancy.threshold (0..1).")
     ] = None,
     imgsz: Annotated[int | None, typer.Option(help="Override detector.imgsz.")] = None,
+    method: Annotated[
+        str | None, typer.Option(help="Override occupancy.method: detector | appearance.")
+    ] = None,
     out: Annotated[Path, typer.Option(help="Folder for the report and mistake images.")] = Path(
         "out/eval"
     ),
@@ -276,11 +305,17 @@ def evaluate(
         thresholds = ev.parse_sweep(sweep) if sweep else []
     except ValueError as e:
         raise typer.BadParameter(str(e), param_hint="--sweep") from None
+    _check_method(method)
 
     lot, cam, root = _occupancy_camera(config, camera, "evaluate")
+    occ = cam.occupancy.model_copy(update={"method": method} if method else {})
+    appearance = occ.method == "appearance"
     det_cfg = cam.detector.model_copy(update={"imgsz": imgsz} if imgsz else {})
-    threshold = threshold if threshold is not None else cam.occupancy.threshold
-    modes = ["mask", "box_bottom"] if mode == "both" else [mode or cam.occupancy.mode]
+    threshold = threshold if threshold is not None else occ.threshold
+    if appearance:
+        modes = ["appearance"]  # `mode` only applies to the detector
+    else:
+        modes = ["mask", "box_bottom"] if mode == "both" else [mode or occ.mode]
     slot_file = _slot_file(cam, root)
 
     labels_path = _resolve(labels or Path(f"data/labels/{camera}.json"), root)
@@ -293,12 +328,16 @@ def evaluate(
         _fail(f"labels {labels_path} are for camera '{label_file.camera_id}', not '{camera}'")
 
     folder = _resolve(images, root)
-    if not folder.is_dir():
+    single = folder.is_file()
+    if single:
+        found, folder = [folder], folder.parent
+    elif folder.is_dir():
+        found = ev.list_images(folder)
+    else:
         _fail(f"image folder {folder} not found")
-    found = ev.list_images(folder)
     paths = [p for p in found if p.name in label_file.images]
     skipped = [p.name for p in found if p.name not in label_file.images]
-    missing = sorted(set(label_file.images) - {p.name for p in found})
+    missing = [] if single else sorted(set(label_file.images) - {p.name for p in found})
     if skipped:
         typer.echo(f"not labelled, skipped: {', '.join(skipped)}")
     if missing:
@@ -306,8 +345,20 @@ def evaluate(
     if not paths:
         _fail(f"no labelled images in {folder}")
 
-    fake = _fake_detector_on(fake_detector)
-    if fake:
+    fake = not appearance and _fake_detector_on(fake_detector)
+    if appearance:
+        try:
+            frames = ev.appearance_frames(
+                paths,
+                lambda p: cv2.imread(str(p)),
+                slot_file,
+                occ.appearance,
+                _reference(occ, root),
+            )
+        except ValueError as e:
+            _fail(str(e))
+        ran = len(frames)
+    elif fake:
         frames = []
         for p in paths:
             frame = cv2.imread(str(p))
@@ -337,10 +388,14 @@ def evaluate(
             )
         except ValueError as e:
             _fail(str(e))
-    source = "fake detector" if fake else f"{Path(det_cfg.model).name} @ {det_cfg.imgsz}"
-    typer.echo(
-        f"{len(frames)} image(s), {source}, {ran} detected, {len(frames) - ran} from cache\n"
-    )
+    if appearance:
+        source = "appearance scoring"
+        typer.echo(f"{len(frames)} image(s), {source} (no detector)\n")
+    else:
+        source = "fake detector" if fake else f"{Path(det_cfg.model).name} @ {det_cfg.imgsz}"
+        typer.echo(
+            f"{len(frames)} image(s), {source}, {ran} detected, {len(frames) - ran} from cache\n"
+        )
 
     out.mkdir(parents=True, exist_ok=True)
     report: dict = {

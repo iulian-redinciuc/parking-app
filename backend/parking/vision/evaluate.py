@@ -2,7 +2,9 @@
 
 "Positive" is **free**: saying free when a slot is taken sends someone to a full lot, so
 free-precision is the number to watch. Slots labelled `unsure` are left out of every metric.
-Detections are cached per image so a threshold sweep only reruns the scoring.
+Detections are cached per image so a threshold sweep only reruns the scoring. With
+`occupancy.method: appearance` there are no detections: each image's slot scores are
+computed once and a sweep only re-thresholds them (no cache needed).
 """
 
 from __future__ import annotations
@@ -16,7 +18,8 @@ from typing import Any
 
 import numpy as np
 
-from parking.config import ImageLabels, LabelFile, SlotFile
+from parking.config import AppearanceCfg, ImageLabels, LabelFile, SlotFile
+from parking.vision.appearance import score_slots_appearance
 from parking.vision.detector import Detection, Detector, FakeDetector
 from parking.vision.occupancy import Mode, Size, SlotResult, score_slots
 
@@ -170,14 +173,21 @@ def parse_sweep(spec: str) -> list[float]:
 
 @dataclass(frozen=True)
 class Frame:
-    """One labelled image's cached detections."""
+    """One labelled image's cached detections, or its appearance scores (slot file order)."""
 
     image: str
     frame_size: Size
     detections: list[Detection]
+    scores: tuple[float, ...] | None = None
 
 
 def score_frame(f: Frame, slot_file: SlotFile, mode: Mode, threshold: float) -> list[SlotResult]:
+    """Slot results at `threshold`: re-thresholded appearance scores, else detection overlap."""
+    if f.scores is not None:
+        return [
+            SlotResult(id=s.id, score=sc, taken=sc >= threshold)
+            for s, sc in zip(slot_file.slots, f.scores, strict=True)
+        ]
     return score_slots(
         f.detections, slot_file.slots, f.frame_size, mode, threshold, slot_file.image_size
     )
@@ -296,6 +306,27 @@ def detect_frames(
                 save_detections(path, frame, key)
         frames.append(frame)
     return frames, ran
+
+
+def appearance_frames(
+    images: Sequence[Path],
+    read: Callable[[Path], np.ndarray | None],
+    slot_file: SlotFile,
+    params: AppearanceCfg,
+    reference: np.ndarray | None = None,
+) -> list[Frame]:
+    """Appearance scores for every image (vision.md §2.1); no detector, no cache."""
+    frames = []
+    for img in images:
+        pixels = read(img)
+        if pixels is None:
+            raise ValueError(f"can't read image {img}")
+        h, w = pixels.shape[:2]
+        results = score_slots_appearance(
+            pixels, slot_file.slots, (w, h), slot_file.image_size, 0.5, params, reference
+        )
+        frames.append(Frame(img.name, (w, h), [], tuple(r.score for r in results)))
+    return frames
 
 
 # --- report ---
