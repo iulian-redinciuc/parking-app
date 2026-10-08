@@ -32,7 +32,7 @@
 | `push/rules.py` | each send/skip rule in [notifications.md §4–5](notifications.md#4-tier-2-im-on-my-way-server-rules-pushrulespy) with a fake clock; quiet hours across midnight; timezones |
 | API routes | status 503 before data; SSE sends current state first then changes; admin auth required; CORS headers; rate limits |
 
-Use `core/clock.py` (`Clock` protocol with `now()`) everywhere time matters, so tests never `sleep`.
+Use `core/clock.py` (`Clock` protocol with `now()` returning aware UTC; `SystemClock` in production, `FakeClock` with `advance()`/`set()` in tests) everywhere time matters, so tests never `sleep`.
 
 ## 3. Fixtures (public repo safe)
 

@@ -112,7 +112,9 @@ class SlotSmoother:
 ```
 
 - First reading after start-up sets the state directly. No waiting, so a restart shows numbers immediately.
-- `CountSmoother` (count zones): the median of the last `k` counts.
+- `restore(states: dict[str, bool])` seeds smoothed states at start-up (from the DB); pending flips are dropped, and a restored slot then needs `k` contrary readings like any other. `update_many(readings)` smooths a whole observation; `state(slot_id)` / `states` read the current values.
+- `CountSmoother` (count zones): the median of the last `k` counts. While the window holds fewer than `k` readings (or an even number), `median_low` is used, so the result is always a count that was really read and the first reading shows directly. It also has `restore(counts)` (seeds each window with one count) and `value(zone)`.
+- `k` comes from the camera's `smoothing.consistent_readings` (config.md §1).
 - With `sample_every_s: 5` and `k = 3`, a real change appears after ~10–15 s, and a one-frame glitch (person walking past, headlight flash) never shows.
 
 ## 4. Bootstrapping slots (`parking bootstrap-slots`) (`parking/vision/bootstrap.py`)
