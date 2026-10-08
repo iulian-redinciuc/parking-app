@@ -314,9 +314,7 @@ class StateStore:
             zones.append(
                 ZoneStatus(
                     id=zone.id,
-                    name=zone.name.get(lang)
-                    or zone.name.get("en")
-                    or next(iter(zone.name.values())),
+                    name=zone.display_name(lang),
                     method=zone.method,
                     capacity=self.capacity[zone.id],
                     occupied=view.occupied,

@@ -2,13 +2,15 @@
 
 Each client gets its own `asyncio.Queue(maxsize=10)`. A full queue drops its oldest event, so
 one slow phone never blocks the others or the ingest path. The status is serialised once per
-publish and every event carries a monotonic `id`.
+publish and every event carries a monotonic `id`. Clients asking for another language get
+the zone names swapped (`render`), serialised once per event and language.
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from parking.messages import LotStatus
 
@@ -21,6 +23,7 @@ RETRY_MS = 3000
 class StatusEvent:
     id: int
     data: str  # LotStatus JSON
+    status: LotStatus = field(repr=False, compare=False)
 
 
 class Broadcaster:
@@ -31,6 +34,7 @@ class Broadcaster:
         self.published = 0
         self.dropped = 0  # events dropped from full client queues
         self._queues: set[asyncio.Queue[StatusEvent]] = set()
+        self._rendered: dict[str, tuple[int, str]] = {}  # lang -> (event id, JSON)
 
     @property
     def clients(self) -> int:
@@ -52,10 +56,23 @@ class Broadcaster:
     def publish(self, status: LotStatus) -> None:
         """Remember `status` as the latest and queue it for every client (never blocks)."""
         self.published += 1
-        event = StatusEvent(self.published, status.model_dump_json())
+        event = StatusEvent(self.published, status.model_dump_json(), status)
         self.latest = event
         for queue in self._queues:
             if queue.full():
                 queue.get_nowait()
                 self.dropped += 1
             queue.put_nowait(event)
+
+    def render(self, event: StatusEvent, lang: str, names: Mapping[str, str]) -> str:
+        """`event`'s JSON with the zone names in `lang` (`names`: zone id -> name)."""
+        zones = event.status.zones
+        if all(names.get(z.id, z.name) == z.name for z in zones):
+            return event.data
+        cached = self._rendered.get(lang)
+        if cached is not None and cached[0] == event.id:
+            return cached[1]
+        renamed = [z.model_copy(update={"name": names.get(z.id, z.name)}) for z in zones]
+        data = event.status.model_copy(update={"zones": renamed}).model_dump_json()
+        self._rendered[lang] = (event.id, data)
+        return data

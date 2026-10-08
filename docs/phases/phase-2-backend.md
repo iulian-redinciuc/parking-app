@@ -123,7 +123,7 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
 **Files:** `parking/api/app.py`, `parking/api/deps.py`, `parking/api/routes/public.py`, `parking/cli.py` (`api` command)
 
 **Steps**
-1. `create_app(settings)`: routers, CORS from `CORS_ORIGINS`, the [error format](../design/api.md#error-format) via exception handlers, slowapi limits, gzip middleware (excluding SSE).
+1. `create_app(settings)`: routers, CORS from `CORS_ORIGINS`, the [error format](../design/api.md#error-format) via exception handlers, rate limits (the `limits` library, see [api.md §7](../design/api.md#7-cross-cutting)), gzip middleware (excluding SSE).
 2. `/healthz`, `/api/lot` (location from settings), `/api/status` (503 `unavailable` until the first observation, unless restored from the DB).
 3. `?lang=` / `Accept-Language` resolution for zone names.
 4. `parking api --host --port --reload`.

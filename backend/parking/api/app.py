@@ -2,8 +2,11 @@
 
 Start-up: `db upgrade`, load lot.yaml and the slot files, restore the `StateStore` from the
 DB (stale until fresh data, data-model.md §2) and start the 1 s `tick()` task. Every new
-status goes to the SSE `Broadcaster` (`/api/stream`). CORS, rate limits and the other public
-`/api/*` routes come with P2.9.
+status goes to the SSE `Broadcaster` (`/api/stream`).
+
+Around the routes (api.md §7): CORS for `CORS_ORIGINS` only, gzip for responses over 1 KB
+(Starlette never compresses `text/event-stream`), every error as `{"error": {code, message}}`
+(api.md §1), per-IP rate limits, and `/docs` only when `LOG_LEVEL=DEBUG`.
 """
 
 from __future__ import annotations
@@ -11,15 +14,20 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import anyio
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from parking import __version__
-from parking.api.deps import ApiError, Runtime
+from parking.api.deps import ApiError, RateLimiter, Runtime
 from parking.api.ingest import Ingestor
 from parking.api.routes import internal, public
 from parking.api.sse import Broadcaster
@@ -30,6 +38,22 @@ from parking.db.engine import default_url, make_engine, upgrade
 log = logging.getLogger(__name__)
 
 TICK_S = 1.0
+GZIP_MIN_BYTES = 1000
+CORS_METHODS = ["GET", "POST", "PATCH", "PUT", "DELETE"]
+CORS_HEADERS = ["Content-Type", "Authorization"]
+
+# HTTP status -> error code (api.md §1 error format)
+ERROR_CODES = {
+    400: "bad_request",
+    401: "unauthorized",
+    403: "forbidden",
+    404: "not_found",
+    405: "method_not_allowed",
+    409: "conflict",
+    422: "bad_request",
+    429: "rate_limited",
+    503: "unavailable",
+}
 
 
 def find_config(path: Path) -> Path:
@@ -106,15 +130,70 @@ def create_app(
             app.state.runtime = None
             engine.dispose()
 
-    app = FastAPI(title="Parking API", version=__version__, lifespan=lifespan)
-
-    @app.exception_handler(ApiError)
-    async def api_error(_request: Request, exc: ApiError) -> JSONResponse:
-        body: dict = {"code": exc.code, "message": exc.message}
-        if exc.details is not None:
-            body["details"] = exc.details
-        return JSONResponse({"error": body}, status_code=exc.status)
-
+    debug = settings.log_level.upper() == "DEBUG"
+    app = FastAPI(
+        title="Parking API",
+        version=__version__,
+        lifespan=lifespan,
+        docs_url="/docs" if debug else None,
+        redoc_url=None,
+        openapi_url="/openapi.json" if debug else None,
+    )
+    app.state.rate_limiter = RateLimiter()
+    _add_error_handlers(app)
+    app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_BYTES)
+    if settings.cors_origin_list:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origin_list,
+            allow_methods=CORS_METHODS,
+            allow_headers=CORS_HEADERS,
+        )
     app.include_router(public.router)
     app.include_router(internal.router)
     return app
+
+
+def _error(status: int, code: str, message: str, details=None, headers=None) -> JSONResponse:
+    body: dict = {"code": code, "message": message}
+    if details is not None:
+        body["details"] = details
+    return JSONResponse({"error": body}, status_code=status, headers=headers)
+
+
+def _add_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(ApiError)
+    async def api_error(_request: Request, exc: ApiError) -> JSONResponse:
+        return _error(exc.status, exc.code, exc.message, exc.details, exc.headers)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        code = ERROR_CODES.get(exc.status_code, "error")
+        message = exc.detail if isinstance(exc.detail, str) else code
+        return _error(exc.status_code, code, message, headers=exc.headers)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        details = [
+            {k: v for k, v in err.items() if k in ("type", "loc", "msg")} for err in exc.errors()
+        ]
+        first = details[0] if details else {}
+        where = ".".join(str(p) for p in first.get("loc", ())) or "request"
+        return _error(422, "bad_request", f"{where}: {first.get('msg', 'invalid')}", details)
+
+    @app.exception_handler(Exception)
+    async def internal_error(request: Request, exc: Exception) -> JSONResponse:
+        log.error("%s %s failed", request.method, request.url.path, exc_info=exc)
+        return _error(500, "internal", "internal server error")
+
+
+def create_app_from_env() -> FastAPI:
+    """Factory for `parking api` (uvicorn, also with `--reload`): lot.yaml from
+    `PARKING_CONFIG`, the rest from `deploy/.env` and the environment; sets up logging."""
+    config_path = find_config(Path(os.environ.get("PARKING_CONFIG", "config/lot.yaml")))
+    settings = Settings(_env_file=config_path.resolve().parent.parent / "deploy" / ".env")
+    logging.basicConfig(
+        level=settings.log_level.upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    return create_app(config_path, settings)

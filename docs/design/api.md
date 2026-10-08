@@ -55,7 +55,7 @@ The level is computed **by the server**. The client only maps it to words and co
 ```json
 { "error": { "code": "not_found", "message": "Zone 'roof' does not exist" } }
 ```
-Codes: `bad_request` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404), `conflict` (409), `rate_limited` (429), `unavailable` (503: no data received yet since start-up).
+Codes: `bad_request` (400; also 422 for a body or query that fails validation, with `details`: `[{"type","loc","msg"}]`), `unauthorized` (401), `forbidden` (403), `not_found` (404, also unknown paths), `method_not_allowed` (405), `conflict` (409), `rate_limited` (429, with `Retry-After` seconds), `unavailable` (503: no data received yet since start-up), `internal` (500, message `internal server error`; details only in the log). Every error, including FastAPI's own, uses this format (exception handlers in `parking/api/app.py`, P2.9).
 
 ---
 
@@ -64,9 +64,11 @@ Codes: `bad_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
 | Method | Path | Phase | Description |
 |--------|------|-------|-------------|
 | GET | `/healthz` | 2 | `{"status":"ok","db":true,"cameras":{"cam-ground":"ok","cam-ramp":"unknown"},"ingest":{"observations":n,"flow_events":n,"health":n,"rejected":n,"db_errors":n},"stream":{"clients":n,"published":n,"dropped":n}}`. `unknown` = no health message since start-up; counters since start-up (`stream.dropped` = events dropped from full SSE client queues). HTTP 200 even when cameras are down, because the API itself is alive |
-| GET | `/api/lot` | 2 | Static lot info (below) |
-| GET | `/api/status` | 2 | `LotStatus`; `503 unavailable` before the first observation |
+| GET | `/api/lot` | 2 | Static lot info (below). `location` uses `LOT_LAT`/`LOT_LON` from the settings when set, else lot.yaml; zone `capacity` is the effective one (slot count for `slots` zones) |
+| GET | `/api/status` | 2 | `LotStatus`; `503 unavailable` until the first data since start-up, unless state was restored from the DB (then 200 with `stale: true`). `Cache-Control: no-cache` |
 | GET | `/api/stream` | 2 | SSE (see §3) |
+
+Zone names (`/api/lot`, `/api/status`, `/api/stream`): `?lang=` first, then the `Accept-Language` languages by `q` (primary subtag only: `ro-RO` → `ro`; `q=0` and `*` ignored); the first one that any zone has a name in wins, else `en` (a zone without that name falls back to `en`, then its first name). `/api/lot` and `/api/status` send `Vary: Accept-Language`. `?lang=` longer than 35 characters → 422.
 | GET | `/api/history` | 7 | Query: `zone` (or `total`), `from`, `to`, `bucket=minute\|hour\|day`. Returns `{"zone":"ground","bucket":"hour","points":[{"t":"…","free_avg":12.4,"free_min":8,"occupied_avg":27.6}]}`. Max 2000 points |
 | GET | `/api/forecast` | 7 | Query: `zone`, `at` (ISO, default now + 30 min). Returns `{"zone":"ground","at":"…","free_expected":10,"basis":"median of last 8 same weekday/hour"}` |
 | GET | `/api/push/vapid-public-key` | 6 | `{"key":"BAx…"}` |
@@ -121,7 +123,7 @@ id: 1740
 data: {…}
 ```
 
-- **On connect:** send `retry`, then the current `status` immediately (if there is one).
+- **On connect:** send `retry`, then the current `status` immediately (if there is one). Zone names follow `?lang=` / `Accept-Language` like the REST routes; the broadcaster serialises each event once per language (`Broadcaster.render`).
 - **On change:** a `status` event with the full `LotStatus` (it's small, so there are no diffs to get wrong).
 - **Heartbeat:** a `: ping` comment every `sse_ping_s` (15 s), which keeps proxies and tunnels from closing idle connections.
 - `id` is a monotonic counter. Clients don't need `Last-Event-ID` replay, because the first event is always the full current state.
@@ -241,7 +243,7 @@ Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `
 
 ## 7. Cross-cutting
 
-- **CORS:** allow only `CORS_ORIGINS`; methods GET/POST/PATCH/PUT/DELETE; headers `Content-Type, Authorization`.
-- **Rate limits** (slowapi, per IP): public GET 120/min, push POST 20/hour, login 5/15 min.
-- **Compression:** gzip for JSON responses > 1 KB (not for SSE).
-- **OpenAPI docs** at `/docs`, enabled only when `LOG_LEVEL=DEBUG` or on the LAN.
+- **CORS:** allow only `CORS_ORIGINS`; methods GET/POST/PATCH/PUT/DELETE; headers `Content-Type, Authorization`. Empty `CORS_ORIGINS` = no CORS headers at all (same-origin only).
+- **Rate limits** (per client IP, moving window, in memory per API process): public GET 120/min (one budget shared by `/healthz` and all public `/api/*` GETs, incl. connecting to `/api/stream`), push POST 20/hour, login 5/15 min; `/internal/*` has none. Implemented as a FastAPI dependency (`rate_limit(limit, group)` in `parking/api/deps.py`) on the `limits` library, the engine behind slowapi: slowapi's decorators need a module-global limiter and its middleware is a `BaseHTTPMiddleware`. The client IP is `request.client.host`; behind the tunnel/proxy uvicorn must trust the proxy's `X-Forwarded-For` (`--proxy-headers --forwarded-allow-ips`, set up in P2.10/P8), otherwise every visitor shares one budget.
+- **Compression:** gzip for responses > 1 KB (Starlette's `GZipMiddleware`, which never compresses `text/event-stream`).
+- **OpenAPI docs** at `/docs` (and `/openapi.json`) only when `LOG_LEVEL=DEBUG`; otherwise both are 404. No ReDoc.

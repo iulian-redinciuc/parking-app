@@ -702,24 +702,31 @@ def api(
     config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
     host: Annotated[str, typer.Option(help="Address to bind.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port to listen on.")] = 8000,
+    reload: Annotated[
+        bool, typer.Option("--reload", help="Restart when the backend code changes (dev only).")
+    ] = False,
 ) -> None:
     """Run the API (uvicorn): ingest from the workers, live status for the app."""
-    import logging
+    import os
 
     import uvicorn
 
-    from parking.api.app import create_app
-    from parking.workers.base import load_settings
+    import parking
 
     config = _find_config(config)
     if not config.is_file():
         _fail(f"config not found: {config}")
-    settings = load_settings(config.resolve().parent.parent)
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    # the factory (also in uvicorn's reload subprocess) reads the config path from here
+    os.environ["PARKING_CONFIG"] = str(config.resolve())
+    uvicorn.run(
+        "parking.api.app:create_app_from_env",
+        factory=True,
+        host=host,
+        port=port,
+        reload=reload,
+        reload_dirs=[str(Path(parking.__file__).parent)] if reload else None,
+        log_config=None,
     )
-    uvicorn.run(create_app(config, settings), host=host, port=port, log_config=None)
 
 
 @db_app.command("upgrade")

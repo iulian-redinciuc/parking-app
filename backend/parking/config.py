@@ -67,7 +67,7 @@ class ResetCfg(Strict):
 
 class Zone(Strict):
     id: Id
-    name: dict[str, str]
+    name: dict[str, str] = Field(min_length=1)
     method: Literal["slots", "count", "flow"]
     capacity: int | None = Field(default=None, gt=0)
     reset: ResetCfg | None = None
@@ -79,6 +79,10 @@ class Zone(Strict):
         if self.reset is not None and self.method != "flow":
             raise ValueError(f"zone '{self.id}': reset is only allowed for 'flow' zones")
         return self
+
+    def display_name(self, lang: str = "en") -> str:
+        """The name in `lang`, else English, else the first one given."""
+        return self.name.get(lang) or self.name.get("en") or next(iter(self.name.values()))
 
 
 class DetectorCfg(Strict):
