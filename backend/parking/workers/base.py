@@ -155,15 +155,21 @@ class Worker:
     # --- lifecycle ---
 
     def stop(self, *_: object) -> None:
-        """Ask the loop to stop after the current frame (also the signal handler)."""
+        """Ask the loop to stop after the current frame."""
         already = self.stop_event.is_set()
         self.stop_event.set()
         if not already:
             log.info("%s: stopping", self.camera_id)
 
+    def _on_signal(self, *_: object) -> None:
+        # Never take a lock in the handler: it runs on the main thread, which may be holding
+        # the stop event's lock right now (inside `Event.wait`), so `set()` here would deadlock
+        # (seen with SIGTERM from `timeout`). Setting it from another thread is safe.
+        threading.Thread(target=self.stop, name="stop", daemon=True).start()
+
     def install_signal_handlers(self) -> None:
-        signal.signal(signal.SIGTERM, self.stop)
-        signal.signal(signal.SIGINT, self.stop)
+        signal.signal(signal.SIGTERM, self._on_signal)
+        signal.signal(signal.SIGINT, self._on_signal)
 
     def run(self, max_frames: int | None = None, handle_signals: bool = True) -> None:
         if handle_signals:

@@ -268,3 +268,13 @@ def test_cli_worker_occupancy_errors(lot):
     assert r.exit_code == 1 and "API_INTERNAL_URL" in r.output
     r = runner.invoke(app, ["worker", "occupancy", "--camera", "cam-ground", "--max-frames", "-1"])
     assert r.exit_code == 2
+
+
+def test_signal_handler_never_blocks_on_the_stop_event(lot):
+    # the handler interrupts the main thread, which may hold the stop event's lock
+    w, _ = make_worker(lot)
+    with w.stop_event._cond:  # what the main thread holds inside Event.wait/set
+        w._on_signal(15, None)
+        w._on_signal(15, None)  # a second signal (uv forwarding + timeout) is fine too
+        assert not w.stop_event.is_set()
+    assert w.stop_event.wait(2)
