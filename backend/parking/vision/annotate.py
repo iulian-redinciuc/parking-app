@@ -19,6 +19,7 @@ from parking.vision.occupancy import Size, SlotResult
 GREEN = (60, 200, 60)
 RED = (40, 40, 220)
 YELLOW = (0, 220, 255)
+MAGENTA = (255, 0, 255)
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 
@@ -133,4 +134,30 @@ def annotate_occupancy(
         band[:] = BLACK
         out[:bh] = cv2.addWeighted(band, BANNER_ALPHA, out[:bh], 1 - BANNER_ALPHA, 0)
         _put_text(out, text, (round(w * 0.02), round((bh + th) / 2)), bscale)
+    return out
+
+
+def highlight_slots(
+    frame: np.ndarray,
+    slots: Sequence[Slot],
+    notes: Mapping[str, str],
+    image_size: Size | None = None,
+) -> np.ndarray:
+    """A copy of `frame` with the slots in `notes` (id -> short text) outlined thickly in magenta
+    and the note written near the bottom of each one (used for evaluation mistakes)."""
+    out = frame.copy()
+    h, w = out.shape[:2]
+    sx, sy = (w / image_size[0], h / image_size[1]) if image_size else (1.0, 1.0)
+    scale = max(0.5, text_scale(w) * 0.7)
+    for s in slots:
+        if s.id not in notes:
+            continue
+        poly = _points(s.polygon, sx, sy)
+        cv2.polylines(out, [poly], True, MAGENTA, _thickness(scale, 6), cv2.LINE_AA)
+        text = notes[s.id]
+        tw, th = cv2.getTextSize(text, FONT, scale, _thickness(scale))[0]
+        cx = poly[:, 0].mean()
+        y = poly[:, 1].max() - th  # under the id/score label, inside the slot
+        x = min(max(cx - tw / 2, 2), w - tw - 2)
+        _put_text(out, text, (round(x), round(min(max(y, th + 2), h - 2))), scale, MAGENTA)
     return out

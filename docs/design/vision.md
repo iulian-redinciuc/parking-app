@@ -212,6 +212,14 @@ occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
 - **Sweep:** `--sweep 0.1:0.6:0.05` reruns scoring (detection is cached, so it's fast) and prints accuracy per threshold.
 - Output: a table in the terminal + `out/eval/<camera>-<date>.json` + annotated images where predictions were wrong.
 
+`parking evaluate --camera ID [--images data/samples] [--labels data/labels/<camera>.json] [--config …] [--sweep start:stop:step] [--mode mask|box_bottom|both] [--threshold X] [--imgsz N] [--out out/eval] [--cache out/cache] [--no-cache] [--fake-detector]`:
+- "Free" is the positive class: **free-precision** = said free and really free / said free; **free-recall** = said free and really free / really free. Precision is `n/a` when nothing was said free. Unsure slots count in neither the metrics nor the free counts. Every slot id in the labels must exist in the slot file (`check_labels`).
+- Detections are cached in `out/cache/<image file>.<model folder>.<imgsz>.json` (the `FakeDetector` sidecar format plus `frame_size` and a `key`: image size + mtime, `conf`, `classes`, `use_masks`). A cache file with another key is ignored and rewritten; the model is loaded only on a cache miss.
+- Without `--mode` the camera's mode is used; `both` evaluates `mask` and `box_bottom` from the same detections. `--sweep` bounds are inclusive and every value must be strictly between 0 and 1.
+- **Best threshold:** highest slot accuracy, then highest free-precision, then lowest mean count error; a tie left after that goes to the threshold closest to the configured one.
+- Terminal: per image `correct/labelled`, accuracy, `free true/predicted`, count error and the mistakes by slot id (`G05 (taken, said free)`), then an overall line and one line per condition tag; with `--sweep` a table per threshold and `best threshold (<mode>): …`.
+- Files: `out/eval/<camera>-<YYYY-MM-DD>.json` (per mode: threshold, overall, by condition, per image, sweep, best threshold) and `out/eval/<camera>-<image stem>-<mode>.png` for each image with a mistake: the annotated frame (§2) with the wrong slots outlined in magenta and "should be taken" / "should be free" (`highlight_slots` in `annotate.py`).
+
 ### Flow metrics (per clip)
 - Match predicted events to truth events with the same direction within **±2 s** (greedy, by time).
 - Report **TP, FP (extra counts), FN (missed)**, event accuracy = TP / (TP + FP + FN), and **net error** = (pred in − pred out) − (true in − true out). Net error is what causes drift.

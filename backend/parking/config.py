@@ -1,6 +1,7 @@
 """Config models and loaders: lot.yaml, slot/line files and .env settings.
 
-Spec: docs/design/config.md (§1 lot.yaml + loader rules, §2 slot file, §3 line file, §5 .env).
+Spec: docs/design/config.md (§1 lot.yaml + loader rules, §2 slot file, §3 line file,
+§4 ground-truth labels, §5 .env).
 """
 
 import os
@@ -254,6 +255,28 @@ class LineFile(Strict):
     in_direction: Literal["a_to_b", "b_to_a"] = "a_to_b"
 
 
+# --- ground-truth labels (config.md §4) ---
+
+
+class ImageLabels(Strict):
+    conditions: list[str] = Field(default_factory=list)
+    taken: list[str] = Field(default_factory=list)
+    unsure: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        both = sorted(set(self.taken) & set(self.unsure))
+        if both:
+            raise ValueError(f"slot(s) both taken and unsure: {', '.join(both)}")
+        return self
+
+
+class LabelFile(Strict):
+    version: Literal[1]
+    camera_id: str
+    images: dict[str, ImageLabels] = Field(default_factory=dict)
+
+
 # --- loaders ---
 
 
@@ -318,6 +341,10 @@ def load_slots(path: str | Path) -> SlotFile:
 
 def load_lines(path: str | Path) -> LineFile:
     return LineFile.model_validate_json(_read(path))
+
+
+def load_labels(path: str | Path) -> LabelFile:
+    return LabelFile.model_validate_json(_read(path))
 
 
 # --- .env (config.md §5) ---

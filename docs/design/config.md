@@ -182,7 +182,7 @@ Made by the slot editor (`tools/slot-editor`) or `parking bootstrap-slots`.
   }
 }
 ```
-Every slot not listed in `taken` or `unsure` is free. `unsure` slots are excluded from metrics.
+Every slot not listed in `taken` or `unsure` is free. `unsure` slots are excluded from metrics. `load_labels(path)` reads it into `LabelFile` (unknown keys are errors; a slot can't be both `taken` and `unsure`).
 
 ### Flow: `data/labels/<clip>.csv`
 ```csv

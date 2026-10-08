@@ -17,6 +17,7 @@
   2. **Keep the straight-down view:** then the detector has to be fine-tuned on overhead photos of this lot (pulls P9.4 forward; needs ~100+ labelled photos, and open question 10 for the licence), or the per-slot classifier (vision.md §9) is used instead. Say which and the plan gets updated.
   Then delete the `⏸️ ` from the P1.4 line.
 - **Heads-up (public repo):** `data/IMG_8093.jpeg` was uploaded to `main` on GitHub (commit `9ff3a0b`). It is a real photo of the lot (the same straight-down view as `ground-01.jpg`, full resolution) and is now public, which goes against the public-repo rules. The agent loop may not rewrite history. If it should go: delete it on GitHub (it stays in history) or purge it from history yourself, and put photos in `data/samples/` on the Pi instead (git-ignored).
+- **Please check the labels (P1.8):** the agent labelled both sample photos by eye in git-ignored `data/labels/cam-ground.json`: taken `G05 G06 G09 G12 G14`, every other space free, none unsure (G09 is the red car cut off at the top-right edge). If that's wrong, fix it in the slot editor's label mode and rerun `parking evaluate`.
 - Nice to have later: more sample photos (busy/full, nearly empty, night) from the same spot; real answers to open questions 2–4 (the working assumptions below are used until then; question 2 is needed before Phase 4).
 
 ## Overview
@@ -24,7 +25,7 @@
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
-| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 6 / 11 | 🟡 | 2026-10-08 | |
+| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 7 / 11 | 🟡 | 2026-10-08 | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
@@ -55,7 +56,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P1.5** Geometry + occupancy scoring
 - [x] **P1.6** Annotated output image
 - [x] **P1.7** `parking analyze`
-- [ ] **P1.8** Ground-truth labels + `parking evaluate`
+- [x] **P1.8** Ground-truth labels + `parking evaluate`
 - [ ] **P1.9** `parking bootstrap-slots`
 - [ ] **P1.10** Benchmark on the dev Pi
 - [ ] **P1.11** Tune and decide
@@ -201,13 +202,14 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | P1.4 found that **COCO-pretrained YOLO11 doesn't detect cars seen straight down** (0–1 of 5 on `ground-01.jpg`; yolo11-obb aerial models ≤ 2 of 5). P1.4 is blocked until Iulian picks an angled camera view or a top-down model (see "Waiting on Iulian") | The detector code works (NCNN output matches PyTorch; detects the bus in `bus.jpg`), so the problem is the viewpoint, not the code |
 | 2026-10-08 | P1.5: `score_slots`/`count_in_zones` take an optional `image_size` (the slot file's) to rescale polygons to `frame_size`; in `mask` mode a detection without a usable mask falls back to `box_bottom`; `count_in_zones` returns every zone (0 if empty) and counts a vehicle once per zone. Recorded in vision.md §2 | The spec's signature had no way to know the slot file's size; the detector may return a box without a mask |
 | 2026-10-08 | P1.6: `annotate_occupancy` takes `totals` as `{zone: (free, capacity)}` plus optional `inference_ms` and `image_size` (polygon rescaling); the banner reads `Ground: 12 free / 40 \| 143 ms` with `\|` instead of `·`; labels of slots cut off at the image edge are moved inside the frame. Recorded in vision.md §2 | The guide didn't define `totals` or where the time comes from; OpenCV's Hershey fonts draw non-ASCII characters as `?` |
+| 2026-10-08 | P1.8: the agent made the ground-truth labels itself from the two sample photos (same scene; 5 cars are clearly visible, so nothing was unsure) instead of waiting; Iulian is asked to check them. `parking evaluate` treats **free** as the positive class, excludes unsure slots from the free counts too, rejects labels naming unknown slots, keys the detection cache on image size/mtime + `conf`/`classes`/`use_masks`, breaks best-threshold ties by free-precision, then count error, then closeness to the configured threshold, and also has `--threshold`, `--imgsz`, `--no-cache`, `--fake-detector`. Labels load through `LabelFile`/`load_labels` in `config.py`. Recorded in vision.md §10 and config.md §4 | The guide left these open; labelling 17 clearly visible spaces needs no input from Iulian |
 | 2026-10-08 | P1.7: `analyze_frame` takes an optional `capacities` (zone → capacity) for the totals; the JSON adds `totals` and `timings` to the observation; `parking analyze` also has `--fake-detector` (sidecar `<image>.json`); paths in lot.yaml resolve against the repo root, and CLI tools read `${VAR}` from `deploy/.env.example` < `deploy/.env` < environment (`cli_env`). Recorded in vision.md §2 and config.md loader rules | `lot.yaml` needs `LOT_LAT`/`TZ`/`CAM_RAMP_RTSP_URL` even for offline tools, and the dev checkout has no `deploy/.env`; the guide didn't say where count-zone capacities come from |
 
 ## Metrics
 
 | Date | Phase | Metric | Value | Target | Notes |
 |------|-------|--------|-------|--------|-------|
-| | 1 | Slot accuracy (samples) | | ≥ 97% | |
+| 2026-10-08 | 1 | Slot accuracy (samples) | 70.6% (24/34; free-precision 70.6%, count error 5) | ≥ 97% | dev Pi, `yolo11n-seg` NCNN @ 1280, mask, 0.30 (best of the 0.1–0.6 sweep, all tie); 2 photos of the same scene. 0 cars detected, so every taken space is said free (P1.4 blocker) |
 | | 1 | Inference time per image (dev Pi, chosen settings) | | < 2 s | worst-case reference |
 | | 4 | Slot accuracy (validation set) | | ≥ 97% | |
 | | 4 | Count error ≤ 1 (% of frames) | | ≥ 95% | |
@@ -245,3 +247,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - P1.5: `parking/geometry.py` (polygon repair, box bottom, overlap ratio, bottom-centre, point-in) + `parking/vision/occupancy.py` (`score_slots` with an STRtree over footprints, max overlap, mask/box_bottom modes; `count_in_zones`), tested with hand-made detections (`test_occupancy.py` 13, `test_geometry.py` 5). Branch coverage of `occupancy.py` is 100% (pytest-cov added); pytest (72 passed) and ruff pass. P1.4's real-photo detection problem is still open; this task doesn't need the model.
 - P1.6: `parking/vision/annotate.py` (`annotate_occupancy`: green free / red-filled taken slots with id + score, yellow detections, top banner with free/capacity and ms; text scales with frame width) + `test_annotate.py` (11 tests). Rendered on `ground-01.jpg` with the 17 slots and 5 hand-made detections (the real detector still misses top-down cars, P1.4) at full size and at 720p; both read clearly when shrunk to phone width (540–590 px). pytest (83 passed) and ruff pass.
 - P1.7: `parking/vision/pipeline.py` (`analyze_frame` → `AnalysisResult` with detections, slot results, zone counts, totals, timings; `to_observation()`) + `parking analyze` (config overrides, `--fake-detector`, JSON + annotated PNG). `uv run parking analyze --image data/samples/ground-01.jpg --camera cam-ground` prints `ground: 17 free / 17 (0 taken) in 1.9 s` and writes both files; 0 taken because the COCO model still sees no top-down cars (P1.4). New `test_pipeline.py` (5, 100% branch coverage), CLI tests with the fake detector (6), `cli_env` tests (3); pytest (97 passed incl. slow) and ruff pass.
+- P1.8: `parking/vision/evaluate.py` (per-image comparison with unsure excluded, overall + per-condition summary, free-precision/recall, count error, sweep, best threshold, detection cache `out/cache/<image>.<model>.<imgsz>.json`), `LabelFile`/`load_labels`, `highlight_slots` and `parking evaluate`. Labelled `ground-01.jpg` and `ground-02.jpg` by eye (taken G05 G06 G09 G12 G14). `parking evaluate --images data/samples --labels data/labels/cam-ground.json --camera cam-ground --sweep 0.1:0.6:0.05` prints slot accuracy 70.6%, free-precision 70.6%, count error 5.00, best threshold 0.30 (second run: 2 from cache, no model load), and writes the report + mistake PNGs to `out/eval/`. The 5 misses are the top-down cars COCO YOLO doesn't see (P1.4). New `test_evaluate.py` (16) + 10 CLI tests, 100% branch coverage of `evaluate.py`; pytest (123 passed) and ruff pass.
