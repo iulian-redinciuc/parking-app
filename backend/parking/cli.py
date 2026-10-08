@@ -576,7 +576,9 @@ def benchmark(
     from parking.vision import benchmark as bm
 
     if runs < 1 or warmup < 0:
-        raise typer.BadParameter("--runs must be ≥ 1 and --warmup ≥ 0", param_hint="--runs")
+        raise typer.BadParameter(
+            "runs must be at least 1 and warmup at least 0", param_hint="--runs"
+        )
     bad = [r for r in _csv(runtimes) if r not in bm.RUNTIMES]
     if bad:
         raise typer.BadParameter(

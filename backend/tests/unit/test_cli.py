@@ -337,7 +337,7 @@ def test_benchmark_appearance_only(tmp_path, monkeypatch):
     [
         (["--runtimes", "onnx"], "unknown"),
         (["--imgsz", "big"], "integers"),
-        (["--runs", "0"], "--runs"),
+        (["--runs", "0"], "at least 1"),
         (["--runtimes", "", "--camera", ""], "nothing to benchmark"),
         (["--image", "missing.jpg"], "can't read image"),
         (["--camera", "cam-x"], "not in"),
