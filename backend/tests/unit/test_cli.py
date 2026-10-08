@@ -314,3 +314,38 @@ def test_bootstrap_slots_errors(tmp_path, monkeypatch):
 
     result = _bootstrap("--out", "d.json")  # real detector, model missing
     assert result.exit_code == 1 and "not found" in result.output
+
+
+def test_benchmark_appearance_only(tmp_path, monkeypatch):
+    import json
+
+    _write_lot(tmp_path, monkeypatch)
+    result = runner.invoke(
+        app,
+        ["benchmark", "--image", "img.jpg", "--runs", "2", "--warmup", "0", "--runtimes", ""],
+    )
+    assert result.exit_code == 0, result.output
+    assert "| appearance scorer | appearance | full frame |" in result.output
+    assert "CPU temperature" in result.output
+    (report,) = (tmp_path / "out" / "benchmark").glob("benchmark-*.json")
+    data = json.loads(report.read_text())
+    assert data["runs"] == 2 and data["results"][0]["case"]["runtime"] == "appearance"
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        (["--runtimes", "onnx"], "unknown"),
+        (["--imgsz", "big"], "integers"),
+        (["--runs", "0"], "--runs"),
+        (["--runtimes", "", "--camera", ""], "nothing to benchmark"),
+        (["--image", "missing.jpg"], "can't read image"),
+        (["--camera", "cam-x"], "not in"),
+    ],
+)
+def test_benchmark_errors(tmp_path, monkeypatch, extra, message):
+    _write_lot(tmp_path, monkeypatch)
+    args = ["benchmark", "--image", "img.jpg", *extra]
+    result = runner.invoke(app, args)
+    assert result.exit_code != 0
+    assert message in result.output

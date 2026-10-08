@@ -266,10 +266,17 @@ Guidelines on any machine:
 - Flow: aim for ≥ 8 fps while active. If detect + track takes over 120 ms per frame, first shrink the ROI and use `imgsz=480`; then use a faster runtime or an accelerator for that machine.
 - Measure with `parking benchmark` and record results in PROGRESS.md → Metrics, **labelled with the machine**.
 
-### Reference numbers (estimates, to be measured)
-| Task | Dev Pi 5 (NCNN, CPU) |
-|------|----------------------|
-| YOLO11n @ 640 px | ~80–120 ms per frame |
-| YOLO11n-seg @ 640 px | ~1.5–2× the above |
+`parking benchmark` (`parking/vision/benchmark.py`) runs every runtime × `imgsz` × model case, and the appearance scorer (`method: appearance` on `--camera`'s slots, the whole `analyze_frame` without a detector), each in a **fresh spawned process** so the peak RSS (`ru_maxrss`) belongs to that case alone. Each case does `--warmup` untimed runs, then `--runs` timed `detect(frame)` calls on the full image (pre-processing included, model loading excluded); p95 is nearest-rank. NCNN exports have a fixed input size, so it exports each size once into `models/bench/<model>-<imgsz>/` (copying the local `.pt`). A failing case shows as an error row; the others go on. It prints a Markdown table plus the CPU temperature before/after (`vcgencmd measure_temp`, else `/sys/class/thermal`; warns over 80 °C) and writes `out/benchmark/benchmark-<time>.json`.
+
+### Reference numbers (dev Pi 5 8 GB, CPU, measured 2026-10-08 in P1.10)
+| Task | PyTorch | NCNN |
+|------|---------|------|
+| YOLO11n @ 640 px | 305 ms | **83 ms** |
+| YOLO11n-seg @ 640 px | 430 ms | 117 ms |
+| YOLO11n @ 1280 px | 1312 ms | 367 ms |
+| YOLO11n-seg @ 1280 px | 1827 ms | 520 ms |
+| Appearance scorer (17 slots, 1932×2576) | 158 ms, no model | |
+
+Medians of 20 runs on `ground-01.jpg`; full table with p95 and memory in PROGRESS.md → Metrics.
 
 The **dev Pi is a worst case.** Production hardware is benchmarked again in P8.2 (and on the candidate vision host during Phase 5), and the settings are re-tuned there.

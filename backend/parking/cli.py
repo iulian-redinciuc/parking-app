@@ -540,3 +540,98 @@ def bootstrap_slots(
         f"{len(slots)} slot(s) in zone '{zone}' -> {target}\n"
         "Now fix it in tools/slot-editor: add the empty spaces and adjust the corners."
     )
+
+
+def _csv(value: str) -> list[str]:
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+
+@app.command()
+def benchmark(
+    image: Annotated[Path, typer.Option(help="Image to run every case on.")],
+    runs: Annotated[int, typer.Option(help="Timed runs per case.")] = 20,
+    warmup: Annotated[int, typer.Option(help="Untimed runs before timing.")] = 3,
+    runtimes: Annotated[str, typer.Option(help="Comma list: pytorch,ncnn ('' for none).")] = (
+        "pytorch,ncnn"
+    ),
+    imgsz: Annotated[str, typer.Option(help="Comma list of input sizes.")] = "640,1280",
+    models: Annotated[str, typer.Option(help="Comma list of model names.")] = (
+        "yolo11n,yolo11n-seg"
+    ),
+    camera: Annotated[
+        str, typer.Option(help="Camera whose slots time the appearance scorer ('' to skip).")
+    ] = "cam-ground",
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    models_dir: Annotated[Path, typer.Option(help="Folder with the .pt weights.")] = Path("models"),
+    out: Annotated[Path, typer.Option(help="Folder for the JSON report.")] = Path("out/benchmark"),
+) -> None:
+    """Time each runtime × imgsz × model (median, p95, peak RSS) and the appearance scorer.
+
+    Each case runs in a fresh process. NCNN models are exported per size into
+    <models-dir>/bench/ on first use. Prints a Markdown table for PROGRESS.md → Metrics.
+    """
+    import platform
+    from datetime import datetime
+
+    from parking.vision import benchmark as bm
+
+    if runs < 1 or warmup < 0:
+        raise typer.BadParameter("--runs must be ≥ 1 and --warmup ≥ 0", param_hint="--runs")
+    bad = [r for r in _csv(runtimes) if r not in bm.RUNTIMES]
+    if bad:
+        raise typer.BadParameter(
+            f"unknown {bad}; use {', '.join(bm.RUNTIMES)}", param_hint="--runtimes"
+        )
+    try:
+        sizes = [int(s) for s in _csv(imgsz)]
+    except ValueError:
+        raise typer.BadParameter("must be integers, e.g. 640,1280", param_hint="--imgsz") from None
+
+    root = _find_config(config).resolve().parent.parent
+    image = _resolve(image, root)
+    if not image.is_file():
+        _fail(f"can't read image {image}")
+    models_dir = _resolve(models_dir, root)
+    cases = bm.cases(_csv(runtimes), sizes, _csv(models))
+    jobs: list[tuple[bm.Case, object]] = [(c, str(models_dir)) for c in cases]
+    if camera:
+        _, cam, root = _occupancy_camera(config, camera, "benchmark")
+        occ = cam.occupancy.model_copy(update={"method": "appearance"})
+        cam = cam.model_copy(update={"occupancy": occ})
+        jobs.append((bm.Case("appearance"), (cam, _slot_file(cam, root), _reference(occ, root))))
+    if not jobs:
+        _fail("nothing to benchmark")
+
+    temp_before = bm.cpu_temp()
+    results = []
+    for case, extra in jobs:
+        typer.echo(f"{case.name} ...", err=True)
+        results.append(bm.run_isolated(case, str(image), runs, warmup, extra))
+    temp_after = bm.cpu_temp()
+
+    for line in bm.table(results):
+        typer.echo(line)
+    temps = " -> ".join("?" if t is None else f"{t:.1f} °C" for t in (temp_before, temp_after))
+    typer.echo(
+        f"\n{platform.node()} ({platform.machine()}), {runs} runs after {warmup} warm-up, "
+        f"CPU temperature {temps}"
+    )
+    if max((t for t in (temp_before, temp_after) if t is not None), default=0) > 80:
+        typer.echo("warning: CPU over 80 °C; the Pi needs its active cooler", err=True)
+
+    out.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    report = bm.to_json(
+        results,
+        date=stamp,
+        machine=platform.node(),
+        arch=platform.machine(),
+        image=image.name,
+        runs=runs,
+        warmup=warmup,
+        cpu_temp_before=temp_before,
+        cpu_temp_after=temp_after,
+    )
+    json_path = out / f"benchmark-{stamp}.json"
+    json_path.write_text(json.dumps(report, indent=2) + "\n")
+    typer.echo(f"report -> {json_path}")

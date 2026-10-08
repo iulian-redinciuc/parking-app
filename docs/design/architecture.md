@@ -161,7 +161,7 @@ frontend/
 | `parking analyze --image PATH --camera ID` | 1 | Analyse one image → JSON + annotated PNG ([vision.md §2](vision.md#analyze-pipeline-parkingvisionpipelinepy)) |
 | `parking evaluate --images DIR --labels FILE --camera ID [--sweep 0.1:0.6:0.05] [--mode both]` | 1 | Accuracy metrics, threshold sweep |
 | `parking bootstrap-slots --image PATH --camera ID [--out FILE] [--force]` | 1 | Suggest slot polygons (vision.md §4) |
-| `parking benchmark --image PATH [--runs 20]` | 1 | Speed per model/format/size |
+| `parking benchmark --image PATH [--runs 20] [--warmup 3] [--runtimes pytorch,ncnn] [--imgsz 640,1280] [--models yolo11n,yolo11n-seg] [--camera cam-ground]` | 1 | Median/p95 ms and peak RSS per runtime × size × model, plus the appearance scorer ([vision.md §11](vision.md#11-runtimes-and-performance)) |
 | `parking worker occupancy --camera ID` | 2 | Run the occupancy worker |
 | `parking worker flow --camera ID` | 5 | Run the flow worker |
 | `parking api` | 2 | Run the API (uvicorn) |

@@ -7,7 +7,7 @@
 >
 > The [agent loop](tools/agent-loop/README.md) works through the unticked tasks in order. A task marked `⏸️` is skipped until its need is met: **delete the `⏸️ ` from its line to unblock it** (editing on GitHub works too).
 
-**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 1: P1.10–P1.11.
+**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 1: P1.11.
 **Build order:** 0 → 1 → 2 → 3 (MVP) → 6 → 7 (no hardware needed) → 4 → 5 → 8 (need the real cameras / production machines) → 9.
 **Last updated:** 2026-10-08
 
@@ -21,7 +21,7 @@
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) (MVP) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
-| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 9 / 11 | 🟡 | 2026-10-08 | |
+| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 10 / 11 | 🟡 | 2026-10-08 | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) (MVP) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
@@ -54,7 +54,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P1.7** `parking analyze`
 - [x] **P1.8** Ground-truth labels + `parking evaluate`
 - [x] **P1.9** `parking bootstrap-slots`
-- [ ] **P1.10** Benchmark on the dev Pi
+- [x] **P1.10** Benchmark on the dev Pi
 - [ ] **P1.11** Tune and decide
 
 ## Phase 2: Backend + simulated live feed ⬜
@@ -207,6 +207,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | Agent loop: technical and design choices are made by the agent and recorded here, never sent to Iulian as a question; tasks are only blocked for physical things (hardware, installation, accounts, payments) | Owner's requirement |
 | 2026-10-08 | `data/IMG_8093.jpeg` (a lot photo uploaded on GitHub, so public) stays; the owner is fine with it. Agents still never commit images | Owner's decision |
 | 2026-10-08 | P1.9: `bootstrap-slots` sorts in reading order (rows grouped by centre y within half the median footprint height, then left→right), drops duplicate footprints (IoU > 0.5, keeps the more confident), adds `--footprint box` for straight-down views, `--imgsz`/`--conf`/`--fake-detector`, `--out` defaults to the camera's `slots_file` (guarded by `--force`), writes nothing when no vehicles are found, and writes the slot editor's exact JSON layout. A fixture written by the bootstrap code is opened by the editor's node test. Recorded in vision.md §4 and architecture.md §6 | The guide left sorting, naming past 99 and the output path open; the editor test proves "opens in the editor" in CI; on the top-down sample COCO YOLO finds no cars (P1.4), so `box` matters once a model sees cars from above |
+| 2026-10-08 | P1.10: `parking benchmark` runs each case in its own spawned process (honest peak RSS per case), times `detect()` on the full frame (pre-processing in, model load out), uses nearest-rank p95, exports NCNN per size into `models/bench/<model>-<imgsz>/` (NCNN inputs are fixed-size; the configured `models/<name>_ncnn_model` stays untouched), times the appearance scorer as the whole `analyze_frame` without a detector, and also has `--warmup`/`--runtimes`/`--imgsz`/`--models`/`--camera`/`--models-dir`/`--out` and a JSON report. Threads left at the library defaults (4 cores). Recorded in vision.md §11 and architecture.md §6 | The guide didn't define how to measure memory per case or where per-size NCNN exports go; a single process would report the largest model's RSS for every later case |
 
 ## Metrics
 
@@ -215,7 +216,8 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | 1 | Slot accuracy (samples) | 70.6% (24/34; free-precision 70.6%, count error 5) | ≥ 97% | dev Pi, `yolo11n-seg` NCNN @ 1280, mask, 0.30 (best of the 0.1–0.6 sweep, all tie); 2 photos of the same scene. 0 cars detected, so every taken space is said free (P1.4 blocker) |
 | 2026-10-08 | 1 | Slot accuracy (`ground-01.jpg`, appearance) | **100% (17/17)**; free-precision 100%, count error 0 | ≥ 97% | `method: appearance`, threshold 0.30; any threshold 0.05–0.40 gives 17/17. One photo only (`ground-02.jpg` doesn't line up with the slot file, P4.6) |
 | 2026-10-08 | 1 | Scoring time per image (dev Pi, appearance) | ~0.3 s | < 2 s | 1932×2576 frame, 17 slots, no model; full benchmark in P1.10 |
-| | 1 | Inference time per image (dev Pi, chosen settings) | | < 2 s | worst-case reference |
+| 2026-10-08 | 1 | Inference time per image (dev Pi 5, appearance, MVP setting for `cam-ground`) | **158 ms** median, 160 ms p95, 142 MB peak RSS | < 2 s | `parking benchmark`, 20 runs after 3 warm-ups on `ground-01.jpg`; no model. Detector cases in the table below; the final pick is P1.11 |
+| 2026-10-08 | 1 | Detector speed (dev Pi 5 8 GB, CPU, `ground-01.jpg` 1932×2576) | NCNN `yolo11n` @ 640: 83 ms; `yolo11n-seg` @ 1280: 520 ms | < 2 s (occupancy), ≤ 120 ms (flow) | table below; CPU 54.9 → 62.0 °C, never throttled (`get_throttled=0x0`); the Pi's other services kept running (not ours to stop), load avg ~1 at start |
 | | 4 | Slot accuracy (validation set) | | ≥ 97% | |
 | | 4 | Count error ≤ 1 (% of frames) | | ≥ 95% | |
 | | 5 | Flow event accuracy (3 clips) | | ≥ 98% | |
@@ -224,6 +226,22 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | | 8 | Slot accuracy on production hardware | | ≥ 97% | |
 | | 8 | Flow fps on production hardware | | ≥ 8 | |
 | | 8 | SSE p95 delivery (500 clients, production) | | < 2 s | |
+
+**P1.10 benchmark** (`parking benchmark --image data/samples/ground-01.jpg --runs 20`, dev Pi 5 8 GB, 2026-10-08; every case in a fresh process after 3 warm-up runs; "Vehicles" = found in the last run; the photo is top-down, so COCO models see ~none, P1.4):
+
+| Case | Runtime | imgsz | Median ms | p95 ms | Peak RSS MB | Vehicles |
+|------|---------|-------|-----------|--------|-------------|----------|
+| yolo11n | pytorch | 640 | 305 | 325 | 469 | 1 |
+| yolo11n-seg | pytorch | 640 | 430 | 442 | 479 | 0 |
+| yolo11n | pytorch | 1280 | 1312 | 1352 | 607 | 0 |
+| yolo11n-seg | pytorch | 1280 | 1827 | 1875 | 656 | 0 |
+| yolo11n | ncnn | 640 | 83 | 89 | 431 | 1 |
+| yolo11n-seg | ncnn | 640 | 117 | 122 | 457 | 0 |
+| yolo11n | ncnn | 1280 | 367 | 387 | 587 | 0 |
+| yolo11n-seg | ncnn | 1280 | 520 | 537 | 680 | 0 |
+| appearance scorer | appearance | full frame | 158 | 160 | 142 | - |
+
+NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occupancy budget (< 2 s); for flow (≥ 8 fps) only NCNN `yolo11n` @ 640 (83 ms) leaves room for tracking. At 62 °C the active cooler isn't a concern.
 
 ## Session log
 
@@ -256,3 +274,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - Defined the MVP (Phases 0–3) and the build order (0–3, 6, 7, 4, 5, 8, 9); P1.4 unblocked with top-down appearance scoring; labels checked; nothing waits on Iulian for the MVP; agents now decide technical choices themselves.
 - P1.4: top-down appearance scoring `parking/vision/appearance.py` (warped slot crops, Lab ΔE vs the pooled pavement median, shadow suppression, open/close + largest blob), `occupancy.method: detector | appearance` + `occupancy.appearance` params, `cam-ground` uses `appearance`; `analyze_frame` skips the detector for it; `analyze`/`evaluate` got `--method`, evaluate needs no cache for appearance and takes a single image. `parking evaluate --images data/samples/ground-01.jpg …` gives 17/17 (5 taken, 12 free), `parking analyze` prints `ground: 12 free / 17 (5 taken)` in 0.3 s and the PNG marks G05 G06 G09 G12 G14. New `test_appearance.py` (9, synthetic pavement with black/blue/grey cars, shadow, moss, overhang, reference image) + pipeline/CLI/config/evaluate tests; pytest 141 passed (+1 slow), ruff clean, 100% branch coverage of `appearance.py`/`pipeline.py`/`evaluate.py`.
 - P1.9: `parking/vision/bootstrap.py` (footprint `box_bottom`/`box` shrunk 10%, duplicate drop, reading-order rows, `<Z>01…` ids, editor-identical `format_json`) + `parking bootstrap-slots` (never overwrites without `--force`). New `test_bootstrap.py` (11, 100% branch coverage) + 3 CLI tests; fixture `backend/tests/fixtures/bootstrap-cam-test.json` from fake detections loads in `load_slots()` and in the editor's node test (11 pass, import + export unchanged). pytest 155 passed, ruff, eslint, prettier clean. On `ground-01.jpg` the real detector finds 0 cars (top-down, P1.4) → clear error, nothing written; re-check on the real camera in Phase 4.
+- P1.10: `parking/vision/benchmark.py` + `parking benchmark` (each case in a spawned process: median/p95 ms, peak RSS, vehicles; NCNN per-size exports in `models/bench/`; appearance scorer; CPU temperature; JSON report). 20-run results on the dev Pi in Metrics: NCNN `yolo11n` @ 640 83 ms, `yolo11n-seg` @ 1280 520 ms, appearance 158 ms; CPU 55 → 62 °C, no throttling. New `test_benchmark.py` (13) + 7 CLI tests; pytest 175 passed, ruff clean.
