@@ -15,7 +15,7 @@ describe('App shell', () => {
   it('shows the header, the Live screen and three tabs', () => {
     renderAt('#/')
     expect(screen.getByText('Parking')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Connecting')
+    expect(screen.getByRole('status')).toHaveTextContent('Live') // the mock feed (VITE_API_BASE=mock)
     expect(screen.getByRole('heading', { name: 'Live' })).toBeInTheDocument()
     const nav = screen.getByRole('navigation', { name: 'Main' })
     expect(nav.querySelectorAll('a')).toHaveLength(3)

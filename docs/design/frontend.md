@@ -88,10 +88,10 @@ type LiveState = {
 Behaviour:
 1. On start: `GET /api/status` (fast first paint), then open `EventSource(API_BASE + '/api/stream')`.
 2. `status` event → replace `status`, `connection = 'live'`.
-3. `onerror`: EventSource retries by itself (server sends `retry: 3000`). If there's no event or ping for **30 s**, close it and switch to **polling** `/api/status` every 10 s, while trying SSE again every 60 s.
-4. `visibilitychange` → hidden: close SSE (saves battery). Visible: fetch `/api/status` at once, then reopen SSE.
-5. `online`/`offline` events update `connection`.
-6. One shared connection for the whole app (module singleton), exposed through `useSyncExternalStore`.
+3. `onerror`: EventSource retries by itself (server sends `retry: 3000`). If there's no event or ping for **30 s**, close it and switch to **polling** `/api/status` every 10 s, while trying SSE again every 60 s. The heartbeat is the server's `event: ping` (a `: ping` comment would be invisible to `EventSource`, api.md §3). Any sign of life from the stream (`open`, `ping`, `status`) re-arms the watchdog, sets `connection = 'live'` and stops polling; a source that ends up `CLOSED` (e.g. a 503 instead of a stream; the browser won't retry) falls back to polling at once. `lastMessageAt` is set by `status` events, pings and successful fetches.
+4. `visibilitychange` → hidden: close SSE (saves battery) and stop polling; in-flight fetches are aborted. Visible: fetch `/api/status` at once, then reopen SSE.
+5. `online`/`offline` events update `connection` (`offline` also closes everything; `online` reconnects as on start). A failed fetch (`network`/`timeout`/…) sets `error` and `connection = 'error'` unless the stream is live, keeping the last `status`; the next good poll goes back to `polling`. `503 unavailable` sets `status: null` + `error` but leaves `connection` alone (the server answered).
+6. One shared connection for the whole app (module singleton `liveFeed()` in `live.ts`, the mock feed in mock mode), exposed through `useSyncExternalStore` by `useLiveStatus()` (starts it on first use, never stops it). `useNow(intervalMs = 1000)` re-renders with `Date.now()` for "updated 12 s ago".
 
 The live manager and the mock share one interface (`src/api/types.ts`): `LiveFeed` = `getSnapshot(): LiveState`, `subscribe(listener): unsubscribe` (ready for `useSyncExternalStore`), `start()`, `stop()`. REST calls go through `src/api/client.ts` (`getStatus()`, `getLot()`, 10 s timeout); every failure is an `ApiRequestError` whose `error: ApiError` has the server's `code`/`message`/`details` plus `status` and `retryAfter`, or a client code `network` / `timeout` / `bad_response` (bodies are shape-checked by `src/api/validate.ts`).
 

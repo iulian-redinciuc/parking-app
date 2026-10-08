@@ -116,7 +116,8 @@ event: status
 id: 1739
 data: {"v":1,"lot":"main","updated_at":"…","total":{…},"zones":[…]}
 
-: ping
+event: ping
+data:
 
 event: status
 id: 1740
@@ -125,7 +126,7 @@ data: {…}
 
 - **On connect:** send `retry`, then the current `status` immediately (if there is one). Zone names follow `?lang=` / `Accept-Language` like the REST routes; the broadcaster serialises each event once per language (`Broadcaster.render`).
 - **On change:** a `status` event with the full `LotStatus` (it's small, so there are no diffs to get wrong).
-- **Heartbeat:** a `: ping` comment every `sse_ping_s` (15 s), which keeps proxies and tunnels from closing idle connections.
+- **Heartbeat:** an `event: ping` with empty `data:` every `sse_ping_s` (15 s), which keeps proxies and tunnels from closing idle connections and lets the app's watchdog (frontend.md §3) see that a quiet stream is still alive. A named event, not a `: ping` comment, because `EventSource` never exposes comments; clients that only listen for `status` ignore it.
 - `id` is a monotonic counter. Clients don't need `Last-Event-ID` replay, because the first event is always the full current state.
 - Server side: one `Broadcaster` holding an `asyncio.Queue(maxsize=10)` per client. If a client's queue is full, drop its oldest message. One slow phone must never block others.
 - Implementation: `sse-starlette` `EventSourceResponse` (`parking/api/sse.py` `Broadcaster`, P2.8). The `Ingestor` publishes after every change (and once at start-up after the restore), so the "current status" exists from start-up on; restored or never-fed zones show `stale: true`. The status is serialised once per publish; `id` restarts at 1 when the API restarts. The current status is read together with the subscribe, so a client never misses or repeats an event.

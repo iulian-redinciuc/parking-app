@@ -1,5 +1,4 @@
-// Same values as LiveState['connection'] in frontend.md §3 (src/api/live.ts arrives in P3.3).
-export type Connection = 'connecting' | 'live' | 'polling' | 'offline' | 'error'
+import type { Connection } from '../api/types'
 
 // The state is always shown as a word too, never only as a colour (frontend.md §4).
 const CONNECTION: Record<Connection, { label: string; dot: string }> = {

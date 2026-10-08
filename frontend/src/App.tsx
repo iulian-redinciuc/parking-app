@@ -1,14 +1,15 @@
 import { HashRouter, Navigate, Route, Routes } from 'react-router'
 import BottomNav from './components/BottomNav'
 import Header from './components/Header'
+import { useLiveStatus } from './hooks/useLiveStatus'
 import PlaceholderScreen from './screens/PlaceholderScreen'
 
 export default function App() {
+  const { connection } = useLiveStatus()
   return (
     <HashRouter>
       <div className="flex min-h-dvh flex-col">
-        {/* The live connection (P3.3) will drive the dot; until then it shows "Connecting". */}
-        <Header connection="connecting" />
+        <Header connection={connection} />
         <main className="mx-auto w-full max-w-xl flex-1 pr-[max(1rem,env(safe-area-inset-right))] pb-[calc(5rem+env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))]">
           <Routes>
             <Route

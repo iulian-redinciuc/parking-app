@@ -132,6 +132,8 @@ async def stream(rt: RuntimeDep, lang: LangDep) -> EventSourceResponse:
         _events(rt.broadcaster, lang, names),
         headers={"Cache-Control": "no-cache"},
         ping=rt.config.api.sse_ping_s,
-        ping_message_factory=lambda: ServerSentEvent(comment="ping"),
+        # a named event, not a `: ping` comment: browsers' EventSource hides comments, and the
+        # frontend's 30 s watchdog (frontend.md §3) needs to see the stream is alive
+        ping_message_factory=lambda: ServerSentEvent("", event="ping"),
         send_timeout=SEND_TIMEOUT_S,
     )

@@ -122,7 +122,7 @@ def test_stream_sends_status_then_changes_with_pings(server):
             assert json.loads(field(changed, "data"))["zones"][0]["free"] == 0
 
             (ping,) = read_blocks(lines, 1)  # sse_ping_s: 1
-            assert ping == [": ping"]
+            assert ping == ["event: ping", "data: "]
 
         deadline = time.monotonic() + 5
         while app.state.runtime.broadcaster.clients:

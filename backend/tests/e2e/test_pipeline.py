@@ -82,7 +82,7 @@ def wait_for_free(lines, free: int, deadline: float) -> dict:
     """Read status events until the ground zone shows `free`, live (not stale)."""
     seen = []
     for line in lines:
-        if line.startswith("data:"):
+        if line.startswith("data:") and line[5:].strip():  # pings have an empty `data:`
             zone = ground(json.loads(line[5:]))
             seen.append((zone["free"], zone["stale"]))
             if zone["free"] == free and not zone["stale"]:
