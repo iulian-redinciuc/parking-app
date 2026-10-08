@@ -1,0 +1,17 @@
+# gitleaks config, used by the pre-commit hook and the CI `secrets` job.
+# Keeps the default rules and adds a stricter AWS key-ID rule: the default one
+# allowlists AWS's documented `...EXAMPLE` keys, which we use to test the hook.
+title = "parking-app gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "aws-access-key-id-strict"
+description = "AWS access key ID (including documented example keys)"
+regex = '''\b((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16})\b'''
+keywords = ["a3t", "akia", "asia", "abia", "acca"]
+
+[allowlist]
+description = "Docs that quote the example key on purpose"
+paths = ['''^docs/phases/phase-0-foundations\.md$''']

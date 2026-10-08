@@ -23,8 +23,8 @@
 | CSRF | Bearer tokens instead of cookies, so there's nothing for a browser to send automatically |
 | API abuse / DoS | Rate limits (slowapi), Cloudflare in front (Option A), SSE queues bounded per client, a cap on concurrent SSE clients (e.g. 1000) |
 | Push spam through our API | Rate limits on subscribe/test. Pushes only ever go to subscriptions the browser created. Content is generated server-side only |
-| Secrets leaked to the public repo | `.env`, `data/`, `models/` in `.gitignore`. **gitleaks** pre-commit hook + CI job. GitHub secret scanning and push protection switched on |
-| Compromised dependency | Dependabot (pip, npm, actions, docker). Lockfiles (`uv.lock`, `package-lock.json`). Images pinned to major versions |
+| Secrets leaked to the public repo | `.env`, `data/`, `models/` in `.gitignore`. **gitleaks** pre-commit hook + CI job (both use `.gitleaks.toml`: default rules plus a strict AWS key-ID rule that also catches `…EXAMPLE` keys). GitHub secret scanning and push protection switched on |
+| Compromised dependency | Dependabot (pip, npm, actions weekly; docker added with the Dockerfiles in P2.10). Lockfiles (`uv.lock`, `package-lock.json`). Images pinned to major versions |
 | A compromise spreads to other software on the same machine | Containers run as non-root, internal networks, read-only mounts where possible, resource limits. Only the API is exposed (via the public entry). Dev and production use **different secrets** |
 
 ## 3. Public-repo rules
