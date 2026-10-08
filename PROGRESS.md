@@ -19,7 +19,7 @@
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
-| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 0 / 11 | ⬜ | | |
+| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 1 / 11 | 🟡 | 2026-10-08 | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
@@ -42,8 +42,8 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P0.7** README for developers
 - [x] **P0.8** Inputs from Iulian: sample image(s) + open questions 2–4 (one photo; questions 2–4 not decided, working assumptions recorded)
 
-## Phase 1: Still-image proof of concept ⬜
-- [ ] **P1.1** Sample data layout
+## Phase 1: Still-image proof of concept 🟡
+- [x] **P1.1** Sample data layout
 - [ ] **P1.2** Config loader
 - [ ] **P1.3** Slot editor (slots / lines / label modes)
 - [ ] **P1.4** Detector module + model export
@@ -226,3 +226,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - P0.6: GitHub secret scanning + push protection enabled; `.pre-commit-config.yaml` (gitleaks v8.30.1, ruff v0.16.10) installed; `.gitleaks.toml`; `.github/dependabot.yml` (pip, npm, actions weekly). A commit containing the AWS example key ID is blocked locally; full-history gitleaks scan clean; ruff + pytest (6 passed) pass.
 - P0.7: developer README (what it is, links, repo layout, prerequisites uv/Node 22/Docker, backend tests, frontend in mock mode, CI, public-repo rules + pre-commit). Followed it on a fresh clone in `/tmp`: pytest (6 passed), ruff, `parking --version`, `npm ci`, lint, format check, vitest (1 passed), build and `npm run dev` at `/parking-app/` all work.
 - P0.8: one sample photo provided (`data/samples/ground-01.jpg`, not committed); open questions 2–4 not decided by Iulian, so working assumptions were recorded and Phase 1 proceeds with them.
+- P1.1: created git-ignored `data/labels/` and `data/reference/`; copied `ground-01.jpg` to `data/reference/cam-ground.jpg` (the only image, so it's the reference); recorded its conditions (`day`, `dry`; partly full) in git-ignored `data/samples/CONDITIONS.md` for the P1.8 labels file. `ls data/samples` lists the image and `git status` stays clean.
