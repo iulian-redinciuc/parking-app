@@ -1,0 +1,85 @@
+# The lot's real configuration. Spec: docs/design/config.md §1 (template: lot.example.yaml)
+# Committed: holds no secrets and no coordinates. ${VAR} values come from deploy/.env.
+# PLACEHOLDERS: zone names, capacities and cameras are copied from the example until
+# open questions 3 (spaces per level, ramp, lanes) and 4 (camera layout) in PROGRESS.md
+# are answered. The ground capacity comes from the slot file once slots are drawn (P1.3).
+version: 1
+
+lot:
+  id: main                         # used in logs and payloads
+  name: "Parking"
+  location:                        # values come from .env so they stay out of git
+    lat: ${LOT_LAT}
+    lon: ${LOT_LON}
+  notify_radius_m: 500
+  timezone: ${TZ}                  # e.g. Europe/Bucharest; used for schedules and stats buckets
+
+zones:
+  - id: ground
+    name: { en: "Ground" }
+    method: slots                  # slots | count | flow
+    capacity: null                 # null = number of slots in this zone (slots method only)
+  - id: underground
+    name: { en: "Underground" }
+    method: flow
+    capacity: 60                   # placeholder until open question 3 is answered
+    reset:                         # optional, flow zones only
+      enabled: false
+      cron: "0 3 * * *"            # local time
+      value: 0
+
+cameras:
+  - id: cam-ground
+    role: occupancy                # occupancy | flow
+    zones: [ground]                # zones this camera reports on
+    source: "file:data/samples/ground-01.jpg"
+    # Phase 2:  "folder:data/replay/ground?interval=5&loop=true"
+    # Phase 4:  "snapshot:${CAM_GROUND_SNAPSHOT_URL}"  or  "rtsp:${CAM_GROUND_RTSP_URL}"
+    sample_every_s: 5
+    slots_file: config/slots/cam-ground.json
+    control_url: http://vision-occupancy:9000   # how the API reaches this worker (VPN address in T2)
+    detector:
+      runtime: ncnn                # ncnn | openvino | onnx | engine | hailo; per machine, see vision.md §11
+      model: models/yolo11n-seg_ncnn_model
+      imgsz: 1280
+      conf: 0.35
+      classes: [car, motorcycle, bus, truck]
+      use_masks: true
+    occupancy:
+      threshold: 0.30              # overlap ratio above which a slot is "taken"
+      mode: mask                   # mask | box_bottom
+    smoothing:
+      consistent_readings: 3
+    health:
+      black_mean_max: 12
+      frozen_diff_max: 0.5
+      frozen_frames: 6
+      blur_laplacian_min: 40
+      shift_check_every_s: 300
+      shift_max_px: 8
+
+  - id: cam-ramp
+    role: flow
+    zones: [underground]
+    source: "rtsp:${CAM_RAMP_RTSP_URL}"
+    fps: 10
+    lines_file: config/lines/cam-ramp.json
+    control_url: http://vision-flow:9000
+    detector:
+      runtime: ncnn
+      model: models/yolo11n_ncnn_model
+      imgsz: 640
+      conf: 0.4
+      classes: [car, motorcycle, bus, truck]
+      use_masks: false
+    flow:
+      min_track_frames: 5
+      motion_min_area_px: 1500
+
+api:
+  stale_after_s: 60
+  sse_ping_s: 15
+  trend_window_min: 15
+  levels:                          # free / capacity thresholds (see api.md#levels)
+    plenty: 0.20
+    filling: 0.05

@@ -208,6 +208,8 @@ video_time_s,direction,note
 | `DEBUG_RETENTION_HOURS` | `24` | workers |
 | `TUNNEL_TOKEN` | from the Cloudflare dashboard | cloudflared |
 | `LOG_LEVEL` | `INFO` | all |
+| `PARKING_VERSION` | `latest` (dev) or `v0.x.y` (pinned in production) | compose (image tag) |
+| `VISION_CPUS`, `FLOW_CPUS` | `1.0`, `1.5` | compose (worker CPU limits, per machine; [deployment.md §4](deployment.md#4-compose-deploy)) |
 
 Frontend build-time variables (not secrets, because they end up in public JS; set per build: preview or production):
 
