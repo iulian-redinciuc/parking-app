@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Parking slot editor</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        font:
+          14px system-ui,
+          sans-serif;
+        background: #0b1120;
+        color: #e5e7eb;
+      }
+      body {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        grid-template-columns: 1fr 300px;
+      }
+      header {
+        grid-column: 1 / 3;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        padding: 6px 8px;
+        background: #1f2937;
+      }
+      #canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        cursor: crosshair;
+      }
+      main {
+        min-height: 0;
+        min-width: 0;
+      }
+      aside {
+        overflow: auto;
+        padding: 8px 10px;
+        background: #111827;
+        border-left: 1px solid #374151;
+      }
+      footer {
+        grid-column: 1 / 3;
+        padding: 4px 8px;
+        background: #1f2937;
+        min-height: 1.8em;
+      }
+      fieldset {
+        border: 1px solid #374151;
+        margin: 0 0 10px;
+        padding: 6px 8px;
+      }
+      legend {
+        color: #9ca3af;
+      }
+      label {
+        display: block;
+        margin: 4px 0;
+      }
+      input,
+      select,
+      button {
+        font: inherit;
+        color: inherit;
+        background: #374151;
+        border: 1px solid #4b5563;
+        border-radius: 4px;
+        padding: 3px 6px;
+      }
+      input[type='text'] {
+        width: 100%;
+      }
+      button:hover {
+        background: #4b5563;
+      }
+      .tab[aria-pressed='true'] {
+        background: #2563eb;
+        border-color: #3b82f6;
+      }
+      .file {
+        position: relative;
+        overflow: hidden;
+      }
+      .file input {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+      .sep {
+        width: 1px;
+        align-self: stretch;
+        background: #4b5563;
+        margin: 0 4px;
+      }
+      .errors {
+        color: #fca5a5;
+      }
+      kbd {
+        background: #374151;
+        border-radius: 3px;
+        padding: 0 4px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      ul {
+        padding-left: 18px;
+        margin: 4px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <button class="tab" data-mode="slots" aria-pressed="true">Slots</button>
+      <button class="tab" data-mode="lines" aria-pressed="false">Lines</button>
+      <button class="tab" data-mode="label" aria-pressed="false">Label</button>
+      <span class="sep"></span>
+      <label class="file" role="button"
+        ><button tabindex="-1">Open image(s)…</button
+        ><input id="images" type="file" accept="image/*" multiple
+      /></label>
+      <span class="sep"></span>
+      <label class="file"
+        ><button tabindex="-1">Import slots…</button
+        ><input id="import-slots" type="file" accept=".json,application/json"
+      /></label>
+      <button id="export-slots">Export slots</button>
+      <label class="file"
+        ><button tabindex="-1">Import lines…</button
+        ><input id="import-lines" type="file" accept=".json,application/json"
+      /></label>
+      <button id="export-lines">Export lines</button>
+      <label class="file"
+        ><button tabindex="-1">Import labels…</button
+        ><input id="import-labels" type="file" accept=".json,application/json"
+      /></label>
+      <button id="export-labels">Export labels</button>
+      <span class="sep"></span>
+      <button id="fit" title="Fit image (F)">Fit</button>
+    </header>
+
+    <main><canvas id="canvas" tabindex="0"></canvas></main>
+
+    <aside>
+      <fieldset>
+        <legend>File</legend>
+        <label>Camera id <input id="camera-id" type="text" value="cam-ground" /></label>
+        <label
+          >Reference image
+          <input id="reference" type="text" placeholder="data/reference/cam-ground.jpg"
+        /></label>
+        <div id="image-info">No image loaded</div>
+      </fieldset>
+
+      <section id="panel-slots">
+        <fieldset>
+          <legend>New spaces</legend>
+          <label
+            >Zone
+            <select id="zone">
+              <option>ground</option>
+              <option>underground</option>
+            </select>
+          </label>
+          <div id="slot-count"></div>
+        </fieldset>
+        <fieldset id="selected" disabled>
+          <legend>Selected space</legend>
+          <label>Id <input id="sel-id" type="text" /></label>
+          <label>Zone <input id="sel-zone" type="text" /></label>
+          <label
+            >Type
+            <select id="sel-type"></select>
+          </label>
+          <button id="dup-right" title="D">Duplicate right</button>
+          <button id="dup-down" title="Shift+D">Duplicate down</button>
+          <button id="delete" title="Delete">Delete</button>
+        </fieldset>
+        <div id="errors" class="errors"></div>
+      </section>
+
+      <section id="panel-lines" hidden>
+        <fieldset>
+          <legend>Draw</legend>
+          <label
+            >Target
+            <select id="line-target">
+              <option value="line_a">line_a (2 clicks)</option>
+              <option value="line_b">line_b (2 clicks)</option>
+              <option value="roi">roi (polygon)</option>
+            </select>
+          </label>
+          <label
+            >in_direction
+            <select id="in-direction">
+              <option value="a_to_b">a_to_b (A then B = IN)</option>
+              <option value="b_to_a">b_to_a (B then A = IN)</option>
+            </select>
+          </label>
+        </fieldset>
+      </section>
+
+      <section id="panel-label" hidden>
+        <fieldset>
+          <legend>Image</legend>
+          <div id="label-image">—</div>
+          <button id="prev">◀ Prev</button>
+          <button id="next">Next ▶</button>
+          <label
+            >Conditions (comma separated)
+            <input id="conditions" type="text" list="condition-list" placeholder="day, dry"
+          /></label>
+          <datalist id="condition-list">
+            <option>day, dry</option>
+            <option>night</option>
+            <option>rain</option>
+            <option>dusk</option>
+            <option>snow</option>
+          </datalist>
+          <button id="mark-labelled" title="Record this image even if every space is free">
+            Mark labelled
+          </button>
+          <div id="label-summary"></div>
+        </fieldset>
+      </section>
+
+      <fieldset>
+        <legend>Help</legend>
+        <ul id="help-slots">
+          <li>Click to add points; click the first point or <kbd>Enter</kbd> to close.</li>
+          <li><kbd>Esc</kbd> cancels / deselects.</li>
+          <li>Click a space to select; drag its corners.</li>
+          <li>
+            <kbd>Delete</kbd> removes it, <kbd>D</kbd> duplicates right, <kbd>Shift</kbd>+<kbd
+              >D</kbd
+            >
+            down.
+          </li>
+        </ul>
+        <ul id="help-lines" hidden>
+          <li>Pick a target, then click 2 points for a line or a polygon for the ROI.</li>
+          <li>Drag the handles to adjust.</li>
+        </ul>
+        <ul id="help-label" hidden>
+          <li>Import the slot file, open the images, click spaces: free → taken → unsure.</li>
+          <li><kbd>←</kbd> <kbd>→</kbd> previous / next image.</li>
+        </ul>
+        <ul>
+          <li>Wheel or pinch zooms; drag pans; <kbd>F</kbd> fits.</li>
+        </ul>
+      </fieldset>
+    </aside>
+
+    <footer id="status">Open an image to start.</footer>
+
+    <script type="module">
+      import { createEditor, formatJson, SLOT_TYPES } from './editor.js'
+
+      const $ = (id) => document.getElementById(id)
+      const setStatus = (text) => ($('status').textContent = text)
+      let files = []
+      let fileIndex = -1
+
+      const editor = createEditor($('canvas'), {
+        cameraId: $('camera-id').value,
+        zone: $('zone').value,
+        onChange: render,
+        onStatus: setStatus,
+      })
+      window.editor = editor // handy from the devtools console
+
+      for (const t of SLOT_TYPES) $('sel-type').append(new Option(t, t))
+
+      function render(ed) {
+        const s = ed.state
+        $('camera-id').value = s.cameraId
+        $('reference').value = s.referenceImage || ''
+        $('image-info').textContent = s.imageSize
+          ? `${s.imageName || '(no image)'} · ${s.imageSize.join(' × ')}`
+          : 'No image loaded'
+        for (const b of document.querySelectorAll('.tab')) {
+          b.setAttribute('aria-pressed', String(b.dataset.mode === s.mode))
+        }
+        for (const m of ['slots', 'lines', 'label']) {
+          $(`panel-${m}`).hidden = s.mode !== m
+          $(`help-${m}`).hidden = s.mode !== m
+        }
+        const zones = {}
+        for (const sl of s.slots) zones[sl.zone] = (zones[sl.zone] || 0) + 1
+        $('slot-count').textContent =
+          `${s.slots.length} spaces` +
+          (s.slots.length
+            ? ` (${Object.entries(zones)
+                .map(([z, n]) => `${z} ${n}`)
+                .join(', ')})`
+            : '')
+        const sel = ed.selectedSlot()
+        $('selected').disabled = !sel
+        if (sel && document.activeElement?.closest('#selected') == null) {
+          $('sel-id').value = sel.id
+          $('sel-zone').value = sel.zone
+          $('sel-type').value = sel.type
+        }
+        if (!sel) $('sel-id').value = $('sel-zone').value = ''
+        const errors = ed.validate()
+        $('errors').textContent = errors.length ? `⚠ ${errors.join('; ')}` : ''
+        $('line-target').value = s.lineTarget
+        $('in-direction').value = s.lines.inDirection
+        const entry = ed.currentLabels()
+        $('label-image').textContent = files.length
+          ? `${fileIndex + 1} / ${files.length}: ${s.imageName}`
+          : s.imageName || '—'
+        if (document.activeElement !== $('conditions')) {
+          $('conditions').value = entry.conditions.join(', ')
+        }
+        const labelled = s.imageName && s.labelImages[s.imageName] ? 'labelled' : 'not labelled yet'
+        $('label-summary').textContent =
+          `${labelled} · taken ${entry.taken.length} · unsure ${entry.unsure.length} · ` +
+          `${Object.keys(s.labelImages).length} image(s) in the labels file`
+      }
+
+      async function showImage(i) {
+        if (!files.length) return
+        fileIndex = (i + files.length) % files.length
+        await editor.loadImage(files[fileIndex])
+        if (!editor.state.referenceImage && editor.state.mode === 'slots') {
+          editor.setReferenceImage(`data/reference/${files[fileIndex].name}`)
+        }
+      }
+
+      async function readJson(input) {
+        const f = input.files[0]
+        input.value = ''
+        return JSON.parse(await f.text())
+      }
+
+      function download(data, name) {
+        const blob = new Blob([formatJson(data)], { type: 'application/json' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = name
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+        setStatus(`Exported ${name}`)
+      }
+
+      const guard = (fn) => async (e) => {
+        try {
+          await fn(e)
+        } catch (err) {
+          setStatus(`Error: ${err.message}`)
+        }
+      }
+
+      for (const b of document.querySelectorAll('.tab')) {
+        b.addEventListener('click', () => editor.setMode(b.dataset.mode))
+      }
+      $('images').addEventListener(
+        'change',
+        guard(async (e) => {
+          files = [...e.target.files].sort((a, b) => a.name.localeCompare(b.name))
+          e.target.value = ''
+          await showImage(0)
+        }),
+      )
+      $('import-slots').addEventListener(
+        'change',
+        guard(async (e) => {
+          editor.loadSlotFile(await readJson(e.target))
+          setStatus(`Imported ${editor.state.slots.length} spaces`)
+        }),
+      )
+      $('import-lines').addEventListener(
+        'change',
+        guard(async (e) => editor.loadLineFile(await readJson(e.target))),
+      )
+      $('import-labels').addEventListener(
+        'change',
+        guard(async (e) => editor.loadLabelsFile(await readJson(e.target))),
+      )
+      $('export-slots').addEventListener(
+        'click',
+        guard(() => {
+          const errors = editor.validate()
+          if (errors.length) throw new Error(errors.join('; '))
+          download(editor.slotFile(), `${editor.state.cameraId}.json`)
+        }),
+      )
+      $('export-lines').addEventListener(
+        'click',
+        guard(() => download(editor.lineFile(), `${editor.state.cameraId}.json`)),
+      )
+      $('export-labels').addEventListener(
+        'click',
+        guard(() => download(editor.labelsFile(), `${editor.state.cameraId}.json`)),
+      )
+      $('fit').addEventListener('click', () => editor.fit())
+      $('camera-id').addEventListener('change', (e) => editor.setCameraId(e.target.value.trim()))
+      $('reference').addEventListener('change', (e) =>
+        editor.setReferenceImage(e.target.value.trim()),
+      )
+      $('zone').addEventListener('change', (e) => editor.setZone(e.target.value))
+      $('sel-id').addEventListener('change', (e) =>
+        editor.updateSelected({ id: e.target.value.trim() }),
+      )
+      $('sel-zone').addEventListener('change', (e) =>
+        editor.updateSelected({ zone: e.target.value.trim() }),
+      )
+      $('sel-type').addEventListener('change', (e) =>
+        editor.updateSelected({ type: e.target.value }),
+      )
+      $('dup-right').addEventListener('click', () => editor.duplicateSelected('right'))
+      $('dup-down').addEventListener('click', () => editor.duplicateSelected('down'))
+      $('delete').addEventListener('click', () => editor.deleteSelected())
+      $('line-target').addEventListener('change', (e) => editor.setLineTarget(e.target.value))
+      $('in-direction').addEventListener('change', (e) => editor.setInDirection(e.target.value))
+      $('conditions').addEventListener('change', (e) =>
+        editor.setConditions(
+          e.target.value
+            .split(',')
+            .map((c) => c.trim())
+            .filter(Boolean),
+        ),
+      )
+      $('mark-labelled').addEventListener('click', () => editor.markLabelled())
+      $('prev').addEventListener(
+        'click',
+        guard(() => showImage(fileIndex - 1)),
+      )
+      $('next').addEventListener(
+        'click',
+        guard(() => showImage(fileIndex + 1)),
+      )
+
+      window.addEventListener(
+        'keydown',
+        guard(async (e) => {
+          if (e.target.closest('input, select, textarea')) {
+            if (e.key === 'Escape') e.target.blur()
+            return
+          }
+          if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+            e.preventDefault()
+            return showImage(fileIndex + (e.key === 'ArrowRight' ? 1 : -1))
+          }
+          if (editor.handleKey(e)) e.preventDefault()
+        }),
+      )
+
+      // Optional: ?image=<url>&slots=<url>&lines=<url>&labels=<url> (when served over http).
+      const q = new URLSearchParams(location.search)
+      guard(async () => {
+        if (q.get('image')) {
+          await editor.loadImage(q.get('image'))
+        }
+        for (const [key, load] of [
+          ['slots', editor.loadSlotFile],
+          ['lines', editor.loadLineFile],
+          ['labels', editor.loadLabelsFile],
+        ]) {
+          if (q.get(key)) load(await (await fetch(q.get(key))).json())
+        }
+        if (q.get('mode')) editor.setMode(q.get('mode'))
+      })()
+    </script>
+  </body>
+</html>

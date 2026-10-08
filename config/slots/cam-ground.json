@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "camera_id": "cam-ground",
+  "image_size": [1932, 2576],
+  "reference_image": "data/reference/cam-ground.jpg",
+  "slots": [
+    { "id": "G01", "zone": "ground", "polygon": [[727, 328], [1192, 372], [1180, 620], [717, 580]], "type": "standard" },
+    { "id": "G02", "zone": "ground", "polygon": [[717, 580], [1180, 620], [1187, 864], [727, 837]], "type": "standard" },
+    { "id": "G03", "zone": "ground", "polygon": [[727, 837], [1187, 864], [1187, 1107], [717, 1087]], "type": "standard" },
+    { "id": "G04", "zone": "ground", "polygon": [[717, 1087], [1187, 1107], [1157, 1331], [727, 1331]], "type": "standard" },
+    { "id": "G05", "zone": "ground", "polygon": [[727, 1331], [1157, 1331], [1160, 1560], [722, 1565]], "type": "standard" },
+    { "id": "G06", "zone": "ground", "polygon": [[722, 1565], [1160, 1560], [1147, 1796], [722, 1810]], "type": "standard" },
+    { "id": "G07", "zone": "ground", "polygon": [[722, 1810], [1147, 1796], [1157, 2029], [727, 2064]], "type": "standard" },
+    { "id": "G08", "zone": "ground", "polygon": [[727, 2064], [1157, 2029], [1147, 2260], [720, 2331]], "type": "standard" },
+    { "id": "G09", "zone": "ground", "polygon": [[1727, 157], [1931, 170], [1931, 400], [1723, 389]], "type": "standard" },
+    { "id": "G10", "zone": "ground", "polygon": [[1723, 389], [1931, 400], [1931, 629], [1713, 616]], "type": "standard" },
+    { "id": "G11", "zone": "ground", "polygon": [[1713, 616], [1931, 629], [1931, 853], [1713, 843]], "type": "standard" },
+    { "id": "G12", "zone": "ground", "polygon": [[1713, 843], [1931, 853], [1931, 1075], [1707, 1067]], "type": "standard" },
+    { "id": "G13", "zone": "ground", "polygon": [[1707, 1067], [1931, 1075], [1931, 1300], [1700, 1294]], "type": "standard" },
+    { "id": "G14", "zone": "ground", "polygon": [[1700, 1294], [1931, 1300], [1931, 1509], [1696, 1516]], "type": "standard" },
+    { "id": "G15", "zone": "ground", "polygon": [[1696, 1516], [1931, 1509], [1931, 1724], [1693, 1737]], "type": "standard" },
+    { "id": "G16", "zone": "ground", "polygon": [[1693, 1737], [1931, 1724], [1931, 1941], [1688, 1957]], "type": "standard" },
+    { "id": "G17", "zone": "ground", "polygon": [[1688, 1957], [1931, 1941], [1931, 2149], [1683, 2177]], "type": "standard" }
+  ],
+  "count_zones": []
+}

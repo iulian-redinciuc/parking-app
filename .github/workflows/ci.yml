@@ -50,6 +50,12 @@ jobs:
       - run: npm run format:check
       - run: npm run test -- --run
       - run: npm run build
+      - name: Slot editor (lint, format, unit tests)
+        working-directory: .
+        run: |
+          frontend/node_modules/.bin/eslint tools/slot-editor
+          frontend/node_modules/.bin/prettier --config frontend/.prettierrc.json --check tools/slot-editor
+          node --test tools/slot-editor/editor.test.js
 
   secrets:
     runs-on: ubuntu-latest

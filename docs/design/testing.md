@@ -10,6 +10,7 @@
 | Vision smoke test on **synthetic** images | `backend/tests/fixtures/` | pytest (marked `slow`, needs model) | ✅ nightly / manual |
 | End-to-end (replay feed → worker → API → SSE) | `backend/tests/e2e/` + `deploy/docker-compose.test.yml` | pytest + docker compose | ✅ on PRs touching backend |
 | Frontend unit/component | `frontend/src/**/*.test.tsx` | Vitest, Testing Library | ✅ |
+| Slot editor (pure helpers: geometry, ids, file formats, labels) | `tools/slot-editor/editor.test.js` | `node --test` (no dependencies) | ✅ (frontend job) |
 | Frontend E2E | `frontend/e2e/` | Playwright (`iPhone 13`, `Pixel 7`) with `VITE_API_BASE=mock` | ✅ |
 | Quality | — | Lighthouse CI (PWA, a11y ≥ 90) | ✅ on frontend PRs |
 | Load | `scripts/load/sse.py` | asyncio + httpx, 500 clients | manual, Phase 8 |
@@ -53,7 +54,7 @@ Every evaluation run writes `out/eval/<set>-<YYYYMMDD-HHMM>.json`. Copy the head
 
 Jobs:
 1. **backend**: `uv sync --frozen`, `ruff check`, `ruff format --check`, `pytest -m "not slow"`.
-2. **frontend**: `npm ci`, `npm run lint`, `npm run format:check`, `npm run test -- --run`, `npm run build`, `npx playwright install --with-deps chromium webkit`, `npm run e2e`.
+2. **frontend**: `npm ci`, `npm run lint`, `npm run format:check`, `npm run test -- --run`, `npm run build`, then the slot editor checks from the repo root (`eslint tools/slot-editor` with its own config, `prettier --check` with the frontend's config, `node --test tools/slot-editor/editor.test.js`), `npx playwright install --with-deps chromium webkit`, `npm run e2e`.
 3. **secrets**: gitleaks (`gitleaks/gitleaks-action@v2`, full history checkout).
 4. **e2e** (only if `backend/**` or `deploy/**` changed): build images, `docker compose -f deploy/docker-compose.test.yml up --abort-on-container-exit`.
 5. **images** (only if `backend/**` changed): `docker buildx build --platform linux/amd64,linux/arm64` for both targets, without pushing. This catches "works on the Pi, breaks on x86" (and the reverse) early. Pushing images happens only on release tags ([deployment.md §8](deployment.md#8-releases-and-updating)).

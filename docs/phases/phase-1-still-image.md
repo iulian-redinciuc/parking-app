@@ -45,7 +45,7 @@ P1.2 config┴─> P1.4 detector ─> P1.5 occupancy ─> P1.6 annotate ─> P1.
 ## P1.3: Slot editor (standalone web page)
 **Files:** `tools/slot-editor/index.html`, `tools/slot-editor/editor.js`, `tools/slot-editor/README.md`
 
-Plain HTML and JavaScript with no build step, so you open it by double-clicking or via `python -m http.server`. The core lives in `editor.js` as an ES module (`createEditor(canvas, opts)`) so the Phase 7 admin can import it.
+Plain HTML and JavaScript with no build step, served with `python3 -m http.server` from the repo root (browsers block ES modules on `file://`, so double-clicking doesn't work). The core lives in `editor.js` as an ES module (`createEditor(canvas, opts)`) so the Phase 7 admin can import it.
 
 **Features**
 1. **Load image** (file picker) → drawn on a canvas, fitted to the window. Mouse-wheel / pinch zoom, drag to pan.
@@ -53,7 +53,8 @@ Plain HTML and JavaScript with no build step, so you open it by double-clicking 
    - Click to add points; click the first point or press Enter to close a polygon. Esc cancels.
    - Select a slot → drag its corners; Delete removes it; edit `id`, `zone`, `type` in a side panel.
    - Auto-name the next slot (`G01`, `G02`, …), with the zone chosen in a dropdown.
-   - "Duplicate right" (`D`): copies the selected slot shifted by its own width. Rows of identical spaces become fast to draw.
+   - "Duplicate right" (`D`): copies the selected slot shifted by its own width. Rows of identical spaces become fast to draw. `Shift+D` duplicates down, for rows that run vertically in the image.
+   - Clicks near an existing corner snap to it, and a click on a corner starts a new space instead of selecting, so neighbouring spaces share edges.
 3. **Lines mode** (for Phase 5): draw `line_a`, `line_b`, the ROI polygon, and pick `in_direction`.
 4. **Label mode**: load a slot file + an image → click slots to cycle *free → taken → unsure* → saves into a labels JSON ([config.md §4](../design/config.md#4-ground-truth-labels)). Keyboard: arrow keys move to the next image in a multi-file selection.
 5. **Import/Export JSON** in the exact formats of [config.md §2–4](../design/config.md#2-slot-file-configslotscamerajson). `image_size` = the natural size of the loaded image.

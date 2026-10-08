@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from parking.config import load_slots
+
 REPO = Path(__file__).resolve().parents[3]
 ENV_EXAMPLE = REPO / "deploy" / ".env.example"
 LOT_FILES = [REPO / "config" / "lot.example.yaml", REPO / "config" / "lot.yaml"]
@@ -66,3 +68,17 @@ def test_lot_yaml_parses_with_env_example(path: Path):
     zone_ids = {z["id"] for z in config["zones"]}
     for camera in config["cameras"]:
         assert set(camera["zones"]) <= zone_ids
+
+
+SLOT_FILES = sorted((REPO / "config" / "slots").glob("*.json"))
+
+
+@pytest.mark.parametrize("path", SLOT_FILES, ids=lambda p: p.name)
+def test_committed_slot_files_load(path: Path):
+    slots = load_slots(path)
+    assert slots.camera_id == path.stem
+    assert slots.slots, "a committed slot file should have spaces"
+    lot = yaml.safe_load(VAR.sub("x", (REPO / "config" / "lot.yaml").read_text()))
+    camera = next(c for c in lot["cameras"] if c["id"] == slots.camera_id)
+    assert camera["slots_file"] == f"config/slots/{path.name}"
+    assert {s.zone for s in slots.slots} <= set(camera["zones"])
