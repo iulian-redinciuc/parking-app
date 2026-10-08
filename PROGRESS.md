@@ -7,13 +7,14 @@
 >
 > The [agent loop](tools/agent-loop/README.md) works through the unticked tasks in order. A task marked `⏸️` is skipped until its need is met: **delete the `⏸️ ` from its line to unblock it** (editing on GitHub works too).
 
-**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 3: P3.9.
+**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 3: P3.10 (P3.9 blocked on a Cloudflare domain + tunnel token).
 **Build order:** 0 → 1 → 2 → 3 (MVP) → 6 → 7 (no hardware needed) → 4 → 5 → 8 (need the real cameras / production machines) → 9.
 **Last updated:** 2026-10-09
 
 ## Waiting on Iulian
 
-- **Nothing for the MVP.** Undecided open questions use the working assumptions below; technical choices are made by the agent and recorded in the decision log.
+- **P3.9 (phone testing over HTTPS):** pick open question #6 (domain on Cloudflare). Then: Cloudflare Zero Trust → Networks → Tunnels → Create tunnel, put the token in `deploy/.env` as `TUNNEL_TOKEN`, add the public hostname `parking-api-dev.<domain>` with path `^/(api/|healthz$)` → `http://api:8000` plus a catch-all 404 and a cache-bypass rule (deployment.md §5 Option A), and tell the loop the hostname (e.g. in open question #6). Then remove the `⏸️ ` from P3.9. The `tunnel` service is already in `deploy/docker-compose.yml`.
+- Otherwise nothing for the MVP. Undecided open questions use the working assumptions below; technical choices are made by the agent and recorded in the decision log.
 - Later, when available (not needed now): photos or video from the **real camera position** (Phase 4) and **where production runs** (Phase 8). More sample photos (busy, nearly empty, night) would help tune the vision.
 
 ## Overview
@@ -79,7 +80,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P3.6** i18n
 - [x] **P3.7** PWA
 - [x] **P3.8** Deploy the preview to GitHub Pages with Actions
-- [ ] **P3.9** Dev API over HTTPS for phone testing
+- [ ] ⏸️ **P3.9** Dev API over HTTPS for phone testing (needs: a domain on Cloudflare + a Cloudflare Tunnel token in `deploy/.env` `TUNNEL_TOKEN` with a dev hostname such as `parking-api-dev.<domain>` routed per deployment.md §5 Option A, and Iulian's phone on mobile data for the Done-when check; open question #6)
 - [ ] **P3.10** Tests + quality gates
 
 ## Phase 6: Notifications ⬜
@@ -321,3 +322,4 @@ NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occup
 - P3.6: i18n (`src/i18n/index.ts` i18next + react-i18next, `en` fallback, detection from `navigator.languages`, bundled `locales/en.json` with plural keys `count.free_one/_other` and `banner.stale_*`; every component, banner and level/trend word goes through `t()`; `<html lang>` synced; feed sends `?lang=`). Done-when: `eslint-plugin-i18next` `no-literal-string` (`jsx-only`) is part of `npm run lint` and passes; checked it flags the 10 literals in the pre-P3.6 components and a probe file. Vitest 101 passed (new `i18n.test.ts`: detection, plurals, keys for every level/trend/connection), Playwright 20 passed (Pixel 7, system Chromium, both themes, unchanged English text), eslint, prettier, tsc + build clean (106 KB gzip JS).
 - P3.7: PWA (vite-plugin-pwa `injectManifest`, manifest from `VITE_BASE`, icons 192/512/maskable 512/apple-touch 180 from `icons/icon.svg` via `scripts/icons.mjs`; `src/sw.ts` precache + shell navigation fallback, no `/api/*` caching, `notificationclick`; header Install button from `beforeinstallprompt`; `InstallHint` for iOS Safari; iOS meta tags; mock feed honours offline at start). Done-when on the dev Pi: Playwright `e2e/pwa.spec.ts` (Pixel 7, system Chromium) — CDP `Page.getAppManifest` has no errors, `Page.getInstallabilityErrors` only `in-incognito` (Playwright contexts), all icons 200, SW `activated` and controlling, caches hold the shell and no `/api/`, offline reload and an offline new tab show header + nav + "You're offline"; install button prompts once and fits 320 px. Vitest 116 passed, Playwright 23 passed, eslint, prettier, tsc + build clean (107 KB gzip JS, SW 5.7 KB, precache 15 entries).
 - P3.8: Pages preview via Actions (`.github/workflows/pages.yml`, `API_BASE=mock`, Pages `build_type=workflow`, root placeholder removed). Local check: `VITE_BASE=/parking-app/ VITE_API_BASE=mock npm run build` clean, manifest `start_url` `/parking-app/#/`; the Pages run and the served URL are checked after the push (results in the next session's log if anything fails). Installing on a phone is for Iulian to try.
+- P3.9: blocked — needs a Cloudflare domain + tunnel token (open question #6) and a phone on mobile data. Done meanwhile: `tunnel` service (`parking-tunnel`, cloudflared, profile `public`, networks internal + egress) added to `deploy/docker-compose.yml`; `docker compose config` shows it only with `--profile public`, base + dev override validate. `CORS_ORIGINS` in `deploy/.env` already `https://iulian-redinciuc.github.io`.

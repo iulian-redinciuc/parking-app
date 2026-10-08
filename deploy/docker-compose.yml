@@ -3,7 +3,9 @@
 #   docker compose up -d
 # Dev Pi (builds the images locally): add  -f docker-compose.dev.yml
 # Isolation (deployment.md §1.1): project "parking", its own networks, API on loopback only.
-# Not yet here: vision-flow (Phase 5) and tunnel (P3.9).
+# Public entry (deployment.md §5 Option A): only while testing,
+#   docker compose --profile public up -d   ...   docker compose --profile public down
+# Not yet here: vision-flow (Phase 5).
 name: parking
 
 x-common: &common
@@ -47,6 +49,15 @@ services:
       retries: 3
       start_period: 60s
       start_interval: 2s
+
+  tunnel:
+    container_name: parking-tunnel
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment: { TUNNEL_TOKEN: "${TUNNEL_TOKEN}" }
+    restart: unless-stopped
+    networks: [internal, egress]                               # internal: reach api:8000
+    profiles: ["public"]
 
 networks:
   internal: { internal: true }
