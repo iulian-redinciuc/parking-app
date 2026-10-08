@@ -39,6 +39,7 @@ Returned by `GET /api/status` and sent in every SSE `status` event.
 | `total.stale` | `true` if **any** zone is stale |
 | `slots` | Map slot id → taken, only for `slots` zones (used by the Phase 9 slot map) |
 | `trend` | `filling` / `emptying` / `steady` (see [vision.md §8](vision.md#8-fusion-confidence-trend-parkingcorefusionpy)) |
+| `updated_at` (zone) | `null` until the zone has received data |
 
 ### Levels
 | `level` | Rule (`free / capacity`) | UI word | Colour token |
@@ -169,6 +170,8 @@ Auth: `Authorization: Bearer <WORKER_TOKEN>` (from `.env`). These routes are **n
 Delivery rules:
 - **Observations:** if the API is unreachable, the worker drops the observation (only the latest matters) and keeps going.
 - **Flow events:** must not be lost. The worker keeps an **outbox** (in memory, plus `data/outbox/<camera>.jsonl` on disk so it survives a worker restart). It retries with backoff (1 → 30 s) and removes events once the API accepts them. `event_id` makes retries safe: duplicates are ignored.
+- **Client** (`parking/workers/api_client.py`, P2.1): 5 s timeout; the outbox file is rewritten atomically after each accepted batch and deleted when empty; on start-up a torn last line (crash mid-write) and repeated `event_id`s are skipped. Every failure (network, 5xx, also 4xx) is retried with backoff, so a misconfigured token never loses events. Print mode writes each payload (flow events as a `{"events": […]}` batch) as one JSON line to stdout and sends nothing.
+- **Payload models:** `parking/messages.py`. Unknown fields are ignored (forward compatibility); timestamps are serialised as UTC with milliseconds and `Z`, and a timestamp without a zone is read as UTC.
 - **Crashed worker:** there's no "last will" message. The API marks a camera `down` when it hasn't received a health message for 30 s, and its zones become `stale` after `stale_after_s`.
 
 ### 5.2 API → workers (control)
