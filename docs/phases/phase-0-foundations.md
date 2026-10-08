@@ -100,7 +100,7 @@
 4. `App.tsx`: a `HashRouter` with one route showing "Parking: coming soon", using the colour tokens from [frontend.md §4](../design/frontend.md#4-styling-and-accessibility).
 5. `.env.development`: `VITE_API_BASE=mock`.
 6. A smoke test: renders the app and finds the heading.
-7. Scripts: `dev`, `build`, `preview`, `lint`, `test`, `e2e`.
+7. Scripts: `dev`, `build`, `preview`, `lint` (ESLint), `format` / `format:check` (Prettier), `test`, `e2e`.
 
 **Done when:** `npm run build && npm test -- --run && npm run lint` pass.
 

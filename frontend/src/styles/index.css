@@ -1,0 +1,43 @@
+@import 'tailwindcss';
+
+/* Design tokens: docs/design/frontend.md §4 */
+:root {
+  --bg: #ffffff;
+  --surface: #f4f5f7;
+  --text: #111418;
+  --muted: #5b6470;
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --bad: #cf222e;
+  --accent: #0969da;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --accent: #58a6ff;
+  }
+}
+
+/* Expose the tokens as Tailwind colours: bg-bg, bg-surface, text-text, text-muted, text-ok… */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-accent: var(--accent);
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+}
