@@ -61,9 +61,9 @@ Every task in a phase guide has:
 
 ### Git workflow
 - `main` is always deployable. Pushing to `main` redeploys the GitHub Pages **preview**. Production is deployed only from release tags (`v*`).
-- One branch per task or small group of tasks: `p1.5-occupancy`, `p3.4-live-screen`.
 - Commit messages start with the task ID: `P1.5: slot overlap scoring with mask/box modes`.
-- Open a PR to `main` so CI runs, then merge when it's green.
+- **Agent loop** ([tools/agent-loop](../tools/agent-loop/README.md)): one commit per task, pushed straight to `main`. CI runs on every push. A red CI run is fixed by the next session before it starts new work.
+- **Manual work:** a branch per task (`p1.5-occupancy`) and a PR to `main` is fine too. Merge when CI is green.
 
 ### Glossary
 | Term | Meaning |

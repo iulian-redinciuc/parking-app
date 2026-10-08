@@ -4,9 +4,15 @@
 > Task IDs (e.g. **P1.5**) link to the step-by-step guides. Tick a box when the task's "Done when" check passes.
 >
 > Status: ⬜ not started · 🟡 in progress · ✅ done · ⏸️ blocked · ⏭️ skipped
+>
+> The [agent loop](tools/agent-loop/README.md) works through the unticked tasks in order. A task marked `⏸️` is skipped until its need is met: **delete the `⏸️ ` from its line to unblock it** (editing on GitHub works too).
 
 **Current focus:** Phase 0 → P0.1–P0.7 (skeleton), waiting on **P0.8** (sample image + answers).
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-08
+
+## Waiting on Iulian
+
+- **P0.8**: sample photo(s) of the lot in `data/samples/` on the dev Pi ([what to send](docs/design/hardware.md#1-sample-images-for-phase-1-what-to-send)), and answers to open questions 2–4 below.
 
 ## Overview
 
@@ -34,7 +40,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] **P0.5** CI workflow
 - [ ] **P0.6** Secret protection (GitHub scanning, gitleaks pre-commit, Dependabot)
 - [ ] **P0.7** README for developers
-- [ ] **P0.8** Inputs from Iulian: sample image(s) + open questions 2–4
+- [ ] ⏸️ **P0.8** Inputs from Iulian: sample image(s) + open questions 2–4 (needs: Iulian to provide the photos and answers)
 
 ## Phase 1: Still-image proof of concept ⬜
 - [ ] **P1.1** Sample data layout
