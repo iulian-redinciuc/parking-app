@@ -47,14 +47,17 @@ class SlotResult:
     score: float      # 0..1 overlap ratio
     taken: bool       # score >= threshold (before temporal smoothing)
 
-def score_slots(detections, slots, frame_size, mode="mask", threshold=0.30) -> list[SlotResult]: ...
-def count_in_zones(detections, count_zones, frame_size) -> dict[str, int]: ...
+def score_slots(detections, slots, frame_size, mode="mask", threshold=0.30,
+                image_size=None) -> list[SlotResult]: ...
+def count_in_zones(detections, count_zones, frame_size, image_size=None) -> dict[str, int]: ...
 ```
+
+`slots` / `count_zones` are the slot file's `Slot` / `CountZone` lists; `frame_size` and `image_size` are `(width, height)`. Pass the slot file's `image_size` to rescale; `None` means the polygons are already in frame pixels. Shapes are built with `parking/geometry.py` (`to_polygon`, `box_bottom`, `overlap_ratio`, `bottom_center`, `point_in`).
 
 ### Algorithm
 1. Rescale slot polygons from `image_size` to the actual `frame_size` (both axes).
 2. For each detection, make its **footprint** polygon:
-   - `mode="mask"`: the mask polygon (`shapely.Polygon(mask).buffer(0)` to fix self-intersections).
+   - `mode="mask"`: the mask polygon (`shapely.Polygon(mask).buffer(0)` to fix self-intersections). A detection without a mask, or whose repaired mask is empty, falls back to `box_bottom`.
    - `mode="box_bottom"`: the bottom 35% of the box: `(x1, y2 - 0.35*(y2-y1), x2, y2)`. Approximates where the car touches the ground.
 3. For each slot: `score = max over detections of area(footprint ∩ slot) / area(slot)`.
    - Use **max**, not sum: two cars each overlapping 20% of the same slot from the sides don't make it taken.
@@ -66,7 +69,7 @@ def count_in_zones(detections, count_zones, frame_size) -> dict[str, int]: ...
 - A threshold around 0.3 tolerates cars parked off-centre while ignoring a neighbour's mirror or bumper poking in. Tune it with `parking evaluate --sweep`.
 
 ### Count mode
-`count_in_zones`: a vehicle counts toward a zone if the **bottom-centre point of its box** is inside the zone polygon. occupied = count, free = capacity − count (clamped at 0).
+`count_in_zones`: a vehicle counts toward a zone if the **bottom-centre point of its box** is inside the zone polygon. occupied = count, free = capacity − count (clamped at 0). Several polygons for the same zone are combined; a vehicle counts once per zone. Every zone in `count_zones` appears in the result, with 0 if no vehicle is in it.
 
 ## 3. Temporal smoothing (`parking/core/smoothing.py`, runs in the API)
 

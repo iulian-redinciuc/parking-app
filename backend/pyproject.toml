@@ -22,7 +22,12 @@ openvino = ["openvino>=2024.3"]          # only if an Intel machine is chosen fo
 parking = "parking.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.6",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]

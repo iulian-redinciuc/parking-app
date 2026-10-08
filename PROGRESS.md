@@ -24,7 +24,7 @@
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
-| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 3 / 11 | 🟡 | 2026-10-08 | |
+| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 4 / 11 | 🟡 | 2026-10-08 | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
@@ -52,7 +52,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P1.2** Config loader
 - [x] **P1.3** Slot editor (slots / lines / label modes)
 - [ ] ⏸️ **P1.4** Detector module + model export (needs: a decision on the camera view or the model. Everything is built, but the "Done when" check fails: the COCO-pretrained YOLO11 models find 0–1 of the 5 cars in `ground-01.jpg` because it is shot straight down. Either an angled sample photo from where Camera B could really be mounted, or approval to use a top-down/fine-tuned detector)
-- [ ] **P1.5** Geometry + occupancy scoring
+- [x] **P1.5** Geometry + occupancy scoring
 - [ ] **P1.6** Annotated output image
 - [ ] **P1.7** `parking analyze`
 - [ ] **P1.8** Ground-truth labels + `parking evaluate`
@@ -199,6 +199,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | P1.3: the slot editor is served with `python3 -m http.server` (not opened by double-click); slot corners snap to existing corners and a click on a corner starts a new space; added `Shift+D` duplicate down and *Mark labelled*. Its own `eslint.config.js` reuses the frontend's packages; CI's frontend job runs its lint, Prettier check and `node --test` (testing.md §5). `config/slots/cam-ground.json` has 17 ground spaces: 8 in the left row and 9 in the right row, which is cut off at the image edge, so those polygons stop at x = 1931 | Browsers block ES modules on `file://`; without snapping, the first click of the next space selected its neighbour; the sample photo's rows run vertically; ESLint 10 won't lint files outside the config's folder |
 | 2026-10-08 | P1.4: the `vision` extra pins **CPU-only** `torch`/`torchvision` from the PyTorch CPU index and adds `pnnx` (needed for NCNN export). `FakeDetector` reads a `{"detections": [...]}` sidecar (format in vision.md §1). The slow test uses Ultralytics' bundled `bus.jpg` (not in the repo) and expects ≥ 1 vehicle, not ≥ 1 car | Default PyPI torch wheels pull ~3 GB of CUDA libraries; NCNN export fails without pnnx; flat drawn cars aren't detected by YOLO, and no public-domain car photo is in the repo |
 | 2026-10-08 | P1.4 found that **COCO-pretrained YOLO11 doesn't detect cars seen straight down** (0–1 of 5 on `ground-01.jpg`; yolo11-obb aerial models ≤ 2 of 5). P1.4 is blocked until Iulian picks an angled camera view or a top-down model (see "Waiting on Iulian") | The detector code works (NCNN output matches PyTorch; detects the bus in `bus.jpg`), so the problem is the viewpoint, not the code |
+| 2026-10-08 | P1.5: `score_slots`/`count_in_zones` take an optional `image_size` (the slot file's) to rescale polygons to `frame_size`; in `mask` mode a detection without a usable mask falls back to `box_bottom`; `count_in_zones` returns every zone (0 if empty) and counts a vehicle once per zone. Recorded in vision.md §2 | The spec's signature had no way to know the slot file's size; the detector may return a box without a mask |
 
 ## Metrics
 
@@ -239,3 +240,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - P1.2: `backend/parking/config.py` (pydantic models for lot.yaml, slot and line files, `${VAR}` interpolation, loader rules, `SlotFile.scaled`, `Settings` for every `.env` variable) + `tests/unit/test_config.py` (38 tests); `config/lot.yaml` loads with the `.env.example` values; pytest (44 passed) and ruff pass.
 - P1.3: slot editor `tools/slot-editor/` (`index.html`, ES module `editor.js` with `createEditor`, README; slots / lines / label modes, zoom/pan/pinch, snapping, duplicate right/down, import/export in the config.md §2–4 formats) + `editor.test.js` (10 node tests) in CI. Drew the 17 visible ground spaces on `data/reference/cam-ground.jpg` by clicking in headless Chromium → `config/slots/cam-ground.json`; re-import + export is byte-identical, `load_slots()` loads it (ground capacity 17), new pytest checks committed slot files (45 passed); label and lines modes also exported correctly.
 - P1.4 (⏸️ blocked): `parking/vision/detector.py` (`Detection`, `Detector`, `YoloDetector`, `FakeDetector`, class mapping/filter, `export_model`) + `parking models export`; exported `yolo11n-seg` @ 1280 and `yolo11n` @ 640 to NCNN; `test_detector_filter.py` (8 unit + 1 slow, all pass; pytest 54 passed, ruff clean). Done-when check fails: 0 vehicles from `yolo11n-seg` @ 1280 (1 from `yolo11n` @ 640) on `ground-01.jpg`, which shows 5 cars from straight above. Needs Iulian's choice of camera view or model.
+- P1.5: `parking/geometry.py` (polygon repair, box bottom, overlap ratio, bottom-centre, point-in) + `parking/vision/occupancy.py` (`score_slots` with an STRtree over footprints, max overlap, mask/box_bottom modes; `count_in_zones`), tested with hand-made detections (`test_occupancy.py` 14, `test_geometry.py` 5). Branch coverage of `occupancy.py` is 100% (pytest-cov added); pytest (72 passed) and ruff pass. P1.4's real-photo detection problem is still open; this task doesn't need the model.
