@@ -71,6 +71,9 @@ def count_in_zones(detections, count_zones, frame_size, image_size=None) -> dict
 ### Count mode
 `count_in_zones`: a vehicle counts toward a zone if the **bottom-centre point of its box** is inside the zone polygon. occupied = count, free = capacity − count (clamped at 0). Several polygons for the same zone are combined; a vehicle counts once per zone. Every zone in `count_zones` appears in the result, with 0 if no vehicle is in it.
 
+### Annotated output (`parking/vision/annotate.py`)
+`annotate_occupancy(frame, slots, results, detections, totals, inference_ms=None, image_size=None) -> np.ndarray` returns an annotated copy of the BGR frame: free slots get a green outline, taken slots a red translucent fill (id + score in each slot, kept inside the frame for slots cut off at the edge), detections are drawn in thin yellow (mask if there is one, else the box), and a dark top banner shows `totals` (`{zone: (free, capacity)}`) and the inference time: `Ground: 12 free / 40 | 143 ms`. The banner uses `|`, not `·`: OpenCV's Hershey fonts only draw ASCII. Slot polygons are rescaled from `image_size` as in `score_slots`. Text and line widths scale with the frame width (font scale = width / 1280, at least 0.5), and a banner that is too long shrinks to fit.
+
 ## 3. Temporal smoothing (`parking/core/smoothing.py`, runs in the API)
 
 ```python
