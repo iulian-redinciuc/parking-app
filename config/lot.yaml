@@ -50,14 +50,14 @@ cameras:
       # (0-1 of 5), so this camera scores spaces by how unlike empty pavement they look
       # (vision.md §2.1). Switch back to `detector` for an angled camera.
       method: appearance           # detector | appearance
-      threshold: 0.30              # score above which a slot is "taken"
+      threshold: 0.30              # score above which a slot is "taken" (P1.11: free <= 0.02, taken >= 0.61)
       mode: mask                   # mask | box_bottom (detector only)
-      appearance:                  # defaults tuned on ground-01.jpg (P1.4)
+      appearance:                  # tuned on ground-01/02.jpg (P1.4, P1.11)
         inset: 0.12
-        k_mad: 2.0
+        k_mad: 1.5
         min_delta_e: 12
         shadow_l_range: [0.35, 0.9]
-        shadow_chroma_max: 3
+        shadow_chroma_max: 2
         morph_frac: 0.06
         reference_empty: null      # optional path to an image of the empty lot
     smoothing:

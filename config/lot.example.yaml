@@ -48,10 +48,10 @@ cameras:
       mode: mask                   # mask | box_bottom (detector only)
       appearance:                  # appearance only; defaults shown, tuned in P1.4/P1.11
         inset: 0.12
-        k_mad: 2.0
+        k_mad: 1.5
         min_delta_e: 12
         shadow_l_range: [0.35, 0.9]
-        shadow_chroma_max: 3
+        shadow_chroma_max: 2
         morph_frac: 0.06
         reference_empty: null      # optional path to an image of the empty lot
     smoothing:

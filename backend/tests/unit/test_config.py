@@ -156,7 +156,7 @@ def test_threshold_between_0_and_1(raw, threshold):
 def test_occupancy_method_and_appearance(raw):
     occ = LotConfig.model_validate(raw).camera("cam-ground").occupancy
     assert occ.method == "detector"
-    assert occ.appearance.k_mad == 2.0
+    assert occ.appearance.k_mad == 1.5
     raw["cameras"][0]["occupancy"]["method"] = "magic"
     invalid(raw, r"occupancy\.method")
     raw["cameras"][0]["occupancy"]["method"] = "appearance"

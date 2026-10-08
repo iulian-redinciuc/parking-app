@@ -94,10 +94,10 @@ class AppearanceCfg(Strict):
     """Top-down appearance scoring parameters (vision.md §2.1)."""
 
     inset: float = Field(default=0.12, ge=0, lt=0.5)
-    k_mad: float = Field(default=2.0, gt=0)
+    k_mad: float = Field(default=1.5, gt=0)
     min_delta_e: float = Field(default=12, ge=0)
     shadow_l_range: tuple[float, float] = (0.35, 0.9)
-    shadow_chroma_max: float = Field(default=3, ge=0)
+    shadow_chroma_max: float = Field(default=2, ge=0)
     morph_frac: float = Field(default=0.06, gt=0, lt=1)
     reference_empty: Path | None = None
 
