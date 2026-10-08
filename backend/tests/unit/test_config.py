@@ -12,6 +12,7 @@ from parking.config import (
     LotConfig,
     Settings,
     SlotFile,
+    cli_env,
     interpolate_env,
     load_config,
     load_lines,
@@ -287,3 +288,24 @@ def test_settings_cover_every_env_example_variable():
         if line.strip() and not line.startswith("#"):
             names.add(line.split("=", 1)[0].strip().lower())
     assert names - Settings.model_fields.keys() == set()
+
+
+def test_cli_env_layers_example_dotenv_and_environment(tmp_path, monkeypatch):
+    (tmp_path / "deploy").mkdir()
+    (tmp_path / "deploy" / ".env.example").write_text("# c\nA=example\nB=example\nC=example\n")
+    (tmp_path / "deploy" / ".env").write_text("B='dotenv'\nC=dotenv\n\nnot a pair\n")
+    monkeypatch.setenv("C", "process")
+    env = cli_env(tmp_path)
+    assert (env["A"], env["B"], env["C"]) == ("example", "dotenv", "process")
+
+
+def test_cli_env_without_files_is_the_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("ONLY_HERE", "1")
+    assert cli_env(tmp_path)["ONLY_HERE"] == "1"
+
+
+def test_load_config_with_cli_env_from_repo(monkeypatch):
+    for key in ENV:
+        monkeypatch.delenv(key, raising=False)
+    cfg = load_config(REPO / "config" / "lot.yaml", cli_env(REPO))
+    assert cfg.camera("cam-ground").role == "occupancy"

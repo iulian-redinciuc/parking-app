@@ -24,7 +24,7 @@
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
-| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 5 / 11 | 🟡 | 2026-10-08 | |
+| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 6 / 11 | 🟡 | 2026-10-08 | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
@@ -54,7 +54,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] ⏸️ **P1.4** Detector module + model export (needs: a decision on the camera view or the model. Everything is built, but the "Done when" check fails: the COCO-pretrained YOLO11 models find 0–1 of the 5 cars in `ground-01.jpg` because it is shot straight down. Either an angled sample photo from where Camera B could really be mounted, or approval to use a top-down/fine-tuned detector)
 - [x] **P1.5** Geometry + occupancy scoring
 - [x] **P1.6** Annotated output image
-- [ ] **P1.7** `parking analyze`
+- [x] **P1.7** `parking analyze`
 - [ ] **P1.8** Ground-truth labels + `parking evaluate`
 - [ ] **P1.9** `parking bootstrap-slots`
 - [ ] **P1.10** Benchmark on the dev Pi
@@ -201,6 +201,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | P1.4 found that **COCO-pretrained YOLO11 doesn't detect cars seen straight down** (0–1 of 5 on `ground-01.jpg`; yolo11-obb aerial models ≤ 2 of 5). P1.4 is blocked until Iulian picks an angled camera view or a top-down model (see "Waiting on Iulian") | The detector code works (NCNN output matches PyTorch; detects the bus in `bus.jpg`), so the problem is the viewpoint, not the code |
 | 2026-10-08 | P1.5: `score_slots`/`count_in_zones` take an optional `image_size` (the slot file's) to rescale polygons to `frame_size`; in `mask` mode a detection without a usable mask falls back to `box_bottom`; `count_in_zones` returns every zone (0 if empty) and counts a vehicle once per zone. Recorded in vision.md §2 | The spec's signature had no way to know the slot file's size; the detector may return a box without a mask |
 | 2026-10-08 | P1.6: `annotate_occupancy` takes `totals` as `{zone: (free, capacity)}` plus optional `inference_ms` and `image_size` (polygon rescaling); the banner reads `Ground: 12 free / 40 \| 143 ms` with `\|` instead of `·`; labels of slots cut off at the image edge are moved inside the frame. Recorded in vision.md §2 | The guide didn't define `totals` or where the time comes from; OpenCV's Hershey fonts draw non-ASCII characters as `?` |
+| 2026-10-08 | P1.7: `analyze_frame` takes an optional `capacities` (zone → capacity) for the totals; the JSON adds `totals` and `timings` to the observation; `parking analyze` also has `--fake-detector` (sidecar `<image>.json`); paths in lot.yaml resolve against the repo root, and CLI tools read `${VAR}` from `deploy/.env.example` < `deploy/.env` < environment (`cli_env`). Recorded in vision.md §2 and config.md loader rules | `lot.yaml` needs `LOT_LAT`/`TZ`/`CAM_RAMP_RTSP_URL` even for offline tools, and the dev checkout has no `deploy/.env`; the guide didn't say where count-zone capacities come from |
 
 ## Metrics
 
@@ -243,3 +244,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - P1.4 (⏸️ blocked): `parking/vision/detector.py` (`Detection`, `Detector`, `YoloDetector`, `FakeDetector`, class mapping/filter, `export_model`) + `parking models export`; exported `yolo11n-seg` @ 1280 and `yolo11n` @ 640 to NCNN; `test_detector_filter.py` (8 unit + 1 slow, all pass; pytest 54 passed, ruff clean). Done-when check fails: 0 vehicles from `yolo11n-seg` @ 1280 (1 from `yolo11n` @ 640) on `ground-01.jpg`, which shows 5 cars from straight above. Needs Iulian's choice of camera view or model.
 - P1.5: `parking/geometry.py` (polygon repair, box bottom, overlap ratio, bottom-centre, point-in) + `parking/vision/occupancy.py` (`score_slots` with an STRtree over footprints, max overlap, mask/box_bottom modes; `count_in_zones`), tested with hand-made detections (`test_occupancy.py` 13, `test_geometry.py` 5). Branch coverage of `occupancy.py` is 100% (pytest-cov added); pytest (72 passed) and ruff pass. P1.4's real-photo detection problem is still open; this task doesn't need the model.
 - P1.6: `parking/vision/annotate.py` (`annotate_occupancy`: green free / red-filled taken slots with id + score, yellow detections, top banner with free/capacity and ms; text scales with frame width) + `test_annotate.py` (11 tests). Rendered on `ground-01.jpg` with the 17 slots and 5 hand-made detections (the real detector still misses top-down cars, P1.4) at full size and at 720p; both read clearly when shrunk to phone width (540–590 px). pytest (83 passed) and ruff pass.
+- P1.7: `parking/vision/pipeline.py` (`analyze_frame` → `AnalysisResult` with detections, slot results, zone counts, totals, timings; `to_observation()`) + `parking analyze` (config overrides, `--fake-detector`, JSON + annotated PNG). `uv run parking analyze --image data/samples/ground-01.jpg --camera cam-ground` prints `ground: 17 free / 17 (0 taken) in 1.9 s` and writes both files; 0 taken because the COCO model still sees no top-down cars (P1.4). New `test_pipeline.py` (5, 100% branch coverage), CLI tests with the fake detector (6), `cli_env` tests (3); pytest (97 passed incl. slow) and ruff pass.

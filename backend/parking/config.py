@@ -279,8 +279,37 @@ def _read(path: str | Path) -> str:
     return path.read_text()
 
 
-def load_config(path: str | Path) -> LotConfig:
-    return LotConfig.model_validate(yaml.safe_load(interpolate_env(_read(path))))
+def load_config(path: str | Path, env: dict[str, str] | None = None) -> LotConfig:
+    """Load lot.yaml; `${VAR}` comes from `env` (default: the process environment)."""
+    return LotConfig.model_validate(yaml.safe_load(interpolate_env(_read(path), env)))
+
+
+def read_env_file(path: str | Path) -> dict[str, str]:
+    """`KEY=VALUE` lines of a .env file (comments and blank lines skipped); {} if missing."""
+    path = Path(path)
+    if not path.is_file():
+        return {}
+    env = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            env[key.strip()] = value.strip().strip("'\"")
+    return env
+
+
+def cli_env(root: str | Path) -> dict[str, str]:
+    """`${VAR}` values for CLI tools run outside Docker.
+
+    `deploy/.env.example` < `deploy/.env` < the process environment, so a dev checkout
+    without a `.env` still loads lot.yaml (the example has placeholders, no secrets).
+    """
+    deploy = Path(root) / "deploy"
+    return {
+        **read_env_file(deploy / ".env.example"),
+        **read_env_file(deploy / ".env"),
+        **os.environ,
+    }
 
 
 def load_slots(path: str | Path) -> SlotFile:

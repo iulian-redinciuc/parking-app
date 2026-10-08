@@ -110,6 +110,7 @@ api:
   - unknown keys are errors (catches typos such as `treshold`)
   - slot files: slot IDs unique, polygons ≥ 3 points and not self-intersecting (also `count_zones` and line-file `roi`)
 - `${VAR}` substitution skips only lines whose first non-space character is `#`; a variable that is set but empty is substituted as empty.
+- CLI tools run outside Docker (e.g. `parking analyze`) take `${VAR}` values from `cli_env(root)`: `deploy/.env.example` < `deploy/.env` < the process environment, so a dev checkout without `deploy/.env` still loads `lot.yaml` (the example holds placeholders, never secrets). Services in Docker use only their environment.
 - `load_slots(path)` / `load_lines(path)` read §2/§3 files; `SlotFile.scaled(frame_w, frame_h)` rescales polygons; `LotConfig.zone_capacity(zone_id, slot_files)` gives the slot count for `slots` zones without a capacity.
 - `Settings` (pydantic-settings) reads the environment and `deploy/.env` (relative to the working directory); empty values count as unset, every variable is optional for now: see §5.
 
