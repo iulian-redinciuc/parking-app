@@ -7,18 +7,18 @@
 >
 > The [agent loop](tools/agent-loop/README.md) works through the unticked tasks in order. A task marked `⏸️` is skipped until its need is met: **delete the `⏸️ ` from its line to unblock it** (editing on GitHub works too).
 
-**Current focus:** Phase 0 → P0.1–P0.7 (skeleton), waiting on **P0.8** (sample image + answers).
+**Current focus:** Phase 1 (still-image proof of concept) with one sample photo, `data/samples/ground-01.jpg`.
 **Last updated:** 2026-10-08
 
 ## Waiting on Iulian
 
-- **P0.8**: sample photo(s) of the lot in `data/samples/` on the dev Pi ([what to send](docs/design/hardware.md#1-sample-images-for-phase-1-what-to-send)), and answers to open questions 2–4 below.
+- Nothing blocking right now. Nice to have later: more sample photos (busy/full, nearly empty, night) from the same spot; real answers to open questions 2–4 (the working assumptions below are used until then; question 2 is needed before Phase 4).
 
 ## Overview
 
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
-| 0 | [Foundations](docs/phases/phase-0-foundations.md) | 7 / 8 | 🟡 | 2026-10-07 | |
+| 0 | [Foundations](docs/phases/phase-0-foundations.md) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 0 / 11 | ⬜ | | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | 0 / 10 | ⬜ | | |
@@ -31,7 +31,7 @@
 
 ---
 
-## Phase 0: Foundations 🟡
+## Phase 0: Foundations ✅
 Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P0.1** Repo layout and `.gitignore`
 - [x] **P0.2** Backend project (uv, Python 3.12, Typer CLI, ruff, pytest)
@@ -40,7 +40,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P0.5** CI workflow
 - [x] **P0.6** Secret protection (GitHub scanning, gitleaks pre-commit, Dependabot)
 - [x] **P0.7** README for developers
-- [ ] ⏸️ **P0.8** Inputs from Iulian: sample image(s) + open questions 2–4 (needs: Iulian to provide the photos and answers)
+- [x] **P0.8** Inputs from Iulian: sample image(s) + open questions 2–4 (one photo; questions 2–4 not decided, working assumptions recorded)
 
 ## Phase 1: Still-image proof of concept ⬜
 - [ ] **P1.1** Sample data layout
@@ -155,10 +155,10 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 
 | # | Question | Answer | Status |
 |---|----------|--------|--------|
-| 1 | Sample image(s): normal, full, empty, night ([what to send](docs/design/hardware.md#1-sample-images-for-phase-1-what-to-send)) | | ⬜ waiting |
-| 2 | **Where will production run?** Topology T1 / T2 / T3 ([deployment.md §3](docs/design/deployment.md#3-production-topologies-to-be-chosen)); power and internet at the lot. Needed before Phase 4 | | ⬜ |
-| 3 | Spaces per level; marked spaces? One ramp? Separate in/out lanes? | | ⬜ |
-| 4 | Camera layout: Option A / B / C ([PLAN §5](PLAN.md#5-key-design-decisions)); existing cameras? | | ⬜ |
+| 1 | Sample image(s): normal, full, empty, night ([what to send](docs/design/hardware.md#1-sample-images-for-phase-1-what-to-send)) | One photo: `data/samples/ground-01.jpg` (1932×2576, portrait, daytime, ground level shot from high up, almost straight down). Two rows of painted perpendicular spaces: left row ~8 spaces fully visible (2 taken), right row cut off at the image edge (3 cars visible). No full/empty/night/rain shots yet | 🟡 partial |
+| 2 | **Where will production run?** Topology T1 / T2 / T3 ([deployment.md §3](docs/design/deployment.md#3-production-topologies-to-be-chosen)); power and internet at the lot. Needed before Phase 4 | Not decided. Keep the design portable | 🟡 assumed |
+| 3 | Spaces per level; marked spaces? One ramp? Separate in/out lanes? | Not decided. Working assumption: ground level has marked spaces in two rows (as in the photo); total count, underground level and ramp layout unknown. Phase 1 uses only the ground-level photo | 🟡 assumed |
+| 4 | Camera layout: Option A / B / C ([PLAN §5](PLAN.md#5-key-design-decisions)); existing cameras? | Not decided. Working assumption: Option A, with Camera B over the ground level at roughly the sample photo's position (high, looking down); no existing cameras | 🟡 assumed |
 | 5 | Who are the users (household / staff / public)? | | ⬜ |
 | 6 | Domain on Cloudflare, or Tailscale Funnel? | | ⬜ |
 | 7 | iPhone users needing notifications? | | ⬜ |
@@ -225,3 +225,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - P0.5: CI workflow with `backend` (uv, ruff check + format, pytest), `frontend` (npm ci, lint, format check, vitest, build; Playwright later) and `secrets` (gitleaks) jobs on push and PR.
 - P0.6: GitHub secret scanning + push protection enabled; `.pre-commit-config.yaml` (gitleaks v8.30.1, ruff v0.16.10) installed; `.gitleaks.toml`; `.github/dependabot.yml` (pip, npm, actions weekly). A commit containing the AWS example key ID is blocked locally; full-history gitleaks scan clean; ruff + pytest (6 passed) pass.
 - P0.7: developer README (what it is, links, repo layout, prerequisites uv/Node 22/Docker, backend tests, frontend in mock mode, CI, public-repo rules + pre-commit). Followed it on a fresh clone in `/tmp`: pytest (6 passed), ruff, `parking --version`, `npm ci`, lint, format check, vitest (1 passed), build and `npm run dev` at `/parking-app/` all work.
+- P0.8: one sample photo provided (`data/samples/ground-01.jpg`, not committed); open questions 2–4 not decided by Iulian, so working assumptions were recorded and Phase 1 proceeds with them.
