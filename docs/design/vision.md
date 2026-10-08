@@ -28,6 +28,13 @@ class YoloDetector:
 - COCO class IDs: car = 2, motorcycle = 3, bus = 5, truck = 7. Pass `classes=[2, 3, 5, 7]` to the model so it skips everything else (people, bicycles).
 - Export once per machine with `parking models export --runtime <runtime>`, which wraps `YOLO(name).export(format=<runtime>, imgsz=…)`, into `models/` (git-ignored). The runtime depends on the machine's hardware: see §11. Load the exported model with `YOLO(path, task="detect"|"segment")`.
 - Masks come from `result.masks.xy` (already in original frame pixels).
+- `FakeDetector(json_path, conf=0.0, classes=…)` (tests, CI, `PARKING_FAKE_DETECTOR=1`) ignores the frame and returns the detections in a JSON sidecar, after the same class/confidence filter as `YoloDetector`:
+  ```json
+  {"detections": [{"cls": "car", "conf": 0.91, "box": [x1, y1, x2, y2], "mask": [[x, y], …]}]}
+  ```
+  `mask` is optional. Masks with fewer than 3 points become `None`.
+- `parking models export --model <name> --imgsz <n> --runtime ncnn|openvino|onnx|engine [--out models]` downloads `<out>/<name>.pt` and exports next to it. The `vision` extra installs **CPU-only** PyTorch from the PyTorch CPU index (`[tool.uv.sources]` in `backend/pyproject.toml`) and `pnnx` (needed by the NCNN export). The task (`segment`/`detect`) is taken from the model name (`*-seg`).
+- **Viewpoint:** COCO-pretrained models recognise cars seen from the side or at an angle. On the Phase 1 sample photo, taken from high up looking **straight down**, YOLO11n/s/m (boxes and seg, 640 and 1280, with rotation or crops) find 0–1 of the 5 visible cars, and the DOTA-trained `yolo11n/s-obb` aerial models find at most the 2 fully visible cars, depending on `imgsz`. A straight-down occupancy camera therefore needs a different model (P9.4) or an angled camera; see PROGRESS.md decision log 2026-10-08 (P1.4).
 - **Small far-away cars:** use `imgsz=1280` for occupancy (one frame every 5 s, so speed isn't critical). If cars are still missed, add tiling: split into 2×2 overlapping tiles, detect each, merge with NMS (IoU 0.5).
 - Keep the detector behind the `Detector` protocol so a YOLOX (Apache-2.0) implementation can be swapped in if the AGPL licence becomes a problem.
 

@@ -12,7 +12,12 @@
 
 ## Waiting on Iulian
 
-- Nothing blocking right now. Nice to have later: more sample photos (busy/full, nearly empty, night) from the same spot; real answers to open questions 2–4 (the working assumptions below are used until then; question 2 is needed before Phase 4).
+- **P1.4 (blocks Phase 1):** the standard COCO car detector doesn't see cars from straight above. On `ground-01.jpg` it finds 0–1 of the 5 cars (YOLO11 n/s/m tried at 640 and 1280; the aerial `yolo11-obb` models find at most the 2 fully visible cars). Please choose one:
+  1. **Angled camera (recommended):** if Camera B can look at the spaces at an angle (e.g. mounted on a wall or pole, about 30–60° down from horizontal rather than straight down), take 1–3 photos from such a spot and put them in `data/samples/` (e.g. `ground-02.jpg`). The standard model is made for this view.
+  2. **Keep the straight-down view:** then the detector has to be fine-tuned on overhead photos of this lot (pulls P9.4 forward; needs ~100+ labelled photos, and open question 10 for the licence), or the per-slot classifier (vision.md §9) is used instead. Say which and the plan gets updated.
+  Then delete the `⏸️ ` from the P1.4 line.
+- **Heads-up (public repo):** `data/IMG_8093.jpeg` was uploaded to `main` on GitHub (commit `9ff3a0b`). It is a real photo of the lot (the same straight-down view as `ground-01.jpg`, full resolution) and is now public, which goes against the public-repo rules. The agent loop may not rewrite history. If it should go: delete it on GitHub (it stays in history) or purge it from history yourself, and put photos in `data/samples/` on the Pi instead (git-ignored).
+- Nice to have later: more sample photos (busy/full, nearly empty, night) from the same spot; real answers to open questions 2–4 (the working assumptions below are used until then; question 2 is needed before Phase 4).
 
 ## Overview
 
@@ -46,7 +51,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P1.1** Sample data layout
 - [x] **P1.2** Config loader
 - [x] **P1.3** Slot editor (slots / lines / label modes)
-- [ ] **P1.4** Detector module + model export
+- [ ] ⏸️ **P1.4** Detector module + model export (needs: a decision on the camera view or the model. Everything is built, but the "Done when" check fails: the COCO-pretrained YOLO11 models find 0–1 of the 5 cars in `ground-01.jpg` because it is shot straight down. Either an angled sample photo from where Camera B could really be mounted, or approval to use a top-down/fine-tuned detector)
 - [ ] **P1.5** Geometry + occupancy scoring
 - [ ] **P1.6** Annotated output image
 - [ ] **P1.7** `parking analyze`
@@ -192,6 +197,8 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | P0.6: added `.gitleaks.toml` (default rules + strict `aws-access-key-id-strict` rule, path allowlist for the phase-0 guide that quotes the example key). Dependabot covers pip/npm/github-actions now; the `docker` ecosystem is added in P2.10 when Dockerfiles exist. pre-commit installed with `uv tool install` | gitleaks' default AWS rule allowlists `…EXAMPLE` keys, so the "Done when" check passed through; Dependabot errors on a directory without a Dockerfile |
 | 2026-10-08 | P1.2: config models forbid unknown keys; `reset` only on flow zones; `levels.filling < plenty`; `Settings` reads `deploy/.env` and treats empty values as unset; added `load_lines` and `LotConfig.zone_capacity` (recorded in config.md loader rules) | The guide left these open; strict keys catch YAML typos, and `.env.example` has empty secrets |
 | 2026-10-08 | P1.3: the slot editor is served with `python3 -m http.server` (not opened by double-click); slot corners snap to existing corners and a click on a corner starts a new space; added `Shift+D` duplicate down and *Mark labelled*. Its own `eslint.config.js` reuses the frontend's packages; CI's frontend job runs its lint, Prettier check and `node --test` (testing.md §5). `config/slots/cam-ground.json` has 17 ground spaces: 8 in the left row and 9 in the right row, which is cut off at the image edge, so those polygons stop at x = 1931 | Browsers block ES modules on `file://`; without snapping, the first click of the next space selected its neighbour; the sample photo's rows run vertically; ESLint 10 won't lint files outside the config's folder |
+| 2026-10-08 | P1.4: the `vision` extra pins **CPU-only** `torch`/`torchvision` from the PyTorch CPU index and adds `pnnx` (needed for NCNN export). `FakeDetector` reads a `{"detections": [...]}` sidecar (format in vision.md §1). The slow test uses Ultralytics' bundled `bus.jpg` (not in the repo) and expects ≥ 1 vehicle, not ≥ 1 car | Default PyPI torch wheels pull ~3 GB of CUDA libraries; NCNN export fails without pnnx; flat drawn cars aren't detected by YOLO, and no public-domain car photo is in the repo |
+| 2026-10-08 | P1.4 found that **COCO-pretrained YOLO11 doesn't detect cars seen straight down** (0–1 of 5 on `ground-01.jpg`; yolo11-obb aerial models ≤ 2 of 5). P1.4 is blocked until Iulian picks an angled camera view or a top-down model (see "Waiting on Iulian") | The detector code works (NCNN output matches PyTorch; detects the bus in `bus.jpg`), so the problem is the viewpoint, not the code |
 
 ## Metrics
 
@@ -231,3 +238,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - P1.1: created git-ignored `data/labels/` and `data/reference/`; copied `ground-01.jpg` to `data/reference/cam-ground.jpg` (the only image, so it's the reference); recorded its conditions (`day`, `dry`; partly full) in git-ignored `data/samples/CONDITIONS.md` for the P1.8 labels file. `ls data/samples` lists the image and `git status` stays clean.
 - P1.2: `backend/parking/config.py` (pydantic models for lot.yaml, slot and line files, `${VAR}` interpolation, loader rules, `SlotFile.scaled`, `Settings` for every `.env` variable) + `tests/unit/test_config.py` (38 tests); `config/lot.yaml` loads with the `.env.example` values; pytest (44 passed) and ruff pass.
 - P1.3: slot editor `tools/slot-editor/` (`index.html`, ES module `editor.js` with `createEditor`, README; slots / lines / label modes, zoom/pan/pinch, snapping, duplicate right/down, import/export in the config.md §2–4 formats) + `editor.test.js` (10 node tests) in CI. Drew the 17 visible ground spaces on `data/reference/cam-ground.jpg` by clicking in headless Chromium → `config/slots/cam-ground.json`; re-import + export is byte-identical, `load_slots()` loads it (ground capacity 17), new pytest checks committed slot files (45 passed); label and lines modes also exported correctly.
+- P1.4 (⏸️ blocked): `parking/vision/detector.py` (`Detection`, `Detector`, `YoloDetector`, `FakeDetector`, class mapping/filter, `export_model`) + `parking models export`; exported `yolo11n-seg` @ 1280 and `yolo11n` @ 640 to NCNN; `test_detector_filter.py` (8 unit + 1 slow, all pass; pytest 54 passed, ruff clean). Done-when check fails: 0 vehicles from `yolo11n-seg` @ 1280 (1 from `yolo11n` @ 640) on `ground-01.jpg`, which shows 5 cars from straight above. Needs Iulian's choice of camera view or model.
