@@ -18,7 +18,7 @@
 
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
-| 0 | [Foundations](docs/phases/phase-0-foundations.md) | 0 / 8 | 🟡 | 2026-10-07 | |
+| 0 | [Foundations](docs/phases/phase-0-foundations.md) | 1 / 8 | 🟡 | 2026-10-07 | |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 0 / 11 | ⬜ | | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | 0 / 10 | ⬜ | | |
@@ -33,7 +33,7 @@
 
 ## Phase 0: Foundations 🟡
 Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
-- [ ] **P0.1** Repo layout and `.gitignore`
+- [x] **P0.1** Repo layout and `.gitignore`
 - [ ] **P0.2** Backend project (uv, Python 3.12, Typer CLI, ruff, pytest)
 - [ ] **P0.3** Frontend scaffold (Vite, React, TS, Tailwind, Vitest)
 - [ ] **P0.4** Config templates (`lot.example.yaml`, `lot.yaml`, `.env.example`)
@@ -212,3 +212,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - Removed Home Assistant and the message broker; the app is fully isolated on the dev Pi.
 - Clarified that the Pi is **dev/test only**: added production topologies (T1/T2/T3), multi-arch images, AI runtime per machine, preview vs production frontend, and turned Phase 8 into production deployment + hardening.
 - Web app only: removed the native-app extra (97 tasks in total). Production will be the cloud or another Raspberry Pi.
+- P0.1: repo layout (`backend/`, `frontend/`, `config/`, `deploy/`, `data/`, `models/`) and `.gitignore`; checked that `data/` and `models/` contents, `out/`, `deploy/.env` and stray `.jpg` files are ignored while test-fixture `.jpg` files are not.

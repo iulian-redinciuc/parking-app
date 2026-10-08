@@ -1,0 +1,25 @@
+# private data (public repo!)
+data/*
+!data/.gitkeep
+models/*
+!models/.gitkeep
+out/
+deploy/.env
+*.sqlite*
+# python
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+# node
+node_modules/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
+# misc
+.DS_Store
+*.mp4
+*.jpg
+*.jpeg
+!frontend/public/**/*.jpg
+!backend/tests/fixtures/**/*.jpg
