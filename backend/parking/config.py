@@ -1,0 +1,332 @@
+"""Config models and loaders: lot.yaml, slot/line files and .env settings.
+
+Spec: docs/design/config.md (§1 lot.yaml + loader rules, §2 slot file, §3 line file, §5 .env).
+"""
+
+import os
+import re
+from pathlib import Path
+from typing import Annotated, Literal, Self
+
+import shapely
+import yaml
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ENV_VAR = re.compile(r"\$\{([A-Z0-9_]+)\}")
+ID_PATTERN = r"^[a-z0-9-]+$"
+
+Id = Annotated[str, Field(pattern=ID_PATTERN)]
+Point = tuple[float, float]
+Size = tuple[Annotated[int, Field(gt=0)], Annotated[int, Field(gt=0)]]
+
+
+class ConfigError(ValueError):
+    """The config can't be read: a missing file or a missing ${VAR}."""
+
+
+class Strict(BaseModel):
+    """Unknown keys are errors, so typos in the YAML/JSON don't pass silently."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def _check_polygon(points: list[Point]) -> list[Point]:
+    if len(points) < 3:
+        raise ValueError("a polygon needs at least 3 points")
+    if not shapely.LinearRing(points).is_simple:
+        raise ValueError("polygon is self-intersecting")
+    return points
+
+
+Polygon = Annotated[list[Point], AfterValidator(_check_polygon)]
+
+
+# --- lot.yaml (config.md §1) ---
+
+
+class Location(Strict):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
+class Lot(Strict):
+    id: Id
+    name: str
+    location: Location
+    notify_radius_m: int = Field(default=500, gt=0)
+    timezone: str
+
+
+class ResetCfg(Strict):
+    enabled: bool = False
+    cron: str = "0 3 * * *"
+    value: int = Field(default=0, ge=0)
+
+
+class Zone(Strict):
+    id: Id
+    name: dict[str, str]
+    method: Literal["slots", "count", "flow"]
+    capacity: int | None = Field(default=None, gt=0)
+    reset: ResetCfg | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if self.method in ("count", "flow") and self.capacity is None:
+            raise ValueError(f"zone '{self.id}': capacity is required for '{self.method}' zones")
+        if self.reset is not None and self.method != "flow":
+            raise ValueError(f"zone '{self.id}': reset is only allowed for 'flow' zones")
+        return self
+
+
+class DetectorCfg(Strict):
+    runtime: Literal["ncnn", "openvino", "onnx", "engine", "hailo"] = "ncnn"
+    model: str
+    imgsz: int = Field(default=640, gt=0)
+    conf: float = Field(default=0.35, gt=0, lt=1)
+    classes: list[str] = Field(default_factory=lambda: ["car", "motorcycle", "bus", "truck"])
+    use_masks: bool = False
+
+
+class OccupancyCfg(Strict):
+    threshold: float = Field(default=0.30, gt=0, lt=1)
+    mode: Literal["mask", "box_bottom"] = "mask"
+
+
+class SmoothingCfg(Strict):
+    consistent_readings: int = Field(default=3, ge=1)
+
+
+class HealthCfg(Strict):
+    black_mean_max: float = 12
+    frozen_diff_max: float = 0.5
+    frozen_frames: int = Field(default=6, ge=1)
+    blur_laplacian_min: float = 40
+    shift_check_every_s: int = Field(default=300, gt=0)
+    shift_max_px: float = 8
+
+
+class FlowCfg(Strict):
+    min_track_frames: int = Field(default=5, ge=1)
+    motion_min_area_px: int = Field(default=1500, ge=0)
+
+
+class Camera(Strict):
+    id: Id
+    role: Literal["occupancy", "flow"]
+    zones: list[str] = Field(min_length=1)
+    source: str
+    control_url: str | None = None
+    detector: DetectorCfg
+    # occupancy cameras
+    sample_every_s: float = Field(default=5, gt=0)
+    slots_file: Path | None = None
+    occupancy: OccupancyCfg = Field(default_factory=OccupancyCfg)
+    smoothing: SmoothingCfg = Field(default_factory=SmoothingCfg)
+    health: HealthCfg = Field(default_factory=HealthCfg)
+    # flow cameras
+    fps: float = Field(default=10, gt=0)
+    lines_file: Path | None = None
+    flow: FlowCfg = Field(default_factory=FlowCfg)
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if self.role == "occupancy" and self.slots_file is None:
+            raise ValueError(f"camera '{self.id}': occupancy cameras need slots_file")
+        if self.role == "flow" and self.lines_file is None:
+            raise ValueError(f"camera '{self.id}': flow cameras need lines_file")
+        return self
+
+
+class Levels(Strict):
+    plenty: float = Field(default=0.20, gt=0, lt=1)
+    filling: float = Field(default=0.05, ge=0, lt=1)
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if self.filling >= self.plenty:
+            raise ValueError("levels: filling must be below plenty")
+        return self
+
+
+class ApiCfg(Strict):
+    stale_after_s: int = Field(default=60, gt=0)
+    sse_ping_s: int = Field(default=15, gt=0)
+    trend_window_min: int = Field(default=15, gt=0)
+    levels: Levels = Field(default_factory=Levels)
+
+
+class LotConfig(Strict):
+    version: Literal[1]
+    lot: Lot
+    zones: list[Zone] = Field(min_length=1)
+    cameras: list[Camera] = Field(default_factory=list)
+    api: ApiCfg = Field(default_factory=ApiCfg)
+
+    @model_validator(mode="after")
+    def _cross_check(self) -> Self:
+        _require_unique("zone", [z.id for z in self.zones])
+        _require_unique("camera", [c.id for c in self.cameras])
+        zone_ids = {z.id for z in self.zones}
+        for camera in self.cameras:
+            for zone_id in camera.zones:
+                if zone_id not in zone_ids:
+                    raise ValueError(f"camera '{camera.id}': unknown zone '{zone_id}'")
+        for zone in self.zones:
+            roles = [c.role for c in self.cameras if zone.id in c.zones]
+            if zone.method == "slots" and "occupancy" not in roles:
+                raise ValueError(f"zone '{zone.id}': 'slots' zones need an occupancy camera")
+            if zone.method == "flow" and roles.count("flow") != 1:
+                raise ValueError(
+                    f"zone '{zone.id}': 'flow' zones need exactly one flow camera, "
+                    f"found {roles.count('flow')}"
+                )
+        return self
+
+    def zone(self, zone_id: str) -> Zone:
+        return next(z for z in self.zones if z.id == zone_id)
+
+    def camera(self, camera_id: str) -> Camera:
+        return next(c for c in self.cameras if c.id == camera_id)
+
+    def zone_capacity(self, zone_id: str, slot_files: list["SlotFile"]) -> int:
+        """The zone's capacity; for `slots` zones without one, the number of its slots."""
+        zone = self.zone(zone_id)
+        if zone.capacity is not None:
+            return zone.capacity
+        return sum(1 for f in slot_files for s in f.slots if s.zone == zone_id)
+
+
+def _require_unique(kind: str, ids: list[str]) -> None:
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    if dupes:
+        raise ValueError(f"duplicate {kind} id(s): {', '.join(dupes)}")
+
+
+# --- slot file (config.md §2) ---
+
+
+class Slot(Strict):
+    id: str = Field(min_length=1)
+    zone: str
+    polygon: Polygon
+    type: Literal["standard", "accessible", "ev", "motorcycle", "reserved"] = "standard"
+
+
+class CountZone(Strict):
+    zone: str
+    polygon: Polygon
+
+
+class SlotFile(Strict):
+    version: Literal[1]
+    camera_id: str
+    image_size: Size
+    reference_image: str | None = None
+    slots: list[Slot] = Field(default_factory=list)
+    count_zones: list[CountZone] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        _require_unique("slot", [s.id for s in self.slots])
+        return self
+
+    def scaled(self, frame_w: int, frame_h: int) -> list[Slot]:
+        """Slots with polygons rescaled from `image_size` to the frame size (both axes)."""
+        sx, sy = frame_w / self.image_size[0], frame_h / self.image_size[1]
+        return [
+            s.model_copy(update={"polygon": [(x * sx, y * sy) for x, y in s.polygon]})
+            for s in self.slots
+        ]
+
+
+# --- line file (config.md §3) ---
+
+
+class LineFile(Strict):
+    version: Literal[1]
+    camera_id: str
+    image_size: Size
+    roi: Polygon | None = None
+    line_a: tuple[Point, Point]
+    line_b: tuple[Point, Point]
+    in_direction: Literal["a_to_b", "b_to_a"] = "a_to_b"
+
+
+# --- loaders ---
+
+
+def interpolate_env(text: str, env: dict[str, str] | None = None) -> str:
+    """Replace `${VAR}` from the environment; lines starting with `#` are left alone."""
+    env = os.environ if env is None else env
+    out = []
+    for n, line in enumerate(text.splitlines(keepends=True), start=1):
+        if not line.lstrip().startswith("#"):
+            missing = [v for v in ENV_VAR.findall(line) if v not in env]
+            if missing:
+                names = ", ".join(missing)
+                raise ConfigError(f"line {n}: environment variable(s) not set: {names}")
+            line = ENV_VAR.sub(lambda m: env[m.group(1)], line)
+        out.append(line)
+    return "".join(out)
+
+
+def _read(path: str | Path) -> str:
+    path = Path(path)
+    if not path.is_file():
+        raise ConfigError(f"file not found: {path}")
+    return path.read_text()
+
+
+def load_config(path: str | Path) -> LotConfig:
+    return LotConfig.model_validate(yaml.safe_load(interpolate_env(_read(path))))
+
+
+def load_slots(path: str | Path) -> SlotFile:
+    return SlotFile.model_validate_json(_read(path))
+
+
+def load_lines(path: str | Path) -> LineFile:
+    return LineFile.model_validate_json(_read(path))
+
+
+# --- .env (config.md §5) ---
+
+
+class Settings(BaseSettings):
+    """Every `.env` variable; all optional for now. Empty values count as unset."""
+
+    model_config = SettingsConfigDict(
+        env_file="deploy/.env", env_ignore_empty=True, extra="ignore", case_sensitive=False
+    )
+
+    tz: str | None = None
+    parking_config: Path = Path("config/lot.yaml")
+    lot_lat: float | None = None
+    lot_lon: float | None = None
+    parking_db_url: str | None = None
+    worker_token: SecretStr | None = None
+    api_internal_url: str | None = None
+    api_host_port: int = 8000
+    cam_ground_snapshot_url: SecretStr | None = None
+    cam_ground_rtsp_url: SecretStr | None = None
+    cam_ramp_rtsp_url: SecretStr | None = None
+    cors_origins: str = ""
+    public_app_url: str | None = None
+    vapid_public_key: str | None = None
+    vapid_private_key: SecretStr | None = None
+    vapid_subject: str | None = None
+    admin_password_hash: SecretStr | None = None
+    admin_token: SecretStr | None = None
+    debug_capture: bool = False
+    debug_retention_hours: int = 24
+    tunnel_token: SecretStr | None = None
+    log_level: str = "INFO"
+    parking_version: str = "latest"
+    vision_cpus: float | None = None
+    flow_cpus: float | None = None
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

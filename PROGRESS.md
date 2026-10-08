@@ -19,7 +19,7 @@
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
-| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 1 / 11 | 🟡 | 2026-10-08 | |
+| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 2 / 11 | 🟡 | 2026-10-08 | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
@@ -44,7 +44,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 
 ## Phase 1: Still-image proof of concept 🟡
 - [x] **P1.1** Sample data layout
-- [ ] **P1.2** Config loader
+- [x] **P1.2** Config loader
 - [ ] **P1.3** Slot editor (slots / lines / label modes)
 - [ ] **P1.4** Detector module + model export
 - [ ] **P1.5** Geometry + occupancy scoring
@@ -190,6 +190,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | CI (`.github/workflows/ci.yml`) runs on every `push` and `pull_request`; the frontend job also runs `npm run format:check` (added to testing.md §5). P0.5 was verified on the push run to `main` (three green jobs) instead of opening a PR | The agent loop pushes straight to `main` and doesn't open PRs; the same three jobs run on PRs |
 | 2026-10-08 | `vite.config.ts` reads `base` from `VITE_BASE` (default `/parking-app/`) already in P0.3; `frontend/.env.development` (`VITE_API_BASE=mock`) is committed because it holds no secret | Matches frontend.md §1; the guide asks for the file |
 | 2026-10-08 | P0.6: added `.gitleaks.toml` (default rules + strict `aws-access-key-id-strict` rule, path allowlist for the phase-0 guide that quotes the example key). Dependabot covers pip/npm/github-actions now; the `docker` ecosystem is added in P2.10 when Dockerfiles exist. pre-commit installed with `uv tool install` | gitleaks' default AWS rule allowlists `…EXAMPLE` keys, so the "Done when" check passed through; Dependabot errors on a directory without a Dockerfile |
+| 2026-10-08 | P1.2: config models forbid unknown keys; `reset` only on flow zones; `levels.filling < plenty`; `Settings` reads `deploy/.env` and treats empty values as unset; added `load_lines` and `LotConfig.zone_capacity` (recorded in config.md loader rules) | The guide left these open; strict keys catch YAML typos, and `.env.example` has empty secrets |
 
 ## Metrics
 
@@ -227,3 +228,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - P0.7: developer README (what it is, links, repo layout, prerequisites uv/Node 22/Docker, backend tests, frontend in mock mode, CI, public-repo rules + pre-commit). Followed it on a fresh clone in `/tmp`: pytest (6 passed), ruff, `parking --version`, `npm ci`, lint, format check, vitest (1 passed), build and `npm run dev` at `/parking-app/` all work.
 - P0.8: one sample photo provided (`data/samples/ground-01.jpg`, not committed); open questions 2–4 not decided by Iulian, so working assumptions were recorded and Phase 1 proceeds with them.
 - P1.1: created git-ignored `data/labels/` and `data/reference/`; copied `ground-01.jpg` to `data/reference/cam-ground.jpg` (the only image, so it's the reference); recorded its conditions (`day`, `dry`; partly full) in git-ignored `data/samples/CONDITIONS.md` for the P1.8 labels file. `ls data/samples` lists the image and `git status` stays clean.
+- P1.2: `backend/parking/config.py` (pydantic models for lot.yaml, slot and line files, `${VAR}` interpolation, loader rules, `SlotFile.scaled`, `Settings` for every `.env` variable) + `tests/unit/test_config.py` (38 tests); `config/lot.yaml` loads with the `.env.example` values; pytest (44 passed) and ruff pass.
