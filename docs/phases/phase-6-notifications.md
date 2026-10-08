@@ -6,7 +6,7 @@
 
 ## Deliverables
 - Web Push working on Android and iPhone (installed PWA)
-- Tiers 1–4 from [notifications.md](../design/notifications.md#1-the-constraint)
+- Tiers 1–3 from [notifications.md](../design/notifications.md#1-the-constraint)
 - The Alerts screen
 
 ---
@@ -59,7 +59,7 @@
 **Done when:** in Chrome DevTools → Sensors → a custom location near the lot, the banner + local notification show once.
 
 ## P6.6: Tier 2, "I'm on my way"
-**Files:** `parking/push/rules.py`, hooks in the consumer's change handler, frontend buttons
+**Files:** `parking/push/rules.py`, a hook in `api/ingest.py` after each status change, frontend buttons
 
 **Steps**
 1. `rules.should_send_on_my_way(sub, old_status, new_status, now) -> bool` implementing [notifications.md §4](../design/notifications.md#4-tier-2-im-on-my-way-server-rules-pushrulespy).
@@ -80,18 +80,8 @@
 
 **Done when:** a schedule set 2 minutes ahead fires once; nothing fires in quiet hours.
 
-## P6.8: Tier 4, Home Assistant
-**Files:** `parking/api/ha_bridge.py`, `docs/home-assistant.md` (copy of the automation example)
-
-**Steps**
-1. If `HA_MQTT_URL` is set: connect to the home broker, publish the discovery configs (retained) at start-up and `parking/main/status` (retained) on every change, per [notifications.md §6](../design/notifications.md#6-tier-4-home-assistant).
-2. A failure to reach the home broker must **never** affect the main pipeline (a separate task, with its own reconnect loop).
-3. In HA: create zone `zone.parking` around the lot and add the automation.
-
-**Done when:** HA shows `sensor.parking_free_spaces` updating, and a real drive into the zone triggers the notification on your phone.
-
-## P6.9: Device test matrix
-**Steps:** fill in the [test matrix](../design/notifications.md#8-test-matrix-phase-6) on a real Android phone, a real iPhone (installed PWA) and a desktop browser. Note the OS and browser versions in PROGRESS.md.
+## P6.8: Device test matrix
+**Steps:** fill in the [test matrix](../design/notifications.md#7-test-matrix-phase-6) on a real Android phone, a real iPhone (installed PWA) and a desktop browser. Note the OS and browser versions in PROGRESS.md.
 
 **Done when:** every "expected ✅" cell is confirmed.
 
@@ -99,6 +89,6 @@
 
 ## Exit criteria
 - [ ] Push works on Android and iPhone (installed)
-- [ ] A drive test: Tier 1 banner (app open) and Tier 4 HA notification (app closed) both fire near the lot
+- [ ] A drive test: the Tier 1 banner fires near the lot with the app open
 - [ ] "On my way" and schedules behave per the rules
 - [ ] No permission prompt appears without a tap

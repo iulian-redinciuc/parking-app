@@ -59,19 +59,19 @@ Implement `TwoLineCounter` per [vision.md §7.3](../design/vision.md#73-two-line
 **Files:** `parking/workers/flow_worker.py`, CLI `worker flow`
 
 **Steps**
-1. Loop: `read → gate → track → counter → publish FlowEventMsg (qos 1, uuid4 event_id)`.
+1. Loop: `read → gate → track → counter → api_client.queue_flow_events([FlowEventMsg(event_id=uuid4, …)])` (the outbox guarantees delivery).
 2. Health every 10 s: fps over the last 10 s, `inference_ms_avg`, gate-active ratio.
 3. `--debug-video PATH` writes the annotated frames (boxes, track ids, lines, running in/out) for checking.
 4. Enable the compose profile: `docker compose --profile flow up -d`.
 
-**Done when:** driving or walking a car through the lines produces exactly one event in the right direction (`mosquitto_sub -t 'parking/main/camera/cam-ramp/flow'`).
+**Done when:** driving or walking a car through the lines produces exactly one event in the right direction (check with `--print`, or the API log).
 
 ## P5.7: FlowCounter in the API + corrections
 **Files:** `parking/core/flow_counter.py`, `parking/api/routes/admin.py`, `parking/api/deps.py` (bearer auth with `ADMIN_TOKEN`), migration if needed
 
 **Steps**
 1. `FlowCounter` per [vision.md §7.4](../design/vision.md#74-flow-counter-parkingcoreflow_counterpy-in-the-api): idempotent by `event_id` (keep the last 1000 IDs in memory + the DB primary key), clamp, `correct()`, `restore()`.
-2. The consumer handles `flow` messages → counter → `flow_event` row → zone change → SSE.
+2. `/internal/flow-events` → `ingest.py` → counter → `flow_event` row → zone change → SSE.
 3. `POST /api/admin/zones/{id}/correct` with `Authorization: Bearer $ADMIN_TOKEN` ([api.md §4](../design/api.md#4-admin-endpoints)). Writes a `correction` row.
 4. Optional scheduled reset (`zones[].reset`) via APScheduler.
 5. Tests: duplicates ignored; clamp sets `applied=false`; correction; restore after restart.

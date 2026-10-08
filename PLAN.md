@@ -36,11 +36,9 @@ A mobile-friendly web app that shows **how many parking spaces are free, in real
 flowchart LR
   CA["Camera A<br/>entry/exit"] -- RTSP --> WA["vision-flow<br/>worker"]
   CB["Camera B<br/>parked cars"] -- snapshot/RTSP --> WB["vision-occupancy<br/>worker"]
-  WA --> MQ[("parking MQTT<br/>(private)")]
-  WB --> MQ
-  MQ --> API["API (FastAPI)<br/>smoothing · fusion · SSE · push"]
+  WA -- "HTTP (private network)" --> API["API (FastAPI)<br/>smoothing · fusion · SSE · push"]
+  WB -- "HTTP (private network)" --> API
   API <--> DB[("SQLite")]
-  API -. status .-> HA["Home Assistant<br/>(via home MQTT)"]
   API --> T["Cloudflare Tunnel"] -- HTTPS --> Phone["Phone (PWA from GitHub Pages)"]
   API -- Web Push --> Phone
 ```
@@ -50,11 +48,13 @@ Full detail: [architecture.md](docs/design/architecture.md).
 
 ## 4. Stack (summary)
 
+**Isolation:** the app runs as its own Docker Compose project with its own networks and data. It does not use or change anything already installed on the Pi ([deployment.md §0](docs/design/deployment.md#0-isolation-from-everything-else-on-the-pi)).
+
 | Area | Choice | Why (short) |
 |------|--------|-------------|
 | Vision | Python 3.12, **YOLO11n / YOLO11n-seg** (NCNN on the Pi CPU), ByteTrack, OpenCV, shapely | Best speed/accuracy on a Pi 5; tracking built in. AGPL licence noted, and the detector is swappable |
 | Backend | **FastAPI**, SSE, SQLite + Alembic, APScheduler, pywebpush | Async, simple, one language with vision |
-| Messaging | **Dedicated Mosquitto** in the parking stack (auth + ACL, internal network); an optional Home Assistant broker gets status only | Counts must only be writable by our own authenticated workers |
+| Worker → API | **Plain HTTP** on the app's own private Docker network, token-protected; no message broker | Simplest option; nothing shared with other software on the Pi |
 | Frontend | **Vite + React + TS + Tailwind + vite-plugin-pwa**, HashRouter, i18next | Large ecosystem; static build for Pages |
 | Hosting | Frontend on **GitHub Pages** (Actions); API on the Pi through **Cloudflare Tunnel** (or Tailscale Funnel) | Free HTTPS, no open router ports |
 | Packaging | **Docker Compose** (`api` image without PyTorch, `vision` image with it) | Matches how the Pi is already run |
@@ -68,7 +68,7 @@ Alternatives and reasons: [architecture.md](docs/design/architecture.md), [deplo
 2. **Space detection.** Vehicle masks overlapping hand-drawn space polygons, with a per-space classifier as a fallback ([vision.md §2, §9](docs/design/vision.md)).
 3. **Entry/exit.** Tracking plus **two counting lines**, so cars that stop or reverse aren't miscounted. Drift is handled by admin corrections, an optional nightly reset, and a "≈" display ([vision.md §7–8](docs/design/vision.md)).
 4. **No silent failures.** Stale data and low confidence are always visible in the UI ([frontend.md §2.1](docs/design/frontend.md)).
-5. **Notifications.** A website can't watch location in the background, so there are tiers: proximity while open, "I'm on my way", schedules, the Home Assistant geofence, and an optional native app later ([notifications.md](docs/design/notifications.md)).
+5. **Notifications.** A website can't watch location in the background, so there are tiers: proximity while open, "I'm on my way", schedules, and an optional native app later ([notifications.md](docs/design/notifications.md)).
 6. **Privacy.** Frames are processed in memory and discarded; only numbers are public; location is computed on the phone ([security-privacy.md](docs/design/security-privacy.md)).
 
 ## 6. Roadmap
@@ -77,7 +77,7 @@ Alternatives and reasons: [architecture.md](docs/design/architecture.md), [deplo
 |-------|-------|---------|-----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) | Skeleton, CI, secret scanning, inputs collected | No |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) ⭐ | One image → correct free count, annotated | No |
-| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | Worker → MQTT → API → SSE end to end | No |
+| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | Worker → API → SSE end to end | No |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | Live numbers on your phone, installable | No |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | Real Camera B, ≥ 97% accuracy | Camera B |
 | 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | In/out counting, ≤ 2 cars/day drift | Camera A |

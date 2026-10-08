@@ -5,15 +5,15 @@
 | Layer | Location | Tools | Runs in CI? |
 |-------|----------|-------|-------------|
 | Backend unit | `backend/tests/unit/` | pytest | ✅ |
-| Backend integration (API + DB + in-process MQTT stub) | `backend/tests/integration/` | pytest, httpx `AsyncClient`, pytest-asyncio | ✅ |
+| Backend integration (API + DB, posting to `/internal/*`) | `backend/tests/integration/` | pytest, httpx `AsyncClient`, pytest-asyncio | ✅ |
 | Vision evaluation on **real** images/clips | `data/` (local only) | `parking evaluate`, `parking evaluate-flow` | ❌ (private data). Run on the Pi, record results in PROGRESS.md |
 | Vision smoke test on **synthetic** images | `backend/tests/fixtures/` | pytest (marked `slow`, needs model) | ✅ nightly / manual |
-| End-to-end (replay feed → MQTT → API → SSE) | `backend/tests/e2e/` + `deploy/docker-compose.test.yml` | pytest + docker compose | ✅ on PRs touching backend |
+| End-to-end (replay feed → worker → API → SSE) | `backend/tests/e2e/` + `deploy/docker-compose.test.yml` | pytest + docker compose | ✅ on PRs touching backend |
 | Frontend unit/component | `frontend/src/**/*.test.tsx` | Vitest, Testing Library | ✅ |
 | Frontend E2E | `frontend/e2e/` | Playwright (`iPhone 13`, `Pixel 7`) with `VITE_API_BASE=mock` | ✅ |
 | Quality | — | Lighthouse CI (PWA, a11y ≥ 90) | ✅ on frontend PRs |
 | Load | `scripts/load/sse.py` | asyncio + httpx, 500 clients | manual, Phase 8 |
-| Device checks | — | Real Android + iPhone, [notifications.md §8](notifications.md#8-test-matrix-phase-6) | manual |
+| Device checks | — | Real Android + iPhone, [notifications.md §8](notifications.md#7-test-matrix-phase-6) | manual |
 
 ## 2. What must have unit tests
 

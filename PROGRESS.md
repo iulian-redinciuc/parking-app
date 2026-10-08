@@ -18,7 +18,7 @@
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
 | 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 0 / 11 | ⬜ | | |
-| 6 | [Notifications](docs/phases/phase-6-notifications.md) | 0 / 9 | ⬜ | | |
+| 6 | [Notifications](docs/phases/phase-6-notifications.md) | 0 / 8 | ⬜ | | |
 | 7 | [Admin + stats](docs/phases/phase-7-admin-stats.md) | 0 / 8 | ⬜ | | |
 | 8 | [Hardening](docs/phases/phase-8-hardening.md) | 0 / 9 | ⬜ | | |
 | 9 | [Extras](docs/phases/phase-9-extras.md) | 0 / 7 | ⬜ | | |
@@ -50,13 +50,13 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] **P1.11** Tune and decide
 
 ## Phase 2: Backend + simulated live feed ⬜
-- [ ] **P2.1** Messaging models + MQTT helpers
+- [ ] **P2.1** Message models + worker API client (with flow-event outbox)
 - [ ] **P2.2** Frame sources + health checks
 - [ ] **P2.3** Occupancy worker
 - [ ] **P2.4** Smoothing
 - [ ] **P2.5** State store + fusion
 - [ ] **P2.6** Database (SQLModel + Alembic)
-- [ ] **P2.7** MQTT consumer in the API
+- [ ] **P2.7** Internal ingest endpoints
 - [ ] **P2.8** SSE broadcaster + `/api/stream`
 - [ ] **P2.9** REST endpoints, CORS, errors
 - [ ] **P2.10** Docker images + Compose
@@ -108,8 +108,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] **P6.5** Tier 1: proximity while open
 - [ ] **P6.6** Tier 2: "I'm on my way"
 - [ ] **P6.7** Tier 3: schedules, quiet hours, almost-full
-- [ ] **P6.8** Tier 4: Home Assistant
-- [ ] **P6.9** Device test matrix
+- [ ] **P6.8** Device test matrix
 
 ## Phase 7: Admin tools, history, stats ⬜
 - [ ] **P7.1** Admin login
@@ -164,10 +163,10 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | Date | Decision | Why |
 |------|----------|-----|
 | 2026-10-07 | Repo made public so GitHub Pages works on the free plan | Pages on private repos needs GitHub Pro |
-| 2026-10-07 | Stack: Python/FastAPI + YOLO11 (NCNN) + MQTT + SQLite on the Pi 5; Vite/React/TS PWA on Pages; SSE; Web Push | [PLAN.md §4](PLAN.md#4-stack-summary) |
+| 2026-10-07 | Stack: Python/FastAPI + YOLO11 (NCNN) + SQLite on the Pi 5; Vite/React/TS PWA on Pages; SSE; Web Push | [PLAN.md §4](PLAN.md#4-stack-summary) |
 | 2026-10-07 | Still image → simulated feed → real cameras | De-risks vision first; Phases 1–3 need no hardware |
 | 2026-10-07 | Notification tiers instead of a promised background geofence | Browsers can't track location in the background |
-| 2026-10-07 | A **dedicated** Mosquitto for the parking stack; an optional Home Assistant broker only receives status | Only authenticated workers may write counts |
+| 2026-10-08 | **Fully isolated:** no Home Assistant, no message broker, nothing shared with existing software on the Pi. Workers send results to the API over HTTP on the app's own private Docker network | Owner's requirement; also fewer moving parts |
 | 2026-10-07 | Admin auth with bearer tokens, not cookies | Frontend and API are different sites; third-party cookies are blocked (Safari) and would need CSRF protection |
 | 2026-10-07 | HashRouter in the frontend | GitHub Pages has no SPA fallback |
 | 2026-10-07 | Python pinned to 3.12 (uv) instead of the host's 3.13 | ARM64 ML wheels lag behind new Python versions |
@@ -190,5 +189,5 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 ### 2026-10-07
 - Created the repo, enabled GitHub Pages, made the repo public (free-plan requirement).
 - Checked the hardware: Raspberry Pi 5 8 GB, Docker, Node 22, Python 3.13.
-- Wrote PLAN.md, then split the details into `docs/design/` (11 specs) and `docs/phases/` (10 guides, 95 tasks).
+- Wrote PLAN.md, then split the details into `docs/design/` (11 specs) and `docs/phases/` (10 guides, 94 tasks).
 - **Next:** P0.1–P0.7 skeleton; get P0.8 inputs (sample image + answers) to start Phase 1.

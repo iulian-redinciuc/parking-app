@@ -26,7 +26,6 @@
    !models/.gitkeep
    out/
    deploy/.env
-   deploy/mosquitto/passwd
    *.sqlite*
    # python
    __pycache__/
@@ -66,7 +65,6 @@
      "numpy>=1.26", "shapely>=2.0", "opencv-python-headless>=4.10",
      "fastapi>=0.115", "uvicorn[standard]>=0.30", "sse-starlette>=2.1",
      "sqlmodel>=0.0.21", "alembic>=1.13",
-     "paho-mqtt>=2.1", "aiomqtt>=2.3",
      "pywebpush>=2.0", "apscheduler>=3.10,<4", "argon2-cffi>=23.1", "slowapi>=0.1.9", "httpx>=0.27",
    ]
    [project.optional-dependencies]

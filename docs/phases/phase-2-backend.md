@@ -1,33 +1,34 @@
 # Phase 2: Backend and simulated live feed
 
-**Goal:** the whole server pipeline running end to end (worker → MQTT → API → SSE), with a folder of images standing in for a camera.
+**Goal:** the whole server pipeline running end to end (worker → API → SSE), with a folder of images standing in for a camera.
 **Needs hardware:** no.
 **Specs used:** [architecture.md](../design/architecture.md), [api.md §1–3, §5](../design/api.md), [data-model.md](../design/data-model.md), [vision.md §3, §5, §8](../design/vision.md), [deployment.md §2–4](../design/deployment.md).
 
 ## Deliverables
 - `parking worker occupancy` publishing observations
 - `parking api` serving `/healthz`, `/api/lot`, `/api/status`, `/api/stream`
-- Docker Compose with mosquitto + api + vision-occupancy
+- Docker Compose with api + vision-occupancy (own project, nothing shared with other software on the Pi)
 - An end-to-end test on a replay folder
 
 ## Order
 ```
-P2.1 messaging ─> P2.2 sources ─> P2.3 worker ─────────────────────────────┐
-P2.4 smoothing ─> P2.5 fusion ─> P2.6 db ─> P2.7 consumer ─> P2.8 SSE ─> P2.9 routes ─> P2.10 docker ─> P2.11 e2e
+P2.1 messages ─> P2.2 sources ─> P2.3 worker ─────────────────────────────┐
+P2.4 smoothing ─> P2.5 fusion ─> P2.6 db ─> P2.7 ingest ─> P2.8 SSE ─> P2.9 routes ─> P2.10 docker ─> P2.11 e2e
 ```
 
 ---
 
-## P2.1: Messaging models and MQTT helpers
-**Files:** `parking/messaging.py`, `parking/mqtt.py`, `tests/unit/test_messaging.py`
+## P2.1: Message models and the worker's API client
+**Files:** `parking/messages.py`, `parking/workers/api_client.py`, `tests/unit/test_messages.py`, `tests/unit/test_api_client.py`
 
 **Steps**
-1. Pydantic models: `Observation`, `SlotScore`, `FlowEventMsg`, `CameraHealthMsg`, `Command`, `LotStatus`, `ZoneStatus`, `Totals`, exactly as in [api.md](../design/api.md#5-mqtt-internal-broker). `model_config = ConfigDict(extra="ignore")` for forward compatibility.
-2. Topic builders: `topic_observation(lot, cam)`, `topic_flow`, `topic_health`, `topic_cmd`, `topic_snapshot(lot, cam, req)`, `topic_status(lot)`. Plus a `parse_topic(topic) -> (kind, cam)`.
-3. `mqtt.py`:
-   - `SyncPublisher` (paho, for workers): connect with credentials, `loop_start()`, automatic reconnect, Last Will on the health topic, `publish_model(topic, model, qos, retain)`, and subscribe to `cmd` with a callback.
-   - `async_client(settings)` context manager (aiomqtt, for the API) with a reconnect loop (backoff 1 → 30 s).
-4. Tests: round-trip each model through JSON; topic parse/build symmetry.
+1. Pydantic models: `Observation`, `SlotScore`, `FlowEventMsg`, `FlowEventBatch`, `CameraHealthMsg`, `LotStatus`, `ZoneStatus`, `Totals`, exactly as in [api.md §1, §5](../design/api.md#5-internal-endpoints-workers--api). `model_config = ConfigDict(extra="ignore")` for forward compatibility.
+2. `ApiClient` (httpx, sync, used by workers): base URL from `API_INTERNAL_URL`, `Authorization: Bearer WORKER_TOKEN`, 5 s timeout.
+   - `send_observation(obs)`: one attempt; on failure log and drop (only the latest matters).
+   - `send_health(msg)`: one attempt; on failure log.
+   - `queue_flow_events(events)`: append to the **outbox** (`data/outbox/<camera>.jsonl`). A background thread sends batches (≤ 100) with backoff 1 → 30 s and removes them once accepted.
+   - `--print` mode: write payloads to stdout instead of sending (for testing a worker before the API exists).
+3. Tests: round-trip each model through JSON; the outbox survives a restart (write, recreate the client, it resends); backoff with a fake transport (`httpx.MockTransport`).
 
 **Done when:** tests pass.
 
@@ -47,7 +48,8 @@ P2.4 smoothing ─> P2.5 fusion ─> P2.6 db ─> P2.7 consumer ─> P2.8 SSE �
 **Files:** `parking/workers/base.py`, `parking/workers/occupancy_worker.py`, CLI `worker occupancy`
 
 **Steps**
-1. `base.Worker`: loads config + settings, creates the publisher, handles SIGTERM/SIGINT (finish the current frame, publish `down`, disconnect), publishes health every 10 s from a timer thread, handles `cmd` messages (`reload` → reload slot file + config section; `snapshot` → publish the current or annotated frame as JPEG on `snapshot/<request_id>`).
+1. `base.Worker`: loads config + settings, creates the `ApiClient`, handles SIGTERM/SIGINT (finish the current frame, send a final health `down`, flush the outbox for up to 5 s), sends health every 10 s from a timer thread.
+   `workers/control.py`: a tiny HTTP server (stdlib `http.server` in a thread, port 9000, `WORKER_TOKEN` required) with `GET /control/snapshot?annotated=` (JPEG of the latest frame), `POST /control/reload` (re-read the slot file + config section) and `POST /control/save-reference` ([api.md §5.2](../design/api.md#52-api--workers-control)).
 2. `OccupancyWorker.loop()`:
    ```
    every sample_every_s:
@@ -55,13 +57,13 @@ P2.4 smoothing ─> P2.5 fusion ─> P2.6 db ─> P2.7 consumer ─> P2.8 SSE �
        issue = health.check(frame)
        if issue: record, continue
        result = pipeline.analyze_frame(frame, cam, slots, detector)   # from P1.7
-       publish Observation(qos=1)
+       api_client.send_observation(Observation(...))
    ```
    Use a monotonic clock for scheduling, and don't drift if analysis is slow (next run = previous start + interval; skip if it's late by more than one interval).
 3. `--fake-detector` flag (or env `PARKING_FAKE_DETECTOR=1`) uses `FakeDetector` (sidecar JSON per image), for CI.
 4. Log one line per observation at DEBUG and a summary every minute at INFO.
 
-**Done when:** with a local broker (`docker run --rm -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf`) and `mosquitto_sub -t 'parking/#' -v`, observations appear every 5 s.
+**Done when:** `uv run parking worker occupancy --camera cam-ground --print` prints an observation JSON every 5 s, and `curl -H "Authorization: Bearer $WORKER_TOKEN" localhost:9000/control/snapshot -o s.jpg` returns the current frame.
 
 ## P2.4: Smoothing
 **Files:** `parking/core/smoothing.py`, `parking/core/clock.py`, tests
@@ -96,15 +98,16 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
 
 **Done when:** `parking db upgrade` creates `data/db/parking.sqlite` with the tables.
 
-## P2.7: MQTT consumer in the API
-**Files:** `parking/api/mqtt_consumer.py`
+## P2.7: Internal ingest endpoints
+**Files:** `parking/api/ingest.py`, `parking/api/routes/internal.py`, tests
 
 **Steps**
-1. On API start-up (FastAPI `lifespan`): `db upgrade`, restore `StateStore` from the DB (marked stale), start the consumer task and a `tick()` task (1 s).
-2. Consumer: subscribe to `parking/<lot>/camera/+/observation`, `+/flow`, `+/health`. Dispatch to the `StateStore`. For each change → `repo.record_changes` (in a thread via `anyio.to_thread`) → `broadcaster.publish(status)` → publish the retained `status` topic.
-3. Never crash the task on a bad message: log it and continue. Count bad messages in a metric shown in `/healthz`.
+1. On API start-up (FastAPI `lifespan`): `db upgrade`, restore `StateStore` from the DB (marked stale), start a `tick()` task (1 s) that also marks cameras `down` after 30 s without health.
+2. `routes/internal.py`: `POST /internal/observations`, `/internal/flow-events`, `/internal/health` per [api.md §5.1](../design/api.md#51-workers--api). Require `Bearer WORKER_TOKEN` (constant-time compare). No rate limit, no CORS.
+3. `ingest.py`: apply the payload to the `StateStore` → for each change, `repo.record_changes` (in a thread via `anyio.to_thread`) → `broadcaster.publish(status)`. Serialise ingestion with one `asyncio.Lock` so changes are applied in order.
+4. A bad payload → 422 with the validation error, logged and counted in `/healthz`. It never crashes the API.
 
-**Done when:** with the worker running, the API logs zone changes and `mosquitto_sub -t parking/main/status` shows the retained status.
+**Done when:** with the worker running (no `--print`), the API logs zone changes, and requests without the token get 401.
 
 ## P2.8: SSE broadcaster and `/api/stream`
 **Files:** `parking/api/sse.py`, `parking/api/routes/public.py`
@@ -124,17 +127,17 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
 2. `/healthz`, `/api/lot` (location from settings), `/api/status` (503 `unavailable` until the first observation, unless restored from the DB).
 3. `?lang=` / `Accept-Language` resolution for zone names.
 4. `parking api --host --port --reload`.
-5. Integration tests with httpx `AsyncClient` + an in-process fake MQTT (call the consumer's dispatch directly).
+5. Integration tests with httpx `AsyncClient`: post observations to `/internal/*`, then check `/api/status` and the SSE stream.
 
 **Done when:** tests pass, and `/docs` shows the endpoints in DEBUG mode.
 
 ## P2.10: Docker images and Compose
-**Files:** `backend/Dockerfile`, `deploy/docker-compose.yml`, `deploy/mosquitto/{mosquitto.conf,acl}`, `deploy/.env.example`
+**Files:** `backend/Dockerfile`, `deploy/docker-compose.yml`, `deploy/.env.example`
 
 **Steps**
 1. Dockerfile per [deployment.md §2](../design/deployment.md#2-docker-images-backenddockerfile-multi-stage).
-2. Compose per [deployment.md §3](../design/deployment.md#3-compose-deploydocker-composeyml), without `cloudflared` and `vision-flow` for now.
-3. Mosquitto config, ACL and password file ([deployment.md §4](../design/deployment.md#4-mqtt-brokers)).
+2. Compose per [deployment.md §3](../design/deployment.md#3-compose-deploydocker-composeyml), without `tunnel` and `vision-flow` for now. Follow the [isolation rules](../design/deployment.md#0-isolation-from-everything-else-on-the-pi): project name `parking`, its own networks, loopback-only port.
+3. Generate `WORKER_TOKEN` (`openssl rand -hex 32`) into `deploy/.env`.
 4. Set `config/lot.yaml` → `cam-ground.source: "folder:data/replay/ground?interval=5&loop=true"` and copy a few sample images into `data/replay/ground/`.
 5. `cd deploy && docker compose up -d --build` → `docker compose ps` shows everything healthy.
 
@@ -144,7 +147,7 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
 **Files:** `deploy/docker-compose.test.yml`, `backend/tests/e2e/test_pipeline.py`, `backend/tests/fixtures/replay/*` (synthetic images + detection sidecars)
 
 **Steps**
-1. Test compose: mosquitto + api + vision-occupancy with `PARKING_FAKE_DETECTOR=1`, using a fixture folder.
+1. Test compose: api + vision-occupancy with `PARKING_FAKE_DETECTOR=1`, using a fixture folder.
 2. The test opens `/api/stream`, waits for the first status, copies a new fixture image (with different sidecar detections) into the replay folder, and asserts the expected free count arrives within `3 × interval + 5 s`.
 3. Wire it into CI ([testing.md §5](../design/testing.md#5-ci-githubworkflowsciyml), job 4).
 
@@ -155,5 +158,6 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
 ## Exit criteria
 - [ ] Dropping a new image into `data/replay/ground/` changes the numbers on `curl -N …/api/stream` within ~20 s
 - [ ] Restarting the API shows the last known numbers immediately (marked stale), then live again
-- [ ] Killing the worker → health `down` → zone `stale` after 60 s
+- [ ] Killing the worker → camera `down` after 30 s → zone `stale` after 60 s
+- [ ] `docker ps` shows only `parking-*` containers added; nothing else on the Pi was changed
 - [ ] Unit + integration + e2e tests green in CI

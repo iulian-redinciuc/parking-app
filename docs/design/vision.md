@@ -160,7 +160,7 @@ Rules this enforces:
 ```
 occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
 ```
-- Idempotent: events carry `event_id`; duplicates (MQTT QoS 1 redelivery) are ignored.
+- Idempotent: events carry `event_id`; duplicates (worker retries from its outbox) are ignored.
 - `correct(new_value, actor, note)` sets the value and resets the confidence counters.
 - The current value is persisted (latest `zone_state` row), so a restart continues from it.
 - When clamping happens (e.g. OUT at 0), log a `clamped` warning. A frequent clamp means the count is off.

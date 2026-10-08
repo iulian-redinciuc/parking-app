@@ -18,11 +18,11 @@ Phase guides **link to** the design specs instead of repeating them. If a spec a
 | [design/architecture.md](design/architecture.md) | Components, data flow, backend/frontend module map, ground rules |
 | [design/config.md](design/config.md) | `lot.yaml`, slot files, line files, labels, `.env` variables |
 | [design/vision.md](design/vision.md) | Detection, occupancy, smoothing, entry/exit counting, health checks, evaluation |
-| [design/api.md](design/api.md) | REST endpoints, SSE stream, MQTT topics and payloads, auth |
+| [design/api.md](design/api.md) | REST endpoints, SSE stream, internal worker endpoints, auth |
 | [design/data-model.md](design/data-model.md) | SQLite tables, retention, aggregation, restart behaviour |
 | [design/frontend.md](design/frontend.md) | Screens, components, live-update hook, PWA, i18n, styling |
-| [design/notifications.md](design/notifications.md) | Push, proximity tiers, Home Assistant, iPhone specifics |
-| [design/deployment.md](design/deployment.md) | Docker images, Compose, MQTT brokers, tunnel, GitHub Pages, backups |
+| [design/notifications.md](design/notifications.md) | Push, proximity tiers, iPhone specifics |
+| [design/deployment.md](design/deployment.md) | Isolation rules, Docker images, Compose, tunnel, GitHub Pages, backups |
 | [design/hardware.md](design/hardware.md) | Cameras, mounting, network, Pi accessories, sample-image guidelines |
 | [design/security-privacy.md](design/security-privacy.md) | Threats, controls, secrets, public-repo rules, GDPR checklist |
 | [design/testing.md](design/testing.md) | Test layers, fixtures, CI, evaluation datasets, device matrix |

@@ -2,8 +2,8 @@
 
 Pick in any order once Phase 8 is done. Each item is a small project; write a short design note in `docs/design/` before starting it.
 
-## P9.1: Native app with background geofencing (Tier 5)
-**Why:** a real "you're near the lot" notification with the app closed, for everyone (not just HA users).
+## P9.1: Native app with background geofencing (Tier 4)
+**Why:** a real "you're near the lot" notification with the app closed.
 **Outline**
 1. `mobile/` Capacitor project; `webDir` → `../frontend/dist`; build with `VITE_API_BASE` set to production.
 2. Geofencing plugin: evaluate the options at the time (maintenance, licence, iOS + Android support). Region = lot location + `notify_radius_m`.
@@ -25,7 +25,7 @@ Pick in any order once Phase 8 is done. Each item is a small project; write a sh
 
 ## P9.4: Barrier / induction-loop integration
 **Why:** near-perfect entry/exit counts where a barrier exists.
-**Outline:** a small worker reading the barrier controller (dry contact via a Pi GPIO / Shelly relay → MQTT, or the controller's API) → the same `flow` messages with `source: "barrier"`. Use it alone or to cross-check the camera (alert on disagreement).
+**Outline:** a small worker reading the barrier controller (dry contact via a GPIO input on the vision box, or the controller's API) → the same `POST /internal/flow-events` with `source: "barrier"`. Use it alone or to cross-check the camera (alert on disagreement).
 
 ## P9.5: Fine-tuned detector / licence swap
 **Why:** better accuracy on your specific view, or avoiding AGPL obligations.
@@ -33,7 +33,7 @@ Pick in any order once Phase 8 is done. Each item is a small project; write a sh
 
 ## P9.6: Multiple lots
 **Why:** reuse for other locations.
-**Outline:** `lots: [...]` in config; `lot` in every API path (`/api/lots/<id>/status`); a lot picker in the UI; per-lot subscriptions. MQTT topics already include `<lot>`.
+**Outline:** `lots: [...]` in config; `lot` in every API path (`/api/lots/<id>/status`); a lot picker in the UI; per-lot subscriptions. Payloads already carry `camera_id`, so add `lot` to them.
 
 ## P9.7: Smarter forecast
 **Why:** "you'll probably find a space if you arrive at 9:10".

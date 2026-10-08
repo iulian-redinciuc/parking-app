@@ -2,15 +2,14 @@
 
 ## 1. The constraint
 
-**A web page cannot read the phone's location while it is closed or in the background.** That's true for Chrome on Android and Safari on iPhone. So "notify me automatically when I drive near the lot, without opening anything" is impossible for a pure web app. The tiers below get as close as possible, and Tier 5 (native wrapper) removes the limit.
+**A web page cannot read the phone's location while it is closed or in the background.** That's true for Chrome on Android and Safari on iPhone. So "notify me automatically when I drive near the lot, without opening anything" is impossible for a pure web app. The tiers below get as close as possible, and Tier 4 (native wrapper) removes the limit.
 
 | Tier | Trigger | Works with app closed? | Who | Phase |
 |------|---------|-----------------------|-----|-------|
 | 1 | Phone is within the radius **while the app is open** | No | Everyone | 6 |
 | 2 | User tapped **"I'm on my way"** | ✅ (server push) | Everyone with push | 6 |
 | 3 | **Scheduled reminder** (e.g. weekdays 08:30) | ✅ | Everyone with push | 6 |
-| 4 | **Home Assistant** zone entry (HA Companion app geofence) | ✅ | Your household | 6 |
-| 5 | **Native geofence** (Capacitor app) | ✅ | Users of the native app | 9 |
+| 4 | **Native geofence** (Capacitor app) | ✅ | Users of the native app | 9 |
 
 ## 2. Web Push basics
 
@@ -69,50 +68,14 @@ After that, on every status change, for each subscription with `on_my_way_until 
 ### "Almost full" alerts (`prefs.alert_when_almost_full`)
 - When a preferred zone's level becomes `almost_full` or `full`, push to subscribers with this pref, at most once per 2 h per subscription, respecting quiet hours.
 
-## 6. Tier 4: Home Assistant
-
-The API's `ha_bridge.py` (enabled when `HA_MQTT_URL` is set) publishes to your **home** broker:
-
-1. **MQTT discovery configs** (retained), once at start-up:
-   - Topic `homeassistant/sensor/parking_main_total_free/config`:
-     ```json
-     { "name": "Parking free spaces", "unique_id": "parking_main_total_free",
-       "state_topic": "parking/main/status", "value_template": "{{ value_json.total.free }}",
-       "unit_of_measurement": "spaces", "icon": "mdi:parking",
-       "json_attributes_topic": "parking/main/status",
-       "json_attributes_template": "{{ {'level': value_json.total.level, 'stale': value_json.total.stale} | tojson }}",
-       "device": { "identifiers": ["parking_main"], "name": "Parking", "manufacturer": "parking-app" } }
-     ```
-   - The same for each zone: `parking_main_<zone>_free` with `value_template: "{{ (value_json.zones | selectattr('id','eq','<zone>') | first).free }}"`.
-2. **`parking/main/status`** retained, on every change.
-
-Example automation (put in HA, not in this repo):
-```yaml
-alias: Parking - tell me free spaces when I get close
-trigger:
-  - platform: zone
-    entity_id: person.<you>
-    zone: zone.parking          # create a zone around the lot in HA, radius e.g. 500 m
-    event: enter
-action:
-  - service: notify.mobile_app_<your_phone>
-    data:
-      title: "Parking: {{ states('sensor.parking_free_spaces') }} free"
-      message: >
-        Ground {{ states('sensor.parking_ground_free') }} ·
-        Underground {{ states('sensor.parking_underground_free') }}
-mode: single
-```
-The HA Companion app does true background geofencing on both Android and iPhone, so this is a real arrival notification today, for anyone who has HA access.
-
-## 7. Tier 5: native app (Phase 9 summary)
+## 6. Tier 4: native app (Phase 9 summary)
 
 - Capacitor project in `mobile/` that loads the built frontend.
 - Geofencing plugin (e.g. `@capacitor-community/background-geolocation` or a dedicated geofence plugin; evaluate licences and maintenance status at the time).
 - On geofence enter → fetch `/api/status` → local notification.
 - Android: APK sideload or Play Store (one-time fee). iPhone: Apple Developer Program (99 USD/year) for TestFlight or the App Store; needs "Always" location permission and a justification text.
 
-## 8. Test matrix (Phase 6)
+## 7. Test matrix (Phase 6)
 
 | Device | Browser | Install? | Push | Tier 1 | Tier 2 | Tier 3 |
 |--------|---------|----------|------|--------|--------|--------|

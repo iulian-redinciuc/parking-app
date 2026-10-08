@@ -18,7 +18,7 @@ Three kinds of configuration:
 version: 1
 
 lot:
-  id: main                         # used in MQTT topics: parking/<id>/...
+  id: main                         # used in logs and payloads
   name: "Parking"
   location:                        # values come from .env so they stay out of git
     lat: ${LOT_LAT}
@@ -189,10 +189,9 @@ video_time_s,direction,note
 | `PARKING_CONFIG` | `/app/config/lot.yaml` | all |
 | `LOT_LAT`, `LOT_LON` | `51.5007`, `-0.1246` (example) | API (lot location) |
 | `PARKING_DB_URL` | `sqlite:////app/data/db/parking.sqlite` | API |
-| `MQTT_HOST`, `MQTT_PORT` | `mosquitto-parking`, `1883` | API, workers |
-| `MQTT_API_USER`, `MQTT_API_PASSWORD` | | API |
-| `MQTT_WORKER_USER`, `MQTT_WORKER_PASSWORD` | | workers |
-| `HA_MQTT_URL` | `mqtt://172.17.0.1:1883` (empty = disabled) | API (Home Assistant bridge) |
+| `WORKER_TOKEN` | `openssl rand -hex 32` | API, workers (internal endpoints) |
+| `API_INTERNAL_URL` | `http://api:8000` | workers |
+| `API_HOST_PORT` | `8000` (bound to 127.0.0.1 only) | compose |
 | `CAM_GROUND_SNAPSHOT_URL`, `CAM_GROUND_RTSP_URL` | `http://user:pass@10.0.20.11/...` | occupancy worker |
 | `CAM_RAMP_RTSP_URL` | `rtsp://user:pass@10.0.20.12:554/sub` | flow worker |
 | `CORS_ORIGINS` | `https://iulian-redinciuc.github.io` | API |

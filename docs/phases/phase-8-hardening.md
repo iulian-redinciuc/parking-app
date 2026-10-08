@@ -9,7 +9,7 @@
 **Steps**
 1. Every service: `restart: unless-stopped`, a healthcheck, `read_only: true` where possible (with `tmpfs: /tmp`), `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, non-root user.
 2. Resource limits tuned to the Phase 4–5 measurements.
-3. Pin image tags (e.g. `eclipse-mosquitto:2.0.x`, `cloudflare/cloudflared:<version>`). Let Dependabot propose updates.
+3. Pin image tags (e.g. `cloudflare/cloudflared:<version>`, `python:3.12.x-slim-bookworm`). Let Dependabot propose updates.
 4. Docker starts on boot (`systemctl is-enabled docker`). The stack comes back after `sudo reboot`.
 
 **Done when:** after `sudo reboot`, the app shows live data again within 3 minutes with no manual steps.
@@ -38,13 +38,13 @@
 **Steps**
 1. Admin push alerts (P7.8) cover cameras and staleness. Add: disk > 85%, CPU temp > 80 °C sustained 10 min, API restarted, backup failed.
 2. External uptime check: a free monitor (e.g. UptimeRobot / Healthchecks.io) on `https://<api>/healthz` every 5 min, emailing you. This catches "the whole Pi or internet is down", which the Pi can't report itself.
-3. Optional: expose metrics to Home Assistant via the HA bridge (camera states as binary sensors).
 
 **Done when:** pulling the Pi's network cable produces an external alert email within 10 min.
 
 ## P8.5: Security review
 Go through [security-privacy.md §2](../design/security-privacy.md#2-threats-and-controls) line by line and tick each control as verified:
-- [ ] MQTT: anonymous connection refused; the worker user can't publish `status`
+- [ ] `/internal/*` returns 401 without `WORKER_TOKEN` and 404 through the tunnel
+- [ ] `docker ps` / `docker network ls`: only `parking-*` containers and `parking_*` networks belong to this app; no other project's containers were changed
 - [ ] Cameras unreachable from outside the camera VLAN (except the Pi)
 - [ ] Login rate limit works; tokens expire; logout revokes
 - [ ] CSP meta present; no `dangerouslySetInnerHTML`; the admin token is in sessionStorage

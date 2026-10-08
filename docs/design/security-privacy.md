@@ -9,20 +9,20 @@
 | Count integrity | Wrong numbers send people to a full lot |
 | Push subscriptions | Could be abused to spam users |
 | Secrets (`.env`) | Camera passwords, VAPID private key, tunnel token |
-| The Pi | It also runs other home services |
+| The Pi | It also runs other software, which this app must never touch ([deployment.md §0](deployment.md#0-isolation-from-everything-else-on-the-pi)) |
 
 ## 2. Threats and controls
 
 | Threat | Control |
 |--------|---------|
-| Fake counts injected over MQTT | Parking broker is on an internal Docker network, no anonymous access, per-user ACLs ([deployment.md §4](deployment.md#4-mqtt-brokers)) |
+| Fake counts posted to the API | `/internal/*` requires `WORKER_TOKEN` (constant-time check) **and** is not forwarded by the tunnel; workers and API share a private Docker network ([deployment.md §5](deployment.md#5-public-access-for-the-api)) |
 | Someone on the internet reaches cameras | Cameras on their own VLAN with no internet. No port forwards. Only the vision workers can reach them |
 | Admin brute force | Argon2 password hash, 5 attempts / 15 min / IP, session tokens expire after 7 days, `ADMIN_TOKEN` ≥ 32 random bytes |
 | Token theft via XSS | React escapes output by default. No `dangerouslySetInnerHTML`. Strict CSP `<meta>` in `index.html` (`default-src 'self'; connect-src 'self' <API>; img-src 'self' data: blob: <API>`). Admin token kept in `sessionStorage`, not `localStorage` |
 | CSRF | Bearer tokens instead of cookies, so there's nothing for a browser to send automatically |
 | API abuse / DoS | Rate limits (slowapi), Cloudflare in front (Option A), SSE queues bounded per client, a cap on concurrent SSE clients (e.g. 1000) |
 | Push spam through our API | Rate limits on subscribe/test. Pushes only ever go to subscriptions the browser created. Content is generated server-side only |
-| Secrets leaked to the public repo | `.env`, `data/`, `models/`, `deploy/mosquitto/passwd` in `.gitignore`. **gitleaks** pre-commit hook + CI job. GitHub secret scanning and push protection switched on |
+| Secrets leaked to the public repo | `.env`, `data/`, `models/` in `.gitignore`. **gitleaks** pre-commit hook + CI job. GitHub secret scanning and push protection switched on |
 | Compromised dependency | Dependabot (pip, npm, actions, docker). Lockfiles (`uv.lock`, `package-lock.json`). Images pinned to major versions |
 | Pi compromise spreads to the home stack | Containers run as non-root, internal networks, read-only mounts where possible, resource limits. Only the API is exposed (via the tunnel) |
 
@@ -35,7 +35,7 @@ The repo `iulian-redinciuc/parking-app` is **public**. Before every commit:
 | Camera images, video, screenshots of the camera view | `data/` (git-ignored) |
 | Ground-truth labels tied to real images | `data/labels/` |
 | Camera URLs, usernames, passwords, IPs | `deploy/.env` |
-| VAPID private key, admin hash/token, tunnel token, MQTT passwords | `deploy/.env`, `deploy/mosquitto/passwd` |
+| VAPID private key, admin hash/token, worker token, tunnel token | `deploy/.env` |
 | Exact lot coordinates (if you consider them private) | `deploy/.env` (`LOT_LAT`/`LOT_LON`) |
 | Model weights | `models/` (git-ignored; reproducible via `parking models export`) |
 

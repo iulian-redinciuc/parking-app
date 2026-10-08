@@ -1,17 +1,19 @@
 # Architecture
 
+## 0. Isolation rule
+
+The parking app is **completely self-contained**. It does **not** use, connect to, or change anything already installed on the Pi (no existing message brokers, home-automation software, reverse proxies, databases or tunnels). Everything it needs runs in its **own Docker Compose project** (`parking`), on its **own Docker networks**, with its **own volumes** under this repo folder. Removing it is `docker compose down -v` plus deleting the folder.
+
 ## 1. Components
 
 | Component | Runs where | Responsibility | Talks to |
 |-----------|-----------|----------------|----------|
-| **vision-occupancy** worker | Pi (or edge box) | Grabs frames from Camera B, detects vehicles, scores each space, publishes results | Camera (RTSP/HTTP) → parking MQTT |
-| **vision-flow** worker | Pi (or edge box) | Reads Camera A's sub-stream, detects + tracks vehicles, publishes in/out events | Camera (RTSP) → parking MQTT |
-| **parking MQTT broker** | Pi, Docker, internal network only | Message bus between workers and API | workers, API |
-| **API** | Pi, Docker | Smoothing, flow counting, fusion into zone counts, SQLite history, REST + SSE, Web Push, admin | parking MQTT, SQLite, phones (through tunnel), push services, home MQTT (optional) |
+| **vision-occupancy** worker | Pi (or edge box) | Grabs frames from Camera B, detects vehicles, scores each space, sends results to the API | Camera (RTSP/HTTP) → API (HTTP, internal) |
+| **vision-flow** worker | Pi (or edge box) | Reads Camera A's sub-stream, detects + tracks vehicles, sends in/out events to the API | Camera (RTSP) → API (HTTP, internal) |
+| **API** | Pi, Docker | Receives worker results, smoothing, flow counting, fusion into zone counts, SQLite history, REST + SSE, Web Push, admin | workers, SQLite, phones (through tunnel), push services |
 | **SQLite** | Pi, file in `data/db/` | History, subscriptions, corrections | API only |
-| **Tunnel** | Pi, Docker | Public HTTPS hostname for the API without opening router ports | API |
+| **Tunnel** | Pi, Docker (its own `cloudflared` container) | Public HTTPS hostname for the API without opening router ports | API |
 | **Frontend (PWA)** | GitHub Pages | Live screen, notifications settings, stats, admin | API over HTTPS |
-| **Home Assistant MQTT broker** (optional) | wherever HA's broker runs | Only used to publish status to Home Assistant | API (publish only) |
 
 ## 2. Data flow
 
@@ -20,7 +22,6 @@ sequenceDiagram
   autonumber
   participant Cam as Camera B
   participant W as vision-occupancy
-  participant MQ as parking MQTT
   participant API as API
   participant DB as SQLite
   participant P as Phone (PWA)
@@ -31,27 +32,25 @@ sequenceDiagram
   loop every 5 s
     W->>Cam: grab frame
     W->>W: detect vehicles → score slots
-    W->>MQ: observation (slot scores, taken flags)
+    W->>API: POST /internal/observations (slot scores, taken flags)
   end
-  MQ->>API: observation
   API->>API: smoothing (3 consistent readings) → fusion
   alt zone count changed
     API->>DB: insert zone_state row
     API-->>P: SSE event: status
-    API->>MQ: retained parking/main/status
   end
 ```
 
-Flow camera events follow the same path: `flow` messages → API `FlowCounter` → fusion → SSE.
+Flow camera events follow the same path: `POST /internal/flow-events` → API `FlowCounter` → fusion → SSE.
 
 ## 3. Ground rules
 
-1. **Workers never send images** to the API, except a single JPEG an admin asks for (`cmd: snapshot`). Results are small JSON.
-2. **The API is the only writer** to SQLite and the only component the internet can reach.
+1. **Workers never send images** to the API, except a single JPEG an admin asks for (`GET /control/snapshot` on the worker). Results are small JSON.
+2. **The API is the only writer** to SQLite and the only component the internet can reach. Its `/internal/*` routes need the worker token **and** are blocked at the tunnel (see [deployment.md §5](deployment.md#5-public-access-for-the-api)).
 3. **Configuration is file-based** (`config/lot.yaml` + `config/slots/*.json`), committed to git. **Secrets and the lot location come from `.env`** (git-ignored).
 4. **Time is UTC** everywhere in storage and payloads (ISO 8601 with `Z`). Only the UI converts to local time.
 5. **Pixel coordinates** in slot and line files are relative to the reference image size stored in that file. Workers rescale if the live frame size differs.
-6. **Every message has a version field `v`** so payloads can evolve.
+6. **Every payload has a version field `v`** so it can evolve.
 7. **Workers are stateless** apart from short-term buffers. All counting state that must survive a restart (flow counts, smoothing results) lives in the API and is persisted.
 8. **Fail visible, not silent.** If data is old or a camera is unhealthy, the UI says so (see `stale` and `confidence` in [api.md](api.md#lotstatus)).
 
@@ -67,8 +66,7 @@ backend/
 │   ├── cli.py                   # Typer app: `parking ...` (all commands, see §6)
 │   ├── config.py                # pydantic models for lot.yaml, slot/line files, Settings (.env)
 │   ├── geometry.py              # polygon/line helpers on top of shapely + numpy
-│   ├── messaging.py             # MQTT topic builders + pydantic payload models
-│   ├── mqtt.py                  # thin sync (paho) and async (aiomqtt) client helpers with reconnect
+│   ├── messages.py              # pydantic payload models shared by workers and API
 │   ├── vision/
 │   │   ├── detector.py          # Detection dataclass, Detector protocol, YoloDetector
 │   │   ├── occupancy.py         # slot scoring, zone counting
@@ -82,7 +80,9 @@ backend/
 │   │   ├── bootstrap.py         # propose slots from detections
 │   │   └── evaluate.py          # metrics for occupancy and flow
 │   ├── workers/
-│   │   ├── base.py              # loop, heartbeat, command handling, graceful shutdown
+│   │   ├── base.py              # loop, heartbeat, graceful shutdown
+│   │   ├── api_client.py        # HTTP client to the API: retries, outbox for flow events
+│   │   ├── control.py           # tiny internal HTTP server: /control/snapshot, /reload, /save-reference
 │   │   ├── occupancy_worker.py
 │   │   └── flow_worker.py
 │   ├── core/
@@ -98,10 +98,10 @@ backend/
 │   │   ├── app.py               # create_app(): routers, CORS, rate limits, lifespan
 │   │   ├── deps.py              # settings, db session, state store, auth dependencies
 │   │   ├── sse.py               # Broadcaster (fan-out to SSE clients)
-│   │   ├── mqtt_consumer.py     # subscribes to worker topics, feeds core/
-│   │   ├── ha_bridge.py         # optional: publish status + discovery to home MQTT
+│   │   ├── ingest.py            # applies worker payloads to core/, records changes, broadcasts
 │   │   └── routes/
 │   │       ├── public.py        # /healthz, /api/lot, /api/status, /api/stream, /api/history
+│   │       ├── internal.py      # /internal/* (worker token only)
 │   │       ├── push.py          # /api/push/*
 │   │       └── admin.py         # /api/admin/*
 │   └── push/
@@ -172,21 +172,19 @@ frontend/
 | `parking db prune` / `parking db aggregate` | 7 | Retention + rollups (also scheduled) |
 | `parking backup --out DIR` | 8 | Consistent SQLite + config backup |
 
-## 7. Runtime view (Docker Compose)
+## 7. Runtime view (Docker Compose project `parking`)
 
 ```mermaid
 flowchart TB
-  subgraph net_internal["network: parking-internal (no published ports)"]
-    MQ[mosquitto-parking]
+  subgraph net_internal["network: parking-internal (private, no published ports)"]
     W1[vision-occupancy]
     W2["vision-flow (profile: flow)"]
     API[api]
   end
-  T[cloudflared] --> API
-  API -. optional publish .-> HMQ[(Home Assistant MQTT)]
-  W1 --> MQ
-  W2 --> MQ
-  MQ --> API
+  W1 -- "POST /internal/*" --> API
+  W2 -- "POST /internal/*" --> API
+  API -- "GET /control/*" --> W1
+  T["cloudflared (own container)"] -- "/api/*, /healthz only" --> API
 ```
 
-Details in [deployment.md](deployment.md).
+Only these containers exist; nothing outside the `parking` project is used. Details in [deployment.md](deployment.md).

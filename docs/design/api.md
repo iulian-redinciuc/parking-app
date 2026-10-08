@@ -1,11 +1,11 @@
-# API, live stream and MQTT contracts
+# API, live stream and internal contracts
 
 Base URL in production: `https://parking-api.<domain>` (see [deployment.md](deployment.md)). All JSON uses UTC ISO 8601 timestamps with `Z`.
 
 ## 1. Shared types
 
 ### LotStatus
-Returned by `GET /api/status`, sent in every SSE `status` event and published retained to `parking/<lot>/status`.
+Returned by `GET /api/status` and sent in every SSE `status` event.
 
 ```json
 {
@@ -62,7 +62,7 @@ Codes: `bad_request` (400), `unauthorized` (401), `forbidden` (403), `not_found`
 
 | Method | Path | Phase | Description |
 |--------|------|-------|-------------|
-| GET | `/healthz` | 2 | `{"status":"ok","mqtt":true,"db":true,"cameras":{"cam-ground":"ok"}}`. HTTP 200 even when cameras are down, because the API itself is alive |
+| GET | `/healthz` | 2 | `{"status":"ok","db":true,"cameras":{"cam-ground":"ok"}}`. HTTP 200 even when cameras are down, because the API itself is alive |
 | GET | `/api/lot` | 2 | Static lot info (below) |
 | GET | `/api/status` | 2 | `LotStatus`; `503 unavailable` before the first observation |
 | GET | `/api/stream` | 2 | SSE (see §3) |
@@ -142,9 +142,9 @@ Why not cookies: the frontend (github.io) and API (your domain) are different si
 | POST | `/api/admin/login` | 7 | `{"password":"…"}` → `{"token":"…","expires_at":"…"}`. 5 attempts / 15 min / IP |
 | POST | `/api/admin/logout` | 7 | Revokes the session token |
 | GET | `/api/admin/cameras` | 7 | `[{"id","role","state":"ok|degraded|down","issue","fps","last_frame_age_s","inference_ms_avg"}]` |
-| GET | `/api/admin/cameras/{id}/snapshot?annotated=true` | 7 | `image/jpeg` (worker round trip via MQTT, 5 s timeout → 503) |
+| GET | `/api/admin/cameras/{id}/snapshot?annotated=true` | 7 | `image/jpeg` (proxied from the worker's `/control/snapshot`, 5 s timeout → 503) |
 | GET | `/api/admin/cameras/{id}/slots` | 7 | Slot file JSON |
-| PUT | `/api/admin/cameras/{id}/slots` | 7 | Validates, writes `config/slots/<id>.json`, keeps a `.bak`, sends `reload` to the worker |
+| PUT | `/api/admin/cameras/{id}/slots` | 7 | Validates, writes `config/slots/<id>.json`, keeps a `.bak`, calls the worker's `/control/reload` |
 | GET / PUT | `/api/admin/cameras/{id}/lines` | 7 | Same, for line files |
 | POST | `/api/admin/cameras/{id}/reference-frame` | 7 | Saves the current frame as the shift-detection reference |
 | POST | `/api/admin/zones/{id}/correct` | 5 | `{"occupied": 37, "note": "manual count"}` → new zone status. `flow` zones only (409 otherwise) |
@@ -152,18 +152,34 @@ Why not cookies: the frontend (github.io) and API (your domain) are different si
 
 ---
 
-## 5. MQTT (internal broker)
+## 5. Internal endpoints (workers ↔ API)
 
-All topics start with `parking/<lot>/`. All payloads are JSON with `"v": 1` unless noted.
+Plain HTTP on the parking app's own private Docker network. There is **no message broker**.
 
-| Topic | QoS | Retained | Publisher → subscriber |
-|-------|-----|----------|------------------------|
-| `camera/<cam>/observation` | 1 | no | occupancy worker → API |
-| `camera/<cam>/flow` | 1 | no | flow worker → API |
-| `camera/<cam>/health` | 0 | yes | worker → API |
-| `camera/<cam>/cmd` | 1 | no | API → worker |
-| `camera/<cam>/snapshot/<request_id>` | 0 | no | worker → API (**binary JPEG**) |
-| `status` | 1 | yes | API → anyone (bridged to the home broker for Home Assistant) |
+### 5.1 Workers → API
+
+Auth: `Authorization: Bearer <WORKER_TOKEN>` (from `.env`). These routes are **never** reachable from the internet: the tunnel only forwards `/api/*` and `/healthz` ([deployment.md §5](deployment.md#5-public-access-for-the-api)), and the token is checked as well.
+
+| Method | Path | Body | Response | Sent |
+|--------|------|------|----------|------|
+| POST | `/internal/observations` | `observation` | 204 | after each analysed frame (occupancy) |
+| POST | `/internal/flow-events` | `{"events": [flow, …]}` (1–100) | 200 `{"accepted": n, "duplicates": m}` | as soon as events happen (flow) |
+| POST | `/internal/health` | `health` | 204 | every 10 s (all workers) |
+
+Delivery rules:
+- **Observations:** if the API is unreachable, the worker drops the observation (only the latest matters) and keeps going.
+- **Flow events:** must not be lost. The worker keeps an **outbox** (in memory, plus `data/outbox/<camera>.jsonl` on disk so it survives a worker restart). It retries with backoff (1 → 30 s) and removes events once the API accepts them. `event_id` makes retries safe: duplicates are ignored.
+- **Crashed worker:** there's no "last will" message. The API marks a camera `down` when it hasn't received a health message for 30 s, and its zones become `stale` after `stale_after_s`.
+
+### 5.2 API → workers (control)
+
+Each worker runs a tiny HTTP server on port **9000**, reachable only inside the private Docker network. The API calls it with the same `WORKER_TOKEN`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/control/snapshot?annotated=true` | Current frame as `image/jpeg` (admin snapshots) |
+| POST | `/control/reload` | Re-read config and the slot/line file |
+| POST | `/control/save-reference` | Save the current frame as the shift-detection reference |
 
 ### observation
 ```json
@@ -193,14 +209,6 @@ All topics start with `parking/<lot>/`. All payloads are JSON with `"v": 1` unle
 }
 ```
 `state`: `ok | degraded | down`. `issue`: `null | black | frozen | blurry | shifted | connect_failed`.
-The worker also sets an MQTT **Last Will** on this topic with `{"v":1,"camera_id":…,"state":"down","issue":"connect_failed"}`, so a crashed worker shows as down at once.
-
-### cmd
-```json
-{ "v": 1, "cmd": "reload" }
-{ "v": 1, "cmd": "snapshot", "request_id": "a1b2", "annotated": true }
-{ "v": 1, "cmd": "save_reference" }
-```
 
 ---
 
