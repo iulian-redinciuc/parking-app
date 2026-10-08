@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Works through PROGRESS.md one task at a time, each task in a fresh Claude Code
-# session. Waits out usage limits and resumes the same session afterwards.
+# session. After each task it checks that tests were added and that lint/tests
+# pass, waits out usage limits, and resumes the same session afterwards.
 # Start it with start.sh (inside tmux); see README.md.
 set -uo pipefail
 shopt -u patsub_replacement 2>/dev/null || true
@@ -8,14 +9,17 @@ shopt -u patsub_replacement 2>/dev/null || true
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="${REPO:-$(cd "$HERE/../.." && pwd)}"
 STATE="${STATE:-$HOME/.parking-loop}"
-TASK_TIMEOUT="${TASK_TIMEOUT:-3h}"        # max wall time per session run
-MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"         # session runs per task before giving up on it
-MAX_TRANSIENT="${MAX_TRANSIENT:-10}"      # retries for network/API hiccups per task
-IDLE_POLL_S="${IDLE_POLL_S:-900}"         # how often to re-check when only blocked tasks remain
+TASK_TIMEOUT="${TASK_TIMEOUT:-3h}"            # max wall time per session run
+MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"             # session runs per task before it's marked blocked
+MAX_TRANSIENT="${MAX_TRANSIENT:-10}"          # retries for network/API hiccups per session run
+MAX_FIX_ROUNDS="${MAX_FIX_ROUNDS:-2}"         # chances to fix failing lint/tests before the loop stops
+IDLE_POLL_S="${IDLE_POLL_S:-900}"             # how often to re-check when only blocked tasks remain
 LIMIT_FALLBACK_S="${LIMIT_FALLBACK_S:-1800}"  # re-try interval when a limit's reset time is unknown
-TRANSIENT_WAIT_S="${TRANSIENT_WAIT_S:-300}"
 LIMIT_GRACE_S="${LIMIT_GRACE_S:-90}"          # extra wait after the announced reset time
+TRANSIENT_WAIT_S="${TRANSIENT_WAIT_S:-300}"
+VERIFY_TIMEOUT="${VERIFY_TIMEOUT:-30m}"
 
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"   # uv and other user-level tools
 PROGRESS="$REPO/PROGRESS.md"
 CURRENT_LOG="$STATE/logs/current.log"
 RULES="$(cat "$HERE/rules.md")"
@@ -36,6 +40,7 @@ say() {
     echo "[$(now)] $*" >>"$STATE/loop.log"
 }
 
+# ---------- PROGRESS.md helpers ----------
 task_line()  { grep -m1 -E "^- \[.\] (⏸️ )?\*\*$1\*\*" "$PROGRESS"; }
 task_title() { task_line "$1" | sed -E 's/^- \[.\] (⏸️ )?\*\*[^*]+\*\* ?//'; }
 task_guide() { local n="${1#P}"; n="${n%%.*}"; (cd "$REPO" && ls docs/phases/phase-"$n"-*.md 2>/dev/null | head -1); }
@@ -74,6 +79,7 @@ write_status() { # state [task] [detail]
     } >"$STATE/status.txt"
 }
 
+# ---------- prompts ----------
 render_prompt() { # task
     local task="$1" p
     p="$(cat "$HERE/task-prompt.md")"
@@ -87,6 +93,16 @@ continue_prompt() { # task
     printf 'Continue task %s where you left off: check `git status` and PROGRESS.md, finish the remaining steps of the task prompt (verify, record progress, commit, push), then give the short summary.' "$1"
 }
 
+tests_prompt() { # task
+    printf 'The loop checked your work on %s: you changed application code but added or changed no tests. Add tests for the logic you wrote, as the phase guide and docs/design/testing.md require (unit tests at minimum), run them until they pass, then commit ("%s: tests") and push. If the change genuinely has no testable logic, explain why in one line and change nothing.' "$1" "$1"
+}
+
+fix_prompt() { # task verify_log
+    printf 'After %s, the loop ran lint and tests itself and they FAIL. Output (last lines):\n\n```\n%s\n```\n\nFix the cause in the code (or the test, if the test itself is wrong). Never delete, skip or weaken tests just to make them pass. Re-run lint and tests until they pass, then commit ("%s: fix lint/tests") and push.' \
+        "$1" "$(tail -n 80 "$2")" "$1"
+}
+
+# ---------- running Claude ----------
 stop_requested() { [ -f "$STATE/STOP" ]; }
 
 sleep_until() { # epoch — wakes early if a stop is requested
@@ -97,7 +113,7 @@ sleep_until() { # epoch — wakes early if a stop is requested
     done
 }
 
-run_claude() { # mode(new|resume) session_id prompt logfile ; sets RC and sources the result summary
+run_claude() { # mode(new|resume) session_id prompt logfile ; sets RC and the result summary variables
     local mode="$1" sid="$2" prompt="$3" log="$4"
     local args=(-p "$prompt" --output-format stream-json --verbose
                 --dangerously-skip-permissions --append-system-prompt "$RULES" "${MODEL_ARGS[@]}")
@@ -113,6 +129,44 @@ run_claude() { # mode(new|resume) session_id prompt logfile ; sets RC and source
     [ -f "$STATE/last_result.env" ] && source "$STATE/last_result.env"
 }
 
+# Like run_claude, but waits out usage limits and network/API hiccups and tries again.
+# Returns 1 only if a stop was requested while waiting. Sets STARTED_ONCE=1 once the session exists.
+run_claude_patiently() { # task mode session_id prompt logfile
+    local task="$1" mode="$2" sid="$3" prompt="$4" log="$5" transient=0 until
+    while :; do
+        run_claude "$mode" "$sid" "$prompt" "$log"
+        if [ "$SESSION_STARTED" = 1 ]; then STARTED_ONCE=1; mode=resume; fi
+        if [ "$AUTH_ERROR" = 1 ]; then
+            FINAL_STATE="STOPPED: Claude Code is not logged in on this machine (run 'claude' once and log in)"
+            say "Claude Code isn't logged in. Stopping."
+            exit 2
+        fi
+        if [ "$LIMIT_HIT" = 1 ]; then
+            local t_now; t_now=$(date +%s)
+            if [ -n "$RESET_EPOCH" ]; then   # known reset time: wait until then (+ a small grace)
+                until=$(( (RESET_EPOCH > t_now ? RESET_EPOCH : t_now) + LIMIT_GRACE_S ))
+            else                             # unknown: try again later
+                until=$(( t_now + LIMIT_FALLBACK_S ))
+            fi
+            write_status "waiting: usage limit reached" "$task" "resuming at $(date -d "@$until" '+%a %H:%M') (session $sid)"
+            say "Usage limit reached. Waiting until $(date -d "@$until" '+%a %H:%M'), then resuming the same session."
+            sleep_until "$until" || return 1
+            [ "$mode" = resume ] && prompt="$(continue_prompt "$task")"
+            continue
+        fi
+        if [ "$TRANSIENT" = 1 ] && [ "$transient" -lt "$MAX_TRANSIENT" ]; then
+            transient=$((transient + 1))
+            write_status "waiting: network/API problem" "$task" "retry $transient/$MAX_TRANSIENT in $((TRANSIENT_WAIT_S / 60)) min"
+            say "Network/API problem; retrying in $((TRANSIENT_WAIT_S / 60)) min."
+            sleep_until $(( $(date +%s) + TRANSIENT_WAIT_S )) || return 1
+            [ "$mode" = resume ] && prompt="$(continue_prompt "$task")"
+            continue
+        fi
+        return 0
+    done
+}
+
+# ---------- git ----------
 git_sync() {
     git -C "$REPO" pull -q --ff-only origin main 2>>"$STATE/loop.log" \
         || say "note: git pull skipped (local changes or network); continuing with the local copy"
@@ -122,19 +176,19 @@ ensure_pushed() { # task session_id log
     local task="$1" sid="$2" log="$3"
     if [ -n "$(git -C "$REPO" status --porcelain)" ]; then
         say "$task left uncommitted changes; asking the session to commit and push them"
-        run_claude resume "$sid" "Commit all remaining work for $task (never secrets or data/), then push to origin main. Reply with one line." "$log"
+        run_claude_patiently "$task" resume "$sid" "Commit all remaining work for $task (never secrets or data/), then push to origin main. Reply with one line." "$log" || return 1
     fi
     if [ -n "$(git -C "$REPO" log '@{u}..HEAD' --oneline 2>/dev/null)" ]; then
-        git -C "$REPO" push -q origin HEAD:main 2>>"$STATE/loop.log" || say "warning: push failed; it will be retried by the next task"
+        git -C "$REPO" push -q origin HEAD:main 2>>"$STATE/loop.log" || say "warning: push failed; it will be retried after the next task"
     fi
 }
 
-mark_blocked() { # task reason
+set_blocked() { # task reason — works whether the line is ticked or not
     python3 -I - "$PROGRESS" "$1" "$2" <<'PY'
 import re, sys
 path, task, reason = sys.argv[1:4]
 s = open(path).read()
-pat = re.compile(r"^- \[ \] \*\*" + re.escape(task) + r"\*\* (.*)$", re.M)
+pat = re.compile(r"^- \[[ x]\] (?:⏸️ )?\*\*" + re.escape(task) + r"\*\* (.*)$", re.M)
 s = pat.sub(lambda m: f"- [ ] ⏸️ **{task}** {m.group(1)} (needs: {reason})", s, count=1)
 open(path, "w").write(s)
 PY
@@ -143,43 +197,96 @@ PY
         && git -C "$REPO" push -q origin HEAD:main 2>>"$STATE/loop.log"
 }
 
-run_task() { # task [session_id_to_resume]
-    local task="$1" sid="${2:-}" mode=new prompt attempts=0 transient=0
+# ---------- quality gate ----------
+# Lint + tests for whatever parts of the project exist yet. Output goes to $1.
+verify_repo() { # logfile
+    local log="$1" ok=0
+    : >"$log"
+    if [ -f "$REPO/backend/pyproject.toml" ]; then
+        echo "### backend: ruff + pytest" >>"$log"
+        (cd "$REPO/backend" && timeout "$VERIFY_TIMEOUT" uv run ruff check . \
+            && timeout "$VERIFY_TIMEOUT" uv run pytest -q -m "not slow") >>"$log" 2>&1 9>&- || ok=1
+    fi
+    if [ -f "$REPO/frontend/package.json" ]; then
+        echo "### frontend: lint + tests" >>"$log"
+        (cd "$REPO/frontend" && timeout "$VERIFY_TIMEOUT" npm run --silent lint \
+            && timeout "$VERIFY_TIMEOUT" npm test --silent -- --run) >>"$log" 2>&1 9>&- || ok=1
+    fi
+    return $ok
+}
+
+code_without_tests() { # start_sha — true if app code changed since start_sha but no tests did
+    local files; files="$(git -C "$REPO" diff --name-only "$1" HEAD 2>/dev/null)"
+    local code tests
+    code="$(grep -E '^(backend/parking/|frontend/src/|tools/slot-editor/|tools/flow-tally/).*\.(py|ts|tsx|js)$' <<<"$files" \
+            | grep -vE '(\.test\.|\.spec\.|/__fixtures__/)')"
+    tests="$(grep -E '^backend/tests/|\.(test|spec)\.(ts|tsx|js)$|^frontend/e2e/' <<<"$files")"
+    [ -n "$code" ] && [ -z "$tests" ]
+}
+
+quality_gate() { # task session_id log start_sha — returns 1 if it still fails after the fix rounds
+    local task="$1" sid="$2" log="$3" start="$4" round=0
+    local vlog="$STATE/logs/$(date +%Y%m%d-%H%M%S)-$task-verify.log"
+
+    if [ -n "$start" ] && code_without_tests "$start"; then
+        say "$task changed code but added no tests; sending it back to add them"
+        write_status "checking: asking for tests" "$task"
+        run_claude_patiently "$task" resume "$sid" "$(tests_prompt "$task")" "$log" || return 2
+    fi
+
+    while :; do
+        write_status "checking: running lint + tests" "$task"
+        say "Running lint + tests after $task"
+        if verify_repo "$vlog"; then
+            say "Lint + tests pass."
+            return 0
+        fi
+        round=$((round + 1))
+        if [ "$round" -gt "$MAX_FIX_ROUNDS" ]; then
+            say "Lint/tests still fail after $MAX_FIX_ROUNDS fix rounds. See $vlog"
+            return 1
+        fi
+        say "Lint/tests fail after $task; sending the output back to the session (fix round $round/$MAX_FIX_ROUNDS)"
+        write_status "fixing: lint/tests fail" "$task" "fix round $round/$MAX_FIX_ROUNDS · $vlog"
+        run_claude_patiently "$task" resume "$sid" "$(fix_prompt "$task" "$vlog")" "$log" || return 2
+    done
+}
+
+# ---------- one task ----------
+run_task() { # task [session_id_to_resume] [start_sha]
+    local task="$1" sid="${2:-}" start="${3:-}" mode=new prompt attempts=0 gate
     local log; log="$STATE/logs/$(date +%Y%m%d-%H%M%S)-$task.log"
-    if [ -n "$sid" ]; then mode=resume; prompt="$(continue_prompt "$task")"
+    STARTED_ONCE=0
+    if [ -n "$sid" ]; then mode=resume; STARTED_ONCE=1; prompt="$(continue_prompt "$task")"
     else sid="$(python3 -I -c 'import uuid; print(uuid.uuid4())')"; prompt="$(render_prompt "$task")"; fi
+    [ -z "$start" ] && start="$(git -C "$REPO" rev-parse HEAD)"
     : >"$CURRENT_LOG"
 
     while :; do
-        echo "$task $sid" >"$STATE/current_task"
+        echo "$task $sid $start" >"$STATE/current_task"
         write_status "working" "$task" "attempt $((attempts + 1))/$MAX_ATTEMPTS · session $sid"
         say "=== $task: $(task_title "$task") ($mode session $sid)"
-        run_claude "$mode" "$sid" "$prompt" "$log"
-        [ "$SESSION_STARTED" = 1 ] && mode=resume && prompt="$(continue_prompt "$task")"
-
-        if [ "$AUTH_ERROR" = 1 ]; then
-            FINAL_STATE="STOPPED: Claude Code is not logged in on this machine (run 'claude' once and log in)"
-            say "Claude Code isn't logged in. Stopping."
-            exit 2
-        fi
-        if [ "$LIMIT_HIT" = 1 ]; then
-            local until=$(( $(date +%s) + LIMIT_FALLBACK_S ))
-            [ -n "$RESET_EPOCH" ] && [ "$RESET_EPOCH" -gt "$(date +%s)" ] && until=$((RESET_EPOCH + LIMIT_GRACE_S))
-            write_status "waiting: usage limit reached" "$task" "resuming at $(date -d "@$until" '+%a %H:%M') (session $sid)"
-            say "Usage limit reached. Waiting until $(date -d "@$until" '+%a %H:%M'), then resuming the same session."
-            sleep_until "$until" || return 1
-            continue
-        fi
+        run_claude_patiently "$task" "$mode" "$sid" "$prompt" "$log" || return 1
+        [ "$STARTED_ONCE" = 1 ] && mode=resume && prompt="$(continue_prompt "$task")"
 
         case "$(task_state "$task")" in
             done)
-                ensure_pushed "$task" "$sid" "$log"
+                quality_gate "$task" "$sid" "$log" "$start"; gate=$?
+                [ "$gate" -eq 2 ] && return 1                      # stop requested while waiting
+                ensure_pushed "$task" "$sid" "$log" || return 1
+                if [ "$gate" -ne 0 ]; then
+                    set_blocked "$task" "lint/tests fail after this task and the session couldn't fix them; see ~/.parking-loop/logs"
+                    rm -f "$STATE/current_task"
+                    FINAL_STATE="STOPPED: lint/tests fail after $task. Fix them (or ask Claude to), remove the ⏸️ from $task in PROGRESS.md, then start the loop again"
+                    say "$FINAL_STATE"
+                    exit 3
+                fi
                 DONE_THIS_RUN+=("$task")
                 say "$task done."
                 rm -f "$STATE/current_task"
                 return 0 ;;
             blocked)
-                ensure_pushed "$task" "$sid" "$log"
+                ensure_pushed "$task" "$sid" "$log" || return 1
                 say "$task is blocked, waiting on Iulian: $(task_line "$task" | grep -oP '\(needs: .*\)$')"
                 rm -f "$STATE/current_task"
                 return 0 ;;
@@ -189,18 +296,10 @@ run_task() { # task [session_id_to_resume]
                 return 0 ;;
         esac
 
-        if [ "$TRANSIENT" = 1 ] && [ "$transient" -lt "$MAX_TRANSIENT" ]; then
-            transient=$((transient + 1))
-            write_status "waiting: network/API problem" "$task" "retry $transient/$MAX_TRANSIENT in $((TRANSIENT_WAIT_S / 60)) min"
-            say "Network/API problem; retrying in $((TRANSIENT_WAIT_S / 60)) min."
-            sleep_until $(( $(date +%s) + TRANSIENT_WAIT_S )) || return 1
-            continue
-        fi
-
         attempts=$((attempts + 1))
         if [ "$attempts" -ge "$MAX_ATTEMPTS" ]; then
             say "$task still not finished after $attempts session runs (exit code $RC); marking it blocked."
-            mark_blocked "$task" "the agent loop couldn't finish it after $attempts tries; see $log"
+            set_blocked "$task" "the agent loop couldn't finish it after $attempts tries; see ~/.parking-loop/logs"
             rm -f "$STATE/current_task"
             return 0
         fi
@@ -208,6 +307,7 @@ run_task() { # task [session_id_to_resume]
     done
 }
 
+# ---------- main ----------
 FINAL_STATE="stopped (start it again with start.sh; an interrupted task resumes where it left off)"
 trap 'write_status "$FINAL_STATE"; say "Loop ended: $FINAL_STATE"' EXIT
 say "Loop started in $REPO (state: $STATE)"
@@ -217,9 +317,9 @@ while :; do
     git_sync
 
     if [ -f "$STATE/current_task" ]; then          # an interrupted task: resume its session
-        read -r ctask csid <"$STATE/current_task"
-        if [ "$(task_state "$ctask")" = open ]; then
-            run_task "$ctask" "$csid" || continue
+        read -r ctask csid cstart <"$STATE/current_task"
+        if [ "$(task_state "$ctask")" != blocked ] && [ "$(task_state "$ctask")" != missing ]; then
+            run_task "$ctask" "$csid" "${cstart:-}" || true
             continue
         fi
         rm -f "$STATE/current_task"
