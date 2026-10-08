@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import BigCount from '../components/BigCount'
+import InstallHint from '../components/InstallHint'
 import StatusBanner, { LiveSkeleton } from '../components/StatusBanner'
 import UpdatedAgo from '../components/UpdatedAgo'
 import ZoneCard from '../components/ZoneCard'
@@ -33,6 +34,7 @@ export default function LiveScreen() {
           <UpdatedAgo at={live.lastMessageAt} />
         </>
       )}
+      <InstallHint />
     </div>
   )
 }

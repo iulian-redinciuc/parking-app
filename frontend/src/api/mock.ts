@@ -268,6 +268,11 @@ export function createMockFeed(options: MockOptions = {}): LiveFeed {
   }
 
   function tick() {
+    // offline: no news reaches the app, as with the real feed
+    if (offline) {
+      timer = setTimeout(tick, minDelayMs)
+      return
+    }
     const status = sim.step()
     set(
       status
@@ -318,10 +323,13 @@ export function createMockFeed(options: MockOptions = {}): LiveFeed {
   }
 
   // the browser's own offline/online, so a real loss of network looks like it does live
+  let offline = false
   function onOffline() {
+    offline = true
     set({ ...state, connection: 'offline' })
   }
   function onOnline() {
+    offline = false
     set({ ...state, connection: state.status || state.error ? 'live' : 'connecting' })
   }
 
@@ -343,6 +351,7 @@ export function createMockFeed(options: MockOptions = {}): LiveFeed {
       }
       window.addEventListener('offline', onOffline)
       window.addEventListener('online', onOnline)
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) onOffline()
       tick()
     },
     stop() {

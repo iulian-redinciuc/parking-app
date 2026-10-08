@@ -66,5 +66,11 @@
     "stale_no_data": "No camera data yet",
     "affected": "Affected: {{zones}}"
   },
-  "loading": "Loading the parking status…"
+  "loading": "Loading the parking status…",
+  "install": {
+    "button": "Install app",
+    "hint_title": "Add Parking to your Home Screen",
+    "hint": "Tap Share, then Add to Home Screen, then open it from the icon.",
+    "dismiss": "Hide this tip"
+  }
 }
