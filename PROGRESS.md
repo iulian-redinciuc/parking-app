@@ -18,7 +18,7 @@
 
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
-| 0 | [Foundations](docs/phases/phase-0-foundations.md) | 4 / 8 | 🟡 | 2026-10-07 | |
+| 0 | [Foundations](docs/phases/phase-0-foundations.md) | 5 / 8 | 🟡 | 2026-10-07 | |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 0 / 11 | ⬜ | | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | 0 / 10 | ⬜ | | |
@@ -37,7 +37,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P0.2** Backend project (uv, Python 3.12, Typer CLI, ruff, pytest)
 - [x] **P0.3** Frontend scaffold (Vite, React, TS, Tailwind, Vitest)
 - [x] **P0.4** Config templates (`lot.example.yaml`, `lot.yaml`, `.env.example`)
-- [ ] **P0.5** CI workflow
+- [x] **P0.5** CI workflow
 - [ ] **P0.6** Secret protection (GitHub scanning, gitleaks pre-commit, Dependabot)
 - [ ] **P0.7** README for developers
 - [ ] ⏸️ **P0.8** Inputs from Iulian: sample image(s) + open questions 2–4 (needs: Iulian to provide the photos and answers)
@@ -187,6 +187,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | Backend uses a flat layout (`backend/parking/`, not `src/`) with `uv_build` and `module-root = ""`; uv is installed per user in `~/.local/bin` | Matches the module map in architecture.md; `uv init` defaults to `src/` |
 | 2026-10-08 | Frontend lints with **ESLint** (typescript-eslint, react-hooks, react-refresh) + **Prettier** (`format`, `format:check` scripts), replacing the oxlint that `create-vite` now ships | frontend.md §1 and the definition of done name ESLint/Prettier |
 | 2026-10-08 | `config/lot.yaml` is a copy of the example with placeholder zones/capacities until open questions 3–4 are answered. `deploy/.env.example` also lists the compose variables `PARKING_VERSION`, `VISION_CPUS`, `FLOW_CPUS` (added to config.md §5) | deployment.md §4 reads them from `.env` but config.md §5 didn't list them |
+| 2026-10-08 | CI (`.github/workflows/ci.yml`) runs on every `push` and `pull_request`; the frontend job also runs `npm run format:check` (added to testing.md §5). P0.5 was verified on the push run to `main` (three green jobs) instead of opening a PR | The agent loop pushes straight to `main` and doesn't open PRs; the same three jobs run on PRs |
 | 2026-10-08 | `vite.config.ts` reads `base` from `VITE_BASE` (default `/parking-app/`) already in P0.3; `frontend/.env.development` (`VITE_API_BASE=mock`) is committed because it holds no secret | Matches frontend.md §1; the guide asks for the file |
 
 ## Metrics
@@ -220,3 +221,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - P0.2: backend project with uv + Python 3.12.15 (`backend/pyproject.toml`, `uv.lock`), Typer CLI with `--version` and empty `models`/`worker`/`db`/`push`/`admin` sub-apps; `uv sync`, `uv run parking --version`, `pytest` (2 passed) and `ruff check` all pass on the dev Pi.
 - P0.3: frontend scaffold (Vite 8, React 19, TS 6 strict, Tailwind v4 with the frontend.md §4 tokens, HashRouter "coming soon" page, Vitest smoke test, ESLint + Prettier, Playwright config for iPhone 13 / Pixel 7); `npm run build`, `npm test -- --run` (1 passed) and `npm run lint` pass.
 - P0.4: `config/lot.example.yaml` (from config.md §1), `config/lot.yaml` (placeholders until open questions 3–4), `deploy/.env.example` (every config.md §5 variable, secrets empty); new `test_config_templates.py` checks spec coverage, empty secrets and that both YAML files parse; pytest (6 passed) and ruff pass.
+- P0.5: CI workflow with `backend` (uv, ruff check + format, pytest), `frontend` (npm ci, lint, format check, vitest, build; Playwright later) and `secrets` (gitleaks) jobs on push and PR.

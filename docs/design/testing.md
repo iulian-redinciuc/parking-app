@@ -53,8 +53,8 @@ Every evaluation run writes `out/eval/<set>-<YYYYMMDD-HHMM>.json`. Copy the head
 
 Jobs:
 1. **backend**: `uv sync --frozen`, `ruff check`, `ruff format --check`, `pytest -m "not slow"`.
-2. **frontend**: `npm ci`, `npm run lint`, `npm run test -- --run`, `npm run build`, `npx playwright install --with-deps chromium webkit`, `npm run e2e`.
-3. **secrets**: gitleaks.
+2. **frontend**: `npm ci`, `npm run lint`, `npm run format:check`, `npm run test -- --run`, `npm run build`, `npx playwright install --with-deps chromium webkit`, `npm run e2e`.
+3. **secrets**: gitleaks (`gitleaks/gitleaks-action@v2`, full history checkout).
 4. **e2e** (only if `backend/**` or `deploy/**` changed): build images, `docker compose -f deploy/docker-compose.test.yml up --abort-on-container-exit`.
 5. **images** (only if `backend/**` changed): `docker buildx build --platform linux/amd64,linux/arm64` for both targets, without pushing. This catches "works on the Pi, breaks on x86" (and the reverse) early. Pushing images happens only on release tags ([deployment.md §8](deployment.md#8-releases-and-updating)).
 
