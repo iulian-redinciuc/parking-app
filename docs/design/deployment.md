@@ -227,7 +227,7 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
-        env: { VITE_BASE: "/parking-app/", VITE_API_BASE: "${{ vars.API_BASE }}" }
+        env: { VITE_BASE: "/parking-app/", VITE_API_BASE: "${{ vars.API_BASE || 'mock' }}" }
       - uses: actions/upload-pages-artifact@v3
         with: { path: frontend/dist }
   deploy:
@@ -239,7 +239,7 @@ jobs:
         uses: actions/deploy-pages@v4
 ```
 One-time switch from "deploy from branch" to Actions: `gh api -X PUT repos/iulian-redinciuc/parking-app/pages -f build_type=workflow`.
-Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-dev.<domain>"` (or `mock`).
+Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-dev.<domain>"` (or `mock`). An unset variable builds in mock mode (an empty `VITE_API_BASE` would otherwise mean a same-origin API, which Pages doesn't have). As built (P3.8): Pages uses `build_type=workflow`, `API_BASE=mock` until P3.9, the old root placeholder `index.html` is gone.
 
 ## 7. Backups
 
