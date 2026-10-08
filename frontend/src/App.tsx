@@ -1,20 +1,58 @@
-import { HashRouter, Route, Routes } from 'react-router'
-
-function ComingSoon() {
-  return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-2 bg-bg p-6 text-text">
-      <h1 className="text-3xl font-bold">Parking: coming soon</h1>
-      <p className="text-muted">Live free-space counts will appear here.</p>
-    </main>
-  )
-}
+import { HashRouter, Navigate, Route, Routes } from 'react-router'
+import BottomNav from './components/BottomNav'
+import Header from './components/Header'
+import PlaceholderScreen from './screens/PlaceholderScreen'
 
 export default function App() {
   return (
     <HashRouter>
-      <Routes>
-        <Route path="*" element={<ComingSoon />} />
-      </Routes>
+      <div className="flex min-h-dvh flex-col">
+        {/* The live connection (P3.3) will drive the dot; until then it shows "Connecting". */}
+        <Header connection="connecting" />
+        <main className="mx-auto w-full max-w-xl flex-1 pr-[max(1rem,env(safe-area-inset-right))] pb-[calc(5rem+env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))]">
+          <Routes>
+            <Route
+              index
+              element={
+                <PlaceholderScreen title="Live" note="Live free-space counts will appear here." />
+              }
+            />
+            <Route
+              path="alerts"
+              element={<PlaceholderScreen title="Alerts" note="Notifications are coming soon." />}
+            />
+            <Route
+              path="stats"
+              element={
+                <PlaceholderScreen
+                  title="Stats"
+                  note="Charts of typical free spaces are coming soon."
+                />
+              }
+            />
+            <Route
+              path="privacy"
+              element={
+                <PlaceholderScreen
+                  title="Privacy"
+                  note="What we process and store will be described here."
+                />
+              }
+            />
+            <Route
+              path="admin/*"
+              element={
+                <PlaceholderScreen
+                  title="Admin"
+                  note="Camera and zone administration is coming soon."
+                />
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </main>
+        <BottomNav />
+      </div>
     </HashRouter>
   )
 }
