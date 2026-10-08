@@ -18,7 +18,7 @@
 
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
-| 0 | [Foundations](docs/phases/phase-0-foundations.md) | 6 / 8 | 🟡 | 2026-10-07 | |
+| 0 | [Foundations](docs/phases/phase-0-foundations.md) | 7 / 8 | 🟡 | 2026-10-07 | |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) | 0 / 11 | ⬜ | | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) | 0 / 10 | ⬜ | | |
@@ -39,7 +39,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P0.4** Config templates (`lot.example.yaml`, `lot.yaml`, `.env.example`)
 - [x] **P0.5** CI workflow
 - [x] **P0.6** Secret protection (GitHub scanning, gitleaks pre-commit, Dependabot)
-- [ ] **P0.7** README for developers
+- [x] **P0.7** README for developers
 - [ ] ⏸️ **P0.8** Inputs from Iulian: sample image(s) + open questions 2–4 (needs: Iulian to provide the photos and answers)
 
 ## Phase 1: Still-image proof of concept ⬜
@@ -224,3 +224,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - P0.4: `config/lot.example.yaml` (from config.md §1), `config/lot.yaml` (placeholders until open questions 3–4), `deploy/.env.example` (every config.md §5 variable, secrets empty); new `test_config_templates.py` checks spec coverage, empty secrets and that both YAML files parse; pytest (6 passed) and ruff pass.
 - P0.5: CI workflow with `backend` (uv, ruff check + format, pytest), `frontend` (npm ci, lint, format check, vitest, build; Playwright later) and `secrets` (gitleaks) jobs on push and PR.
 - P0.6: GitHub secret scanning + push protection enabled; `.pre-commit-config.yaml` (gitleaks v8.30.1, ruff v0.16.10) installed; `.gitleaks.toml`; `.github/dependabot.yml` (pip, npm, actions weekly). A commit containing the AWS example key ID is blocked locally; full-history gitleaks scan clean; ruff + pytest (6 passed) pass.
+- P0.7: developer README (what it is, links, repo layout, prerequisites uv/Node 22/Docker, backend tests, frontend in mock mode, CI, public-repo rules + pre-commit). Followed it on a fresh clone in `/tmp`: pytest (6 passed), ruff, `parking --version`, `npm ci`, lint, format check, vitest (1 passed), build and `npm run dev` at `/parking-app/` all work.
