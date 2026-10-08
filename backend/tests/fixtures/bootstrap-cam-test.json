@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "camera_id": "cam-test",
+  "image_size": [1000, 800],
+  "reference_image": "data/x.jpg",
+  "slots": [
+    { "id": "G01", "zone": "ground", "polygon": [[110, 234], [290, 234], [290, 296], [110, 296]], "type": "standard" },
+    { "id": "G02", "zone": "ground", "polygon": [[370, 254], [550, 254], [550, 316], [370, 316]], "type": "standard" },
+    { "id": "G03", "zone": "ground", "polygon": [[630, 244], [810, 244], [810, 306], [630, 306]], "type": "standard" },
+    { "id": "G04", "zone": "ground", "polygon": [[124, 647], [196, 647], [196, 697], [124, 697]], "type": "standard" },
+    { "id": "G05", "zone": "ground", "polygon": [[390, 654], [570, 654], [570, 716], [390, 716]], "type": "standard" }
+  ],
+  "count_zones": []
+}

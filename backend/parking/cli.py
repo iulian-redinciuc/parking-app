@@ -464,3 +464,79 @@ def evaluate(
     json_path = out / f"{camera}-{report['date']}.json"
     json_path.write_text(json.dumps(report, indent=2) + "\n")
     typer.echo(f"report -> {json_path}; images with mistakes -> {out}/{camera}-*.png")
+
+
+@app.command("bootstrap-slots")
+def bootstrap_slots(
+    image: Annotated[Path, typer.Option(help="Image of the lot when it's busy.")],
+    camera: Annotated[str, typer.Option(help="Camera id in the config, e.g. cam-ground.")],
+    out: Annotated[
+        Path | None, typer.Option(help="Slot file to write (default: the camera's slots_file).")
+    ] = None,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite an existing file.")] = False,
+    footprint: Annotated[
+        str, typer.Option(help="box_bottom (angled view) | box (seen from above).")
+    ] = "box_bottom",
+    imgsz: Annotated[int, typer.Option(help="Detector input size.")] = 1280,
+    conf: Annotated[float, typer.Option(help="Detector confidence threshold.")] = 0.25,
+    fake_detector: Annotated[
+        bool,
+        typer.Option(
+            "--fake-detector",
+            help="Read detections from <image>.json instead of running the model "
+            "(also env PARKING_FAKE_DETECTOR=1).",
+        ),
+    ] = False,
+) -> None:
+    """Draft a slot file from detected vehicles (vision.md §4); fix it in tools/slot-editor."""
+    import cv2
+
+    from parking.config import SlotFile
+    from parking.vision.bootstrap import format_json, propose_slots, slot_file
+    from parking.vision.detector import FakeDetector
+
+    if footprint not in ("box_bottom", "box"):
+        raise typer.BadParameter("must be box_bottom or box", param_hint="--footprint")
+    if imgsz <= 0:
+        raise typer.BadParameter("must be positive", param_hint="--imgsz")
+    if not 0 < conf < 1:
+        raise typer.BadParameter("must be between 0 and 1", param_hint="--conf")
+
+    _, cam, root = _occupancy_camera(config, camera, "bootstrap-slots")
+    target = out or _resolve(cam.slots_file, root)
+    if target.exists() and not force:
+        _fail(f"{target} exists; pass --force to overwrite it")
+
+    path = _resolve(image, root)
+    frame = cv2.imread(str(path))
+    if frame is None:
+        _fail(f"can't read image {path}")
+
+    # vision.md §4: masks on, 1280 px, a low confidence to find as many vehicles as possible
+    det_cfg = cam.detector.model_copy(update={"imgsz": imgsz, "conf": conf, "use_masks": True})
+    if _fake_detector_on(fake_detector):
+        sidecar = path.with_suffix(".json")
+        if not sidecar.is_file():
+            _fail(f"fake detector: no sidecar {sidecar}")
+        detector = FakeDetector(sidecar, conf=det_cfg.conf, classes=det_cfg.classes)
+    else:
+        detector = _yolo_detector(det_cfg, root)
+
+    zone = cam.zones[0]
+    slots = propose_slots(detector.detect(frame), zone, footprint)
+    if not slots:
+        _fail(f"no vehicles found in {path}; draw the slots by hand in tools/slot-editor")
+
+    try:
+        reference = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        reference = str(path)
+    data = slot_file(camera, (frame.shape[1], frame.shape[0]), slots, reference)
+    SlotFile.model_validate(data)  # what load_slots() checks
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(format_json(data))
+    typer.echo(
+        f"{len(slots)} slot(s) in zone '{zone}' -> {target}\n"
+        "Now fix it in tools/slot-editor: add the empty spaces and adjust the corners."
+    )

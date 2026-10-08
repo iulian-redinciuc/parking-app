@@ -157,3 +157,12 @@ test('the committed cam-ground slot file is in the exported format', () => {
   assert.equal(formatJson(toSlotFile(parsed)), text)
   assert.deepEqual(validateSlots(parsed.slots), [])
 })
+
+test('a slot file from parking bootstrap-slots opens and exports unchanged', () => {
+  const url = new URL('../../backend/tests/fixtures/bootstrap-cam-test.json', import.meta.url)
+  const text = readFileSync(url, 'utf8')
+  const parsed = parseSlotFile(JSON.parse(text))
+  assert.equal(parsed.slots.length, 5)
+  assert.deepEqual(validateSlots(parsed.slots), [])
+  assert.equal(formatJson(toSlotFile(parsed)), text)
+})

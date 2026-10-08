@@ -262,3 +262,55 @@ def test_bad_method_rejected(tmp_path, monkeypatch):
     for cmd in (["analyze", "--image", "img.jpg"], ["evaluate"]):
         result = runner.invoke(app, [*cmd, "--camera", "cam-ground", "--method", "x"])
         assert result.exit_code == 2
+
+
+def _bootstrap(*args):
+    return runner.invoke(
+        app, ["bootstrap-slots", "--image", "img.jpg", "--camera", "cam-ground", *args]
+    )
+
+
+def test_bootstrap_slots_with_fake_detector(tmp_path, monkeypatch):
+    from parking.config import load_slots
+
+    _write_lot(tmp_path, monkeypatch)
+    # --conf (not the camera's 0.5) decides which detections count
+    result = _bootstrap("--out", "draft.json", "--fake-detector", "--conf", "0.15")
+    assert result.exit_code == 0, result.output
+    assert "2 slot(s) in zone 'ground' -> draft.json" in result.output
+    sf = load_slots(tmp_path / "draft.json")
+    assert sf.camera_id == "cam-ground" and sf.image_size == (200, 100)
+    assert sf.reference_image == "img.jpg"
+    assert [s.id for s in sf.slots] == ["G01", "G02"]
+
+
+def test_bootstrap_slots_never_overwrites_without_force(tmp_path, monkeypatch):
+    _write_lot(tmp_path, monkeypatch)
+    target = tmp_path / "config" / "slots" / "cam-ground.json"
+    before = target.read_text()
+    result = _bootstrap("--fake-detector")  # default --out is the camera's slots_file
+    assert result.exit_code == 1
+    assert "exists; pass --force" in result.output
+    assert target.read_text() == before
+
+    result = _bootstrap("--fake-detector", "--force", "--footprint", "box")
+    assert result.exit_code == 0, result.output
+    assert target.read_text() != before
+
+
+def test_bootstrap_slots_errors(tmp_path, monkeypatch):
+    _write_lot(tmp_path, monkeypatch)
+    assert _bootstrap("--out", "d.json", "--footprint", "mask").exit_code == 2
+    assert _bootstrap("--out", "d.json", "--conf", "1.5").exit_code == 2
+    assert _bootstrap("--out", "d.json", "--imgsz", "0").exit_code == 2
+
+    result = _bootstrap("--out", "d.json", "--fake-detector", "--conf", "0.95")
+    assert result.exit_code == 1 and "no vehicles found" in result.output
+    assert not (tmp_path / "d.json").exists()
+
+    (tmp_path / "img.json").unlink()
+    result = _bootstrap("--out", "d.json", "--fake-detector")
+    assert result.exit_code == 1 and "no sidecar" in result.output
+
+    result = _bootstrap("--out", "d.json")  # real detector, model missing
+    assert result.exit_code == 1 and "not found" in result.output

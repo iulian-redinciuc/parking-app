@@ -7,7 +7,7 @@
 >
 > The [agent loop](tools/agent-loop/README.md) works through the unticked tasks in order. A task marked `⏸️` is skipped until its need is met: **delete the `⏸️ ` from its line to unblock it** (editing on GitHub works too).
 
-**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 1: P1.9–P1.11.
+**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 1: P1.10–P1.11.
 **Build order:** 0 → 1 → 2 → 3 (MVP) → 6 → 7 (no hardware needed) → 4 → 5 → 8 (need the real cameras / production machines) → 9.
 **Last updated:** 2026-10-08
 
@@ -21,7 +21,7 @@
 | Phase | Name | Tasks | Status | Started | Finished |
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) (MVP) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
-| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 8 / 11 | 🟡 | 2026-10-08 | |
+| 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 9 / 11 | 🟡 | 2026-10-08 | |
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 0 / 11 | ⬜ | | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) (MVP) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
@@ -53,7 +53,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P1.6** Annotated output image
 - [x] **P1.7** `parking analyze`
 - [x] **P1.8** Ground-truth labels + `parking evaluate`
-- [ ] **P1.9** `parking bootstrap-slots`
+- [x] **P1.9** `parking bootstrap-slots`
 - [ ] **P1.10** Benchmark on the dev Pi
 - [ ] **P1.11** Tune and decide
 
@@ -206,6 +206,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | **Build order:** MVP (0–3) → 6 → 7 → 4 → 5 → 8 → 9; PROGRESS.md sections reordered (the loop works top to bottom) | Phases 6–7 need no hardware; 4, 5, 8 need the real cameras / production machines |
 | 2026-10-08 | Agent loop: technical and design choices are made by the agent and recorded here, never sent to Iulian as a question; tasks are only blocked for physical things (hardware, installation, accounts, payments) | Owner's requirement |
 | 2026-10-08 | `data/IMG_8093.jpeg` (a lot photo uploaded on GitHub, so public) stays; the owner is fine with it. Agents still never commit images | Owner's decision |
+| 2026-10-08 | P1.9: `bootstrap-slots` sorts in reading order (rows grouped by centre y within half the median footprint height, then left→right), drops duplicate footprints (IoU > 0.5, keeps the more confident), adds `--footprint box` for straight-down views, `--imgsz`/`--conf`/`--fake-detector`, `--out` defaults to the camera's `slots_file` (guarded by `--force`), writes nothing when no vehicles are found, and writes the slot editor's exact JSON layout. A fixture written by the bootstrap code is opened by the editor's node test. Recorded in vision.md §4 and architecture.md §6 | The guide left sorting, naming past 99 and the output path open; the editor test proves "opens in the editor" in CI; on the top-down sample COCO YOLO finds no cars (P1.4), so `box` matters once a model sees cars from above |
 
 ## Metrics
 
@@ -254,3 +255,4 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - P1.8: `parking/vision/evaluate.py` (per-image comparison with unsure excluded, overall + per-condition summary, free-precision/recall, count error, sweep, best threshold, detection cache `out/cache/<image>.<model>.<imgsz>.json`), `LabelFile`/`load_labels`, `highlight_slots` and `parking evaluate`. Labelled `ground-01.jpg` and `ground-02.jpg` by eye (taken G05 G06 G09 G12 G14). `parking evaluate --images data/samples --labels data/labels/cam-ground.json --camera cam-ground --sweep 0.1:0.6:0.05` prints slot accuracy 70.6%, free-precision 70.6%, count error 5.00, best threshold 0.30 (second run: 2 from cache, no model load), and writes the report + mistake PNGs to `out/eval/`. The 5 misses are the top-down cars COCO YOLO doesn't see (P1.4). New `test_evaluate.py` (16) + 10 CLI tests, 100% branch coverage of `evaluate.py`; pytest (123 passed) and ruff pass.
 - Defined the MVP (Phases 0–3) and the build order (0–3, 6, 7, 4, 5, 8, 9); P1.4 unblocked with top-down appearance scoring; labels checked; nothing waits on Iulian for the MVP; agents now decide technical choices themselves.
 - P1.4: top-down appearance scoring `parking/vision/appearance.py` (warped slot crops, Lab ΔE vs the pooled pavement median, shadow suppression, open/close + largest blob), `occupancy.method: detector | appearance` + `occupancy.appearance` params, `cam-ground` uses `appearance`; `analyze_frame` skips the detector for it; `analyze`/`evaluate` got `--method`, evaluate needs no cache for appearance and takes a single image. `parking evaluate --images data/samples/ground-01.jpg …` gives 17/17 (5 taken, 12 free), `parking analyze` prints `ground: 12 free / 17 (5 taken)` in 0.3 s and the PNG marks G05 G06 G09 G12 G14. New `test_appearance.py` (9, synthetic pavement with black/blue/grey cars, shadow, moss, overhang, reference image) + pipeline/CLI/config/evaluate tests; pytest 141 passed (+1 slow), ruff clean, 100% branch coverage of `appearance.py`/`pipeline.py`/`evaluate.py`.
+- P1.9: `parking/vision/bootstrap.py` (footprint `box_bottom`/`box` shrunk 10%, duplicate drop, reading-order rows, `<Z>01…` ids, editor-identical `format_json`) + `parking bootstrap-slots` (never overwrites without `--force`). New `test_bootstrap.py` (11, 100% branch coverage) + 3 CLI tests; fixture `backend/tests/fixtures/bootstrap-cam-test.json` from fake detections loads in `load_slots()` and in the editor's node test (11 pass, import + export unchanged). pytest 155 passed, ruff, eslint, prettier clean. On `ground-01.jpg` the real detector finds 0 cars (top-down, P1.4) → clear error, nothing written; re-check on the real camera in Phase 4.

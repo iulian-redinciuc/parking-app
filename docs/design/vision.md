@@ -115,13 +115,14 @@ class SlotSmoother:
 - `CountSmoother` (count zones): the median of the last `k` counts.
 - With `sample_every_s: 5` and `k = 3`, a real change appears after ~10–15 s, and a one-frame glitch (person walking past, headlight flash) never shows.
 
-## 4. Bootstrapping slots (`parking bootstrap-slots`)
+## 4. Bootstrapping slots (`parking bootstrap-slots`) (`parking/vision/bootstrap.py`)
 
 For a quick first draft of the slot file from an image taken when the lot is busy:
-1. Detect vehicles (`use_masks=true`, `imgsz=1280`, `conf=0.25`).
-2. For each detection, take the `box_bottom` footprint, shrink it 10%, and turn it into a 4-point polygon.
-3. Sort left→right, top→bottom, and name them `<Z>01…` using the camera's first zone letter.
-4. Write the slot file. **Then fix it by hand in the slot editor** (empty spaces won't have been detected; angles will be rough).
+1. Detect vehicles (`use_masks=true`, `imgsz=1280`, `conf=0.25`; `--imgsz`/`--conf` override, the rest of the camera's `detector` settings are used).
+2. For each detection, take the `box_bottom` footprint (`--footprint box` takes the whole box, for a camera looking straight down), shrink it 10% around its centre, and turn it into a 4-point polygon (top-left, top-right, bottom-right, bottom-left, whole pixels). A footprint overlapping a more confident one by IoU > 0.5 is a duplicate and dropped.
+3. Sort in reading order: rows top→bottom (a space joins a row while its centre is within half the median footprint height of the row's first space), each row left→right. Name them `<Z>01…` (`<Z>100` past 99) using the first letter of the camera's first zone; every slot gets that zone and type `standard`.
+4. Write the slot file (config.md §2; `reference_image` = the image path relative to the repo root, `count_zones: []`) in the slot editor's JSON layout, so importing and exporting it in the editor changes nothing. `--out` defaults to the camera's `slots_file`; an existing file is **never overwritten unless `--force`** is given. With no vehicles found nothing is written (exit 1). `--fake-detector` reads `<image>.json` like `analyze`.
+5. **Then fix it by hand in the slot editor** (empty spaces won't have been detected; angles will be rough).
 
 ## 5. Frame health (`parking/vision/health.py`)
 
