@@ -7,7 +7,7 @@
 >
 > The [agent loop](tools/agent-loop/README.md) works through the unticked tasks in order. A task marked `⏸️` is skipped until its need is met: **delete the `⏸️ ` from its line to unblock it** (editing on GitHub works too).
 
-**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 2: P2.5.
+**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Now Phase 2: P2.6.
 **Build order:** 0 → 1 → 2 → 3 (MVP) → 6 → 7 (no hardware needed) → 4 → 5 → 8 (need the real cameras / production machines) → 9.
 **Last updated:** 2026-10-08
 
@@ -22,7 +22,7 @@
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) (MVP) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 11 / 11 | ✅ | 2026-10-08 | 2026-10-08 |
-| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 4 / 11 | 🟡 | 2026-10-08 | |
+| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 5 / 11 | 🟡 | 2026-10-08 | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) (MVP) | 0 / 10 | ⬜ | | |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 0 / 11 | ⬜ | | |
 | 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 0 / 11 | ⬜ | | |
@@ -62,7 +62,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P2.2** Frame sources + health checks
 - [x] **P2.3** Occupancy worker
 - [x] **P2.4** Smoothing
-- [ ] **P2.5** State store + fusion
+- [x] **P2.5** State store + fusion
 - [ ] **P2.6** Database (SQLModel + Alembic)
 - [ ] **P2.7** Internal ingest endpoints
 - [ ] **P2.8** SSE broadcaster + `/api/stream`
@@ -213,6 +213,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-08 | P2.4: `CountSmoother` uses `median_low` (while fewer than `k` readings or an even count) so it always returns a real reading and the first one shows directly; both smoothers have `restore()` (a restored slot needs `k` contrary readings to flip), `SlotSmoother.update_many`; `Clock.now()` returns aware UTC, `FakeClock` has `advance()`/`set()`. Recorded in vision.md §3 and testing.md §2 | The spec left the warm-up/even-window median and the clock API open |
 | 2026-10-08 | P2.2: `Frame` is a `NamedTuple(image, ts)` (BGR, UTC-aware); `make_source(uri, root)` resolves relative paths against the repo root; `snapshot:`/`rtsp:`/`video:` raise `NotImplementedError`; error messages never echo the URI (credentials). Unreadable/missing images → `read()` returns `None` (= `connect_failed`). `folder:` with `loop=false` sets `exhausted`. **`frozen` is off for replay sources** (`FrameSource.replay`, `FrameHealth(check_frozen=False)`): the MVP feed repeats the same photo, which would otherwise be flagged frozen after 6 frames. Check order connect_failed → black → frozen → blurry; `down` counts from start-up if never healthy (vision.md §5, config.md updated) | The guide left these open; the sample photos score blur 1637/1699 (threshold 40) and pass |
 | 2026-10-08 | P2.3: `workers/base.py` (`Worker`, `Schedule` on a monotonic grid: next = previous scheduled start + interval, runs > 1 interval late are skipped and counted) + `workers/control.py` + `workers/occupancy_worker.py`. The control server **isn't started without `WORKER_TOKEN`** (never open); `--control-port 0` turns it off, binds `0.0.0.0` by default (not published outside Docker). For `folder:` sources the URI's `interval` is the sampling interval (replaces `sample_every_s`). `Frame` got an optional `path` so `--fake-detector` reads `<image>.json` per replayed frame (no sidecar = no detections). Observation `ts` = when the frame was read. Snapshot returns the latest frame even if unhealthy. `reload` keeps the old setup on any error and reuses the detector/source if unchanged. Health `fps`/`inference_ms_avg` over the last 20 analysed frames; final health on shutdown is `down`. Analysis exceptions are logged and the loop goes on. `--max-frames` for tests. Recorded in api.md §5.2, config.md, architecture.md §6 | The guide left these open; a token-less control port would let anyone on the LAN pull camera frames |
+| 2026-10-08 | P2.5: `StateStore` returns `SlotChange`/`ZoneChange` lists (`ZoneChange.count_changed` decides `zone_state` rows; `source` adds `health`/`tick` for non-count changes). Stale = never had data, a camera `down`, or no fresh data for `stale_after_s` measured by the API clock at receipt; flow zones count non-`down` health heartbeats as fresh. Confidence `ok` before any health message, any `degraded` camera lowers the zone, `down` keeps the last value. Trend from a change-only `(ts, free)` step buffer (20 min); `tick()` also reports trend flips. Unknown slots ignored, occupied clamped to capacity, unknown cameras raise `UnknownCameraError`. `FlowCounter` skeleton already counts/clamps/dedups/corrects so P5.7 only wires it. Recorded in vision.md §8 | The guide left change shapes, freshness and the no-health/no-data cases open; receipt time avoids worker clock skew |
 
 ## Metrics
 
@@ -287,3 +288,4 @@ NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occup
 - P2.2: `parking/vision/sources.py` (`Frame`, `FrameSource` protocol, `FileSource`, `FolderReplaySource` re-scanning each pass, `make_source` for `file:`/`folder:`, later schemes raise `NotImplementedError`) + `parking/vision/health.py` (`FrameHealth.check` black/frozen/blurry/connect_failed on a 320-px gray copy, rolling `unhealthy_ratio` over 20, `degraded`, `is_down`). `test_sources.py` + `test_health.py` (32 tests: black, identical repeated, Gaussian-blurred frames); pytest 255 passed, ruff clean; both sample photos pass health.
 - P2.3: occupancy worker (`parking worker occupancy`: health → `analyze_frame` → observation every interval, heartbeat every 10 s, SIGTERM/SIGINT → final `down` + 5 s outbox flush) with the token-protected control server (`/control/snapshot`, `/reload`, `/save-reference`). Done-when check on the dev Pi: `--print` printed an observation every 5 s (ground 12/17 free, ~170–300 ms) and `curl …/control/snapshot` returned a 1.1 MB JPEG (401 without the token); `test_worker_base.py` (11) + `test_occupancy_worker.py` (16); pytest 282 passed, ruff clean; coverage control 100%, base 89%, occupancy_worker 90%.
 - P2.4: `parking/core/smoothing.py` (`SlotSmoother` k-consecutive flip with first-reading-direct and `restore()`, `CountSmoother` median of last k) + `parking/core/clock.py` (`Clock`, `SystemClock`, `FakeClock`). `test_smoothing.py` (15) covers every testing.md §2 smoothing case (first reading sets state, k−1 don't flip, k do, alternating noise never flips); pytest 297 passed, ruff clean, 100% branch coverage of `core/`.
+- P2.5: `parking/core/fusion.py` (`StateStore`: observation/health/tick/restore → `SlotChange`/`ZoneChange`, `status()` → `LotStatus` with level, trend, confidence, stale, totals; `level_for`, `trend_for`, `TrendBuffer`) + `parking/core/flow_counter.py` skeleton (clamp, dedup, correct, restore, confidence). `test_fusion.py` (36, fake clock: level boundaries, totals, stale on/off, camera down/degraded, trend filling/emptying/steady, restore, flow confidence); pytest 333 passed, ruff clean; coverage fusion 99% (branch), flow_counter 100%.

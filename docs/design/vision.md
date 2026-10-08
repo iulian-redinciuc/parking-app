@@ -219,6 +219,15 @@ occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
 - **Level**: computed from free/capacity (see [api.md](api.md#levels)).
 - The UI shows **"≈"** before a number when confidence < 0.8.
 
+`StateStore(config, clock, slot_files)` implements this (P2.5):
+- `apply_observation(obs)`, `apply_health(msg)`, `tick()` (every second) and `restore(slot_states, zone_counts, updated_at, trend)` each return a list of changes: `SlotChange(ts, camera_id, slot_id, taken)` when a smoothed slot flips (or is first seen), and `ZoneChange(ts, zone_id, occupied, free, level, confidence, stale, trend, count_changed, source)` when anything a client sees about a zone changes. `count_changed` tells the DB layer whether to write a `zone_state` row; `source` is `observation | health | tick | startup`. `status(lang)` builds the `LotStatus` (`has_data` is false until the first observation or restore → `503`).
+- **Stale** = the zone never had data, or one of its cameras reported `down`, or no fresh data from one of its cameras for `stale_after_s`. Fresh data is an observation (occupancy cameras) or a non-`down` health message (flow cameras: no cars crossing is normal). Freshness is measured with the API's clock at receipt, never the worker's `ts`. Zone `updated_at` = receipt time of the latest data.
+- Confidence uses the last non-`down` health state of the zone's cameras (`ok` until the first health message; any `degraded` camera lowers the zone). Flow confidence is rounded to 2 decimals.
+- Slot readings for slots not in the camera's slot file (or in a zone the camera doesn't cover) are ignored with a warning. `occupied` is clamped to the zone capacity. A count zone seen by several cameras sums their medians.
+- Trend: a per-zone buffer of `(ts, free)` appended whenever `free` changes, kept 20 min; Δfree = free now − free at `now − trend_window_min` (the oldest sample while the history is shorter). `tick()` also reports trend flips.
+- Payloads naming an unknown camera (or an observation from a flow camera) raise `UnknownCameraError`.
+- `FlowCounter` (`core/flow_counter.py`) already has `apply(event_id, direction)` (→ `True` applied / `False` clamped / `None` duplicate, last 1000 ids), `correct`, `restore` and the confidence formula; feeding flow events into the store comes in P5.7–P5.8.
+
 ## 9. Per-slot classifier
 
 Replaces the MVP appearance scorer (§2.1) for top-down views once the real camera has given enough labelled photos, and is the fallback for angled views if Phase 4 accuracy is below target.
