@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test'
 
 // P6.5 Done-when, as DevTools → Sensors would do it: a location near the mock lot (51.5007,
 // -0.1246, radius 500 m) shows the banner and one local notification while the app is open.
-// Chromium only: Playwright's WebKit isn't on the dev Pi to check its geolocation permission
-// emulation; the hook's logic is unit-tested (useProximity.test.tsx).
+// The banner on both projects; the notification on Chromium only (as in alerts.spec, WebKit here
+// is iPhone Safari outside the installed app, which has no notifications).
 const FAR = { latitude: 51.5207, longitude: -0.1246, accuracy: 30 } // ≈ 2.2 km north
 const NEAR = { latitude: 51.5043, longitude: -0.1246, accuracy: 30 } // ≈ 400 m north
 
@@ -32,15 +32,17 @@ test('entering the radius shows the banner and one local notification', async ({
     /You're 400 m away · \d+ free \(Ground \d+ · Underground ≈\d+\)/,
   )
 
-  const shown = () =>
-    page.evaluate(async () =>
-      (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => [
-        n.title,
-        n.tag,
-        n.body.startsWith("You're 400 m away"),
-      ]),
-    )
-  await expect.poll(shown).toEqual([["You're near the parking", 'parking-status', true]])
+  if (browserName === 'chromium') {
+    const shown = () =>
+      page.evaluate(async () =>
+        (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => [
+          n.title,
+          n.tag,
+          n.body.startsWith("You're 400 m away"),
+        ]),
+      )
+    await expect.poll(shown).toEqual([["You're near the parking", 'parking-status', true]])
+  }
 
   // Out and back in: no second alert within 2 h, even after a reload.
   await page.getByRole('button', { name: 'Hide' }).click()
