@@ -90,3 +90,27 @@ As built (P6.7): rules in `parking/push/rules.py`, jobs in `parking/push/schedul
 | iPhone (iOS ≥ 16.4) | Safari, installed to home screen | **required** | ✅ expected | ✅ | ✅ | ✅ |
 | iPhone | Safari, not installed | — | ❌ (show install hint) | ✅ (in-app banner only) | ❌ | ❌ |
 | Desktop | Chrome / Firefox | no | ✅ | n/a | ✅ | ✅ |
+
+### 6.1 Results (P6.8)
+
+Fill in one row per device actually tested: ✅ confirmed, ❌ failed (note why), — not tested yet.
+
+| Device / OS | Browser (version) | Installed? | Push | Tier 1 | Tier 2 | Tier 3 | Date | Notes |
+|-------------|-------------------|------------|------|--------|--------|--------|------|-------|
+| Desktop, Debian 13 (dev Pi 5, arm64) | Chromium 154.0.8037.92 (FCM) | no | ✅ | n/a | ✅ | ✅ | 2026-10-09 | Live runs against a real `parking api` with the dev VAPID keys: test push (P6.4), on-my-way rules (P6.6), reminder + quiet hours + almost-full (P6.7). Tier 1 also passes in Chromium with an emulated location (P6.5 e2e) |
+| Desktop | Firefox | no | — | n/a | — | — | | Not installed on the dev Pi |
+| Android phone | Chrome | optional | — | — | — | — | | Needs P3.9 (HTTPS from the phone) |
+| iPhone (iOS ≥ 16.4) | Safari, installed | required | — | — | — | — | | Needs P3.9 |
+| iPhone | Safari, not installed | — | — | — | — | — | | Expected: install hint, no push; Tier 1 banner only |
+
+### 6.2 How to run it on a phone
+
+Needs the dev API reachable over HTTPS (P3.9) and the frontend built against it (`VITE_API_BASE=https://parking-api-dev.<domain>`). For Tier 1, set `LOT_LAT`/`LOT_LON` in `deploy/.env` to where the test happens (or test near the real lot).
+
+1. **Push:** open the app → *Alerts* → *Enable notifications* (the permission prompt must appear only after the tap) → *Send test notification* → a notification arrives with the screen locked. Tapping it opens the app.
+2. **Tier 1:** turn on *Tell me when I'm near*, allow location, walk/drive into the radius with the app open → banner + (with the notification permission) one notification; not again within 2 h.
+3. **Tier 2:** under *I'm on my way* tap *15 min* → a push arrives at once; change the occupancy (e.g. `parking replay` or a few posted observations) by ≥ 3 free / a level → another push (≥ 2 min apart); *Stop updates* → none.
+4. **Tier 3:** add a reminder 2 min ahead → one push at that minute; one inside quiet hours → none; *Warn when almost full* on + a zone becoming almost full → one push, not again within 2 h.
+5. **iPhone not installed:** *Alerts* shows the install hint instead of the enable button; Tier 1 banner still works.
+
+Write the OS and browser versions into the table above and into PROGRESS.md.
