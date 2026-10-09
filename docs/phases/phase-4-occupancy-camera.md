@@ -34,6 +34,15 @@
 
 **Done when:** both commands work from the vision host and from inside its vision container (`docker compose run --rm vision-occupancy ...`).
 
+Inside the container the image's entrypoint is `parking worker` and there is no `curl` (it has `ffprobe` from ffmpeg, and Python), so from `deploy/`:
+```bash
+docker compose run --rm --no-deps --entrypoint ffprobe vision-occupancy -v error -rtsp_transport tcp \
+  -show_entries stream=codec_name,width,height "$CAM_GROUND_RTSP_URL"
+docker compose run --rm --no-deps --entrypoint /app/backend/.venv/bin/python vision-occupancy -c \
+  'import os,urllib.request as u;print(len(u.urlopen(os.environ["CAM_GROUND_SNAPSHOT_URL"],timeout=10).read()),"bytes")'
+```
+(the URLs come from `deploy/.env` via `env_file`; `--no-deps` so the API doesn't have to be up).
+
 ## P4.3: Snapshot and RTSP sources
 **Files:** `parking/vision/sources.py`, tests
 
