@@ -2,7 +2,9 @@
 
 Every `interval` seconds (the `folder:` source's `interval`, otherwise the camera's
 `sample_every_s`): read a frame → health check (unhealthy frames are recorded and skipped)
-→ `analyze_frame` (the same pipeline as `parking analyze`) → `ApiClient.send_observation`.
+→ camera shift check every `shift_check_every_s` against `data/reference/<camera>.jpg`, if it
+exists (vision.md §6) → `analyze_frame` (the same pipeline as `parking analyze`) →
+`ApiClient.send_observation`.
 
 One DEBUG line per observation, an INFO summary every `SUMMARY_EVERY_S`.
 """
@@ -26,6 +28,7 @@ from parking.vision.detector import Detection, Detector, FakeDetector
 from parking.vision.health import FrameHealth
 from parking.vision.health_stats import format_metrics
 from parking.vision.pipeline import AnalysisResult, analyze_frame
+from parking.vision.shift import ShiftDetector
 from parking.vision.sources import FolderReplaySource, Frame, FrameSource, make_source
 from parking.workers.base import Schedule, Worker, WorkerError, load_camera
 
@@ -79,6 +82,8 @@ class _Setup:
         self.cam = cam
         self.capacities = {z: lot.zone_capacity(z, [self.slot_file]) for z in cam.zones}
         self.reference = _load_reference(cam, root)
+        # a reload (e.g. recalibrated slots) starts shift detection over (vision.md §6)
+        self.shift = load_shift_detector(cam, self.slot_file, root)
 
         # keep the expensive or stateful parts when their config didn't change
         if old is not None and old.cam.detector == cam.detector and old.method == self.method:
@@ -131,6 +136,23 @@ def _load_reference(cam: Camera, root: Path) -> np.ndarray | None:
     if ref is None:
         raise WorkerError(f"can't read reference_empty image {path}")
     return ref
+
+
+def reference_frame_path(camera_id: str, root: Path) -> Path:
+    return root / "data" / "reference" / f"{camera_id}.jpg"
+
+
+def load_shift_detector(cam: Camera, slot_file: SlotFile, root: Path) -> ShiftDetector | None:
+    """The shift detector for `data/reference/<camera>.jpg`; None (check off) without one."""
+    path = reference_frame_path(cam.id, root)
+    if not path.is_file():
+        log.info("%s: no reference frame %s, shift check off", cam.id, path.name)
+        return None
+    ref = cv2.imread(str(path))
+    if ref is None:
+        log.warning("%s: can't read reference frame %s, shift check off", cam.id, path.name)
+        return None
+    return ShiftDetector(ref, slot_file, cam.health)
 
 
 class OccupancyWorker(Worker):
@@ -209,6 +231,7 @@ class OccupancyWorker(Worker):
             log.debug("%s: frame skipped: %s", self.camera_id, issue)
             return None
         assert frame is not None
+        self._check_shift(setup, frame)
         detector = setup.detector
         if isinstance(detector, SidecarDetector):
             detector = detector.for_frame(frame)
@@ -238,6 +261,36 @@ class OccupancyWorker(Worker):
         )
         return obs
 
+    def _check_shift(self, setup: _Setup, frame: Frame) -> None:
+        shift = setup.shift
+        if shift is None or shift.shifted:
+            return  # off, or already shifted (never clears by itself)
+        try:
+            m = shift.check(frame.image)
+        except Exception:
+            log.exception("%s: shift check failed", self.camera_id)
+            return
+        if m is None:
+            return
+        px = "-" if m.displacement_px is None else f"{m.displacement_px:.1f}"
+        log.debug(
+            "%s: shift check: %s px (%d inliers of %d matches), %d over in a row",
+            self.camera_id,
+            px,
+            m.inliers,
+            m.matches,
+            shift.over,
+        )
+        if shift.shifted:
+            log.warning(
+                "%s: camera shifted: %s px > %g px in %d checks in a row; recalibrate the "
+                "slots or save a new reference frame",
+                self.camera_id,
+                px,
+                shift.cfg.shift_max_px,
+                shift.over,
+            )
+
     def _log_summary(self, skipped_total: int) -> None:
         s, self._summary = self._summary, _Summary()
         last = self._latest[1] if self._latest else None
@@ -262,7 +315,7 @@ class OccupancyWorker(Worker):
         stale = self.lot.api.stale_after_s
         if final or self.health.is_down(stale):
             state = "down"
-        elif self.health.degraded:
+        elif self.health.degraded or self.shifted:
             state = "degraded"
         else:
             state = "ok"
@@ -274,7 +327,7 @@ class OccupancyWorker(Worker):
             camera_id=self.camera_id,
             ts=datetime.now(UTC),
             state=state,
-            issue=self.health.last_issue,
+            issue=self.health.last_issue or ("shifted" if self.shifted else None),
             fps=round(fps, 3) if fps is not None else None,
             last_frame_age_s=(
                 round(now - self._last_frame_at, 1) if self._last_frame_at is not None else None
@@ -282,6 +335,11 @@ class OccupancyWorker(Worker):
             inference_ms_avg=round(sum(ms) / len(ms), 1) if ms else None,
             unhealthy_ratio=round(self.health.unhealthy_ratio, 3),
         )
+
+    @property
+    def shifted(self) -> bool:
+        shift = self._setup.shift
+        return shift is not None and shift.shifted
 
     # --- control (api.md §5.2) ---
 
@@ -335,17 +393,21 @@ class OccupancyWorker(Worker):
         }
 
     def save_reference(self) -> dict[str, Any]:
-        """Save the current frame as `data/reference/<camera>.jpg` (vision.md §6)."""
+        """Save the current frame as `data/reference/<camera>.jpg` and compare later frames
+        with it (vision.md §6; clears `shifted`)."""
         latest = self._latest
         if latest is None:
             raise ValueError("no frame read yet")
-        path = self.root / "data" / "reference" / f"{self.camera_id}.jpg"
+        path = reference_frame_path(self.camera_id, self.root)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp.jpg")
         if not cv2.imwrite(str(tmp), latest[0].image):
             raise ValueError(f"could not write {path.name}")
         tmp.replace(path)
-        log.info("%s: reference frame saved", self.camera_id)
+        with self._lock:
+            setup = self._setup
+            setup.shift = ShiftDetector(latest[0].image, setup.slot_file, setup.cam.health)
+        log.info("%s: reference frame saved, shift check restarted", self.camera_id)
         return {"saved": f"data/reference/{path.name}", "ts": latest[0].ts.isoformat()}
 
     def shutdown(self) -> None:

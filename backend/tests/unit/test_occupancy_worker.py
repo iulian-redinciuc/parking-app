@@ -15,6 +15,7 @@ from parking.config import Settings
 from parking.workers.api_client import ApiClient
 from parking.workers.base import WorkerError
 from parking.workers.occupancy_worker import OccupancyWorker
+from tests.unit.test_shift import moved, scene
 
 RECT = [[0, 0], [100, 0], [100, 100], [0, 100]]
 RIGHT = [[100, 0], [200, 0], [200, 100], [100, 100]]
@@ -280,3 +281,59 @@ def test_signal_handler_never_blocks_on_the_stop_event(lot):
         w._on_signal(15, None)  # a second signal (uv forwarding + timeout) is fine too
         assert not w.stop_event.is_set()
     assert w.stop_event.wait(2)
+
+
+def test_shift_check_against_the_saved_reference(lot):
+
+    # 640x320 frames: a.jpg in place, b..e.jpg moved 12 px; one slot across the middle
+    for f in (lot / "frames").iterdir():
+        f.unlink()
+    big = [[160, 100], [480, 100], [480, 220], [160, 220]]
+    (lot / "config" / "slots" / "cam-ground.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "camera_id": "cam-ground",
+                "image_size": [640, 320],
+                "slots": [{"id": "G01", "zone": "ground", "polygon": big}],
+            }
+        )
+    )
+    ref = scene(11, 640, 320)
+    cv2.imwrite(str(lot / "frames" / "a.png"), ref)
+    for name in "bcde":
+        cv2.imwrite(str(lot / "frames" / f"{name}.png"), moved(ref, dx=12))
+
+    w, _ = make_worker(lot)
+    assert w._setup.shift is None  # no data/reference/cam-ground.jpg yet: check off
+    w.step()
+    w.save_reference()
+    shift = w._setup.shift
+    clock = iter(range(0, 10_000, 300))
+    shift.clock = lambda: next(clock)
+    for _ in range(2):
+        w.step()
+    assert shift.over == 2 and not w.shifted
+    assert w.health_message().issue is None
+    w.step()
+    assert w.shifted and shift.last.displacement_px == pytest.approx(12, abs=1)
+    msg = w.health_message()
+    assert (msg.state, msg.issue) == ("degraded", "shifted")
+    w.step()  # still shifted, still analysed
+    assert w.shifted and w.observations == 5
+
+    # recalibrating (reload) or a new reference starts over
+    w.reload()
+    assert w._setup.shift is not shift and not w.shifted
+    w._setup.shift.shifted = True
+    w.save_reference()
+    assert not w.shifted and w.health_message().state == "ok"
+
+
+def test_unreadable_reference_turns_the_shift_check_off(lot):
+    (lot / "data" / "reference").mkdir(parents=True)
+    (lot / "data" / "reference" / "cam-ground.jpg").write_bytes(b"not a jpeg")
+    w, _ = make_worker(lot)
+    assert w._setup.shift is None
+    w.step()
+    assert not w.shifted

@@ -152,6 +152,8 @@ A bumped camera makes every slot polygon point at the wrong pixels.
 4. Only use matches from the **static background** (outside slot polygons), since parked cars move.
 5. `shifted` never auto-corrects. An admin recalibrates (Phase 7) or re-saves the reference.
 
+**Implementation (P4.6).** `ShiftDetector` works on grayscale copies scaled to 1280 px wide (the current frame is first resized to the reference's size) and reports pixels at reference size. The background mask is the inverse of the slot polygons, each grown by 1% of the image width so overhanging cars don't count; if under 5% of the frame is left (or there are no slots) the whole frame is used. Ratio test 0.75, RANSAC reprojection threshold 3 px. A check with fewer than 12 inliers (fog, a black or IR frame against a daytime reference) is **inconclusive**: it neither counts towards nor resets the run of 3. A view turned far away still finds chance inliers with a huge displacement, so it counts. The worker checks only frames that passed the health checks, the first one right away and then every `shift_check_every_s` (DEBUG line `shift check: <px> px (<inliers> inliers of <matches> matches), <n> over in a row`, a WARNING when it becomes shifted), and keeps analysing while shifted. Health then reports `state: degraded` (unless `down`) and `issue: shifted` (unless the current frame has its own issue). No `data/reference/<camera>.jpg` (or an unreadable one) = check off. `save_reference` (admin "reference frame", `/control/save-reference`) and `reload` (recalibrated slots) start over with a fresh detector. On the sample photo a check takes ~100 ms on the dev Pi and measures 5 / 10 px nudges to ±0.5 px; a 1° turn reads 17 px.
+
 ## 7. Entry/exit counting
 
 ### 7.1 Frame pipeline (flow worker)
