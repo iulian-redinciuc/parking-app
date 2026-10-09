@@ -17,7 +17,7 @@
 | occupied | int | |
 | free | int | |
 | confidence | real | |
-| source | text | the `StateStore` change source `observation \| flow \| health \| tick \| config` (`config` = an admin saved a new slot file, P7.3); later `correction \| reset`. `startup` changes are not written (they republish restored rows) |
+| source | text | the `StateStore` change source `observation \| flow \| health \| tick \| config \| correction` (`config` = an admin saved a new slot file, P7.3; `correction` = an admin set a flow zone's count, P7.4); later `reset`. `startup` changes are not written (they republish restored rows) |
 
 ### `slot_state`: a slot's smoothed state, written only when it flips
 | Column | Type | Notes |

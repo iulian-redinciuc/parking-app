@@ -9,7 +9,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from parking.core.fusion import Change, SlotChange, ZoneChange
-from parking.db.models import CameraHealth, FlowEvent, SlotState, ZoneState
+from parking.db.models import CameraHealth, Correction, FlowEvent, SlotState, ZoneState
 from parking.messages import CameraHealthMsg, FlowEventMsg
 
 
@@ -113,3 +113,33 @@ def upsert_camera_health(session: Session, msg: CameraHealthMsg) -> CameraHealth
 def camera_health(session: Session) -> dict[str, CameraHealth]:
     """Every camera's latest health row."""
     return {row.camera_id: row for row in session.exec(select(CameraHealth))}
+
+
+def recent_corrections(session: Session, limit: int) -> list[Correction]:
+    """The newest `limit` corrections, newest first."""
+    query = select(Correction).order_by(Correction.id.desc()).limit(limit)
+    return list(session.exec(query))
+
+
+def correction_counters(
+    session: Session, zone_ids: Iterable[str]
+) -> dict[str, tuple[datetime, int]]:
+    """zone id -> (time of its last correction, `flow_event` rows since), for the flow
+    confidence after a restart (data-model.md §2). Zones never corrected are left out."""
+    out: dict[str, tuple[datetime, int]] = {}
+    for zone_id in zone_ids:
+        last = session.exec(
+            select(Correction)
+            .where(Correction.zone_id == zone_id)
+            .order_by(Correction.id.desc())
+            .limit(1)
+        ).first()
+        if last is None:
+            continue
+        events = session.exec(
+            select(func.count())
+            .select_from(FlowEvent)
+            .where(FlowEvent.zone_id == zone_id, FlowEvent.ts > last.ts)
+        ).one()
+        out[zone_id] = (last.ts, int(events))
+    return out

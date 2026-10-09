@@ -189,6 +189,21 @@ export function createMockLot(
 
   return {
     lot,
+    /** An admin correction (P7.4): sets a zone's count with full confidence; the old count and
+     * the new status, or `null` for an unknown zone. */
+    correct(zoneId: string, occupied: number): MockCorrection | null {
+      const z = zones.find((zone) => zone.info.id === zoneId)
+      if (!z) return null
+      const old = z.occupied
+      const ts = new Date(now()).toISOString()
+      z.occupied = Math.max(0, Math.min(z.info.capacity, occupied))
+      z.confidence = 1 // a correction resets the confidence, as on the server
+      z.lowConfidenceFor = 0
+      z.staleFor = 0
+      z.updatedAt = ts
+      moveSlots(z)
+      return { old, status: status(ts) }
+    },
     /** Advance one update. `null` = the server would answer 503 `unavailable`. */
     step(): LotStatus | null {
       const ts = new Date(now()).toISOString()
@@ -226,6 +241,22 @@ export function mockStatus(seed?: number): LotStatus {
   let status = sim.step()
   while (!status) status = sim.step()
   return status
+}
+
+export interface MockCorrection {
+  old: number
+  status: LotStatus
+}
+
+// running mock feeds, so a mock correction (client.ts) reaches the app at once, as SSE would
+const corrections = new Set<(zoneId: string, occupied: number) => MockCorrection | null>()
+
+/** Applies an admin correction to every running mock feed (mock-mode `correctZone`); the last
+ * feed's old count and new status, or `null` when none is running. */
+export function correctMockZone(zoneId: string, occupied: number): MockCorrection | null {
+  let latest: MockCorrection | null = null
+  corrections.forEach((apply) => (latest = apply(zoneId, occupied) ?? latest))
+  return latest
 }
 
 /** A `LiveFeed` that publishes a new mock status every 3–8 s once started. */
@@ -322,6 +353,15 @@ export function createMockFeed(options: MockOptions = {}): LiveFeed {
     }
   }
 
+  function onCorrect(zoneId: string, occupied: number): MockCorrection | null {
+    const corrected = sim.correct(zoneId, occupied)
+    if (corrected && !offline) {
+      const status = shape(corrected.status)
+      set({ status, connection: 'live', lastMessageAt: now(), error: null })
+    }
+    return corrected
+  }
+
   // the browser's own offline/online, so a real loss of network looks like it does live
   let offline = false
   function onOffline() {
@@ -351,6 +391,7 @@ export function createMockFeed(options: MockOptions = {}): LiveFeed {
       }
       window.addEventListener('offline', onOffline)
       window.addEventListener('online', onOnline)
+      corrections.add(onCorrect)
       if (typeof navigator !== 'undefined' && navigator.onLine === false) onOffline()
       tick()
     },
@@ -359,6 +400,7 @@ export function createMockFeed(options: MockOptions = {}): LiveFeed {
       started = false
       window.removeEventListener('offline', onOffline)
       window.removeEventListener('online', onOnline)
+      corrections.delete(onCorrect)
       if (timer !== null) clearTimeout(timer)
       timer = null
     },

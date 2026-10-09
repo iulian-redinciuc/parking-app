@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   MOCK_SCENARIOS,
   type MockScenario,
+  correctMockZone,
   createMockFeed,
   createMockLot,
   levelFor,
@@ -101,6 +102,25 @@ describe('mock feed', () => {
     feed.start()
     expect(listener).toHaveBeenCalledTimes(calls)
     feed.stop()
+  })
+
+  it('a correction reaches running feeds at once, clamped, with full confidence', () => {
+    vi.useFakeTimers()
+    const feed = createMockFeed({ seed: 5, scenario: 'estimated' })
+    const idle = createMockFeed({ seed: 6 })
+    feed.start()
+    const listener = vi.fn()
+    feed.subscribe(listener)
+    const before = feed.getSnapshot().status!.zones.find((z) => z.id === 'underground')!
+    const corrected = correctMockZone('underground', 70)
+    expect(listener).toHaveBeenCalledTimes(1)
+    const zone = feed.getSnapshot().status!.zones.find((z) => z.id === 'underground')!
+    expect(zone).toMatchObject({ occupied: 60, free: 0, level: 'full' })
+    expect(corrected!.old).toBe(before.occupied)
+    expect(corrected!.status.zones.find((z) => z.id === 'underground')!.occupied).toBe(60)
+    expect(idle.getSnapshot().status).toBeNull() // not started: not corrected
+    feed.stop()
+    expect(correctMockZone('underground', 3)).toBeNull()
   })
 
   it('reports `unavailable` like a 503 from the server', () => {

@@ -3,8 +3,8 @@
 // Admin calls add `Authorization: Bearer <token>` from sessionStorage; a 401 forgets the token,
 // which sends the admin screens back to the login.
 import { API_BASE, IS_MOCK } from './base'
-import { mockLotInfo, mockStatus } from './mock'
-import type { ApiError, LotInfo, LotStatus } from './types'
+import { correctMockZone, mockLotInfo, mockStatus } from './mock'
+import type { ApiError, LotInfo, LotStatus, ZoneStatus } from './types'
 import { isApiErrorBody, isLotInfo, isLotStatus } from './validate'
 
 export { API_BASE, IS_MOCK } from './base'
@@ -32,7 +32,7 @@ export interface RequestOptions {
 }
 
 export function apiUrl(path: string, lang?: string, base = API_BASE): string {
-  const query = lang ? `?lang=${encodeURIComponent(lang)}` : ''
+  const query = lang ? `${path.includes('?') ? '&' : '?'}lang=${encodeURIComponent(lang)}` : ''
   return `${base}${path}${query}`
 }
 
@@ -560,4 +560,94 @@ export async function saveReferenceFrame(
   }
   const path = `/api/admin/cameras/${encodeURIComponent(cameraId)}/reference-frame`
   return adminRequest(path, isReferenceSaved, options, { method: 'POST' })
+}
+
+// --- count corrections (P7.4) ---
+
+/** One row of `GET /api/admin/corrections` (the audit log). */
+export interface Correction {
+  id: number
+  ts: string
+  zone_id: string
+  /** In the requested language. */
+  zone_name: string
+  old_occupied: number
+  new_occupied: number
+  /** `admin-token`, `session:<id>` or `scheduled-reset`. */
+  actor: string
+  note: string
+}
+
+const isCorrection = (x: unknown): x is Correction =>
+  isObject(x) &&
+  typeof x.id === 'number' &&
+  typeof x.ts === 'string' &&
+  typeof x.zone_id === 'string' &&
+  typeof x.zone_name === 'string' &&
+  typeof x.old_occupied === 'number' &&
+  typeof x.new_occupied === 'number' &&
+  typeof x.actor === 'string' &&
+  typeof x.note === 'string'
+const isCorrectionList = (x: unknown): x is Correction[] =>
+  Array.isArray(x) && x.every(isCorrection)
+const isZoneStatus = (x: unknown): x is ZoneStatus =>
+  isObject(x) &&
+  typeof x.id === 'string' &&
+  typeof x.occupied === 'number' &&
+  typeof x.capacity === 'number'
+
+// The mock build keeps its corrections in memory (newest first).
+const mockLog: Correction[] = []
+
+/** `POST /api/admin/zones/{id}/correct`: sets an entry/exit (`flow`) zone's count; the API
+ * publishes the new status to every app. 409 for other zones, 422 above the capacity. */
+export async function correctZone(
+  zone: { id: string; name: string },
+  occupied: number,
+  note: string,
+  options?: RequestOptions,
+): Promise<ZoneStatus> {
+  if (IS_MOCK && !options?.base) {
+    mockAdminOnly()
+    const lot = mockLotInfo()
+    const info = lot.zones.find((z) => z.id === zone.id)
+    if (!info) throw new ApiRequestError({ code: 'not_found', message: 'no zone', status: 404 })
+    if (info.method !== 'flow') {
+      throw new ApiRequestError({ code: 'conflict', message: 'not a flow zone', status: 409 })
+    }
+    if (occupied > info.capacity) {
+      throw new ApiRequestError({ code: 'bad_request', message: 'above capacity', status: 422 })
+    }
+    // the running mock feed's zone (its old count), else a one-off mock status
+    const corrected = correctMockZone(zone.id, occupied)
+    const old = corrected?.old ?? 0
+    const after =
+      corrected?.status.zones.find((z) => z.id === zone.id) ??
+      mockStatus().zones.find((z) => z.id === zone.id)!
+    mockLog.unshift({
+      id: mockLog.length + 1,
+      ts: new Date().toISOString(),
+      zone_id: zone.id,
+      zone_name: zone.name,
+      old_occupied: old,
+      new_occupied: occupied,
+      actor: 'session:mock',
+      note: note.trim(),
+    })
+    return { ...after, occupied, free: info.capacity - occupied }
+  }
+  const path = `/api/admin/zones/${encodeURIComponent(zone.id)}/correct`
+  return adminRequest(path, isZoneStatus, options, {
+    method: 'POST',
+    body: { occupied, note: note.trim() },
+  })
+}
+
+/** `GET /api/admin/corrections?limit=`: the newest corrections first. */
+export async function getCorrections(limit = 50, options?: RequestOptions): Promise<Correction[]> {
+  if (IS_MOCK && !options?.base) {
+    mockAdminOnly()
+    return mockLog.slice(0, limit).map((c) => ({ ...c }))
+  }
+  return adminRequest(`/api/admin/corrections?limit=${limit}`, isCorrectionList, options)
 }

@@ -9,6 +9,7 @@ rows when a count changed, `slot_state` rows when a slot flipped) and the SSE br
 - `apply_health(msg)`: camera state -> confidence (`degraded`) and staleness (`down`).
 - `tick()`: once a second; staleness (`stale_after_s` without data) and trend flips.
 - `replace_slot_file(camera_id, slot_file)`: an admin saved new slots (P7.3).
+- `correct(zone_id, occupied)`: an admin set a `flow` zone's count (P7.4).
 - `restore(...)`: seeds the state from the DB at start-up; restored zones stay stale until
   fresh data arrives (data-model.md §2).
 
@@ -47,11 +48,15 @@ TREND_BUFFER = timedelta(minutes=20)
 # (confidence when the camera is ok, when it's degraded) per zone method (vision.md §8)
 CAMERA_CONFIDENCE = {"slots": (1.0, 0.6), "count": (0.9, 0.5)}
 
-ChangeSource = Literal["observation", "flow", "health", "tick", "startup", "config"]
+ChangeSource = Literal["observation", "flow", "health", "tick", "startup", "config", "correction"]
 
 
 class UnknownCameraError(ValueError):
     """A payload names a camera that isn't in lot.yaml (or has the wrong role)."""
+
+
+class NotCorrectableError(ValueError):
+    """Only `flow` zones keep a count that can be corrected (slots/count zones are measured)."""
 
 
 @dataclass(frozen=True)
@@ -274,6 +279,19 @@ class StateStore:
                 self.capacity[zone.id] = self.config.zone_capacity(zone.id, files)
         return self._diff("config")
 
+    def correct(self, zone_id: str, occupied: int) -> tuple[int, int, list[Change]]:
+        """Set a `flow` zone's count (clamped to its capacity) and reset its confidence
+        counters: (old occupied, new occupied, changes). Other zones -> `NotCorrectableError`."""
+        counter = self.flow.get(zone_id)
+        if counter is None:
+            if zone_id not in self.capacity:
+                raise KeyError(zone_id)
+            raise NotCorrectableError(f"zone '{zone_id}' isn't a flow zone")
+        old = counter.occupied
+        new = counter.correct(occupied)
+        self._updated_at[zone_id] = self.clock.now()
+        return old, new, self._diff("correction")
+
     def tick(self) -> list[Change]:
         """Call every second: zones going stale (or trends shifting) produce changes."""
         return self._diff("tick")
@@ -284,9 +302,11 @@ class StateStore:
         zone_counts: Mapping[str, int] | None = None,
         updated_at: Mapping[str, datetime] | None = None,
         trend: Mapping[str, Iterable[tuple[datetime, int]]] | None = None,
+        corrections: Mapping[str, tuple[datetime, int]] | None = None,
     ) -> list[Change]:
         """Seed from the DB: slot states per camera, counts of `count`/`flow` zones, each zone's
-        last update time and its recent (ts, free) samples. Zones stay stale until fresh data."""
+        last update time, its recent (ts, free) samples and, per `flow` zone, its last
+        correction (time, events since) for the confidence. Zones stay stale until fresh data."""
         for cam_id, states in (slot_states or {}).items():
             if cam_id in self._slots:
                 known = self._slot_zone.get(cam_id, {})
@@ -294,7 +314,8 @@ class StateStore:
         for zone_id, count in (zone_counts or {}).items():
             zone = self.config.zone(zone_id)
             if zone.method == "flow":
-                self.flow[zone_id].restore(count)
+                corrected_at, events = (corrections or {}).get(zone_id, (None, 0))
+                self.flow[zone_id].restore(count, corrected_at, events)
             elif zone.method == "count":
                 # one camera's smoother carries the whole restored count
                 cam = next(

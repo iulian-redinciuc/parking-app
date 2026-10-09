@@ -8,11 +8,13 @@ import {
   adminLogout,
   ApiRequestError,
   apiUrl,
+  correctZone,
   getAdminCameras,
   getAdminSession,
   getCameraConfig,
   getAdminToken,
   getCameraSnapshot,
+  getCorrections,
   getLot,
   getStatus,
   IS_MOCK,
@@ -48,6 +50,12 @@ describe('API client', () => {
     expect(IS_MOCK).toBe(true)
     expect((await getStatus()).v).toBe(1)
     expect((await getLot()).id).toBe('main')
+  })
+
+  it('adds lang to a path that already has a query', () => {
+    expect(apiUrl('/api/admin/corrections?limit=5', 'ro', BASE)).toBe(
+      'http://api.test/api/admin/corrections?limit=5&lang=ro',
+    )
   })
 
   it('builds URLs with ?lang=', () => {
@@ -353,5 +361,61 @@ describe('admin slot/line editor client', () => {
       reply(409, { error: { code: 'conflict', message: 'no frame read yet' } }),
     )
     expect((await failure(saveReferenceFrame('cam-ground', { base: BASE }))).code).toBe('conflict')
+  })
+})
+
+describe('admin corrections client', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setAdminToken(null)
+  })
+
+  const zone = lotStatus.zones.find((z) => z.method === 'flow')!
+  const entry = {
+    id: 3,
+    ts: '2026-10-09T12:01:00.000Z',
+    zone_id: zone.id,
+    zone_name: zone.name,
+    old_occupied: 5,
+    new_occupied: 37,
+    actor: 'session:2',
+    note: 'manual count',
+  }
+
+  it('POSTs the count and the trimmed note with the bearer token', async () => {
+    setAdminToken('tok')
+    const fetch = reply(200, { ...zone, occupied: 37 })
+    vi.stubGlobal('fetch', fetch)
+    const result = await correctZone(zone, 37, ' manual count ', { base: BASE })
+    expect(result.occupied).toBe(37)
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe(`http://api.test/api/admin/zones/${zone.id}/correct`)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ occupied: 37, note: 'manual count' })
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer tok' })
+  })
+
+  it('a zone that is not a flow zone is a 409 `conflict`', async () => {
+    setAdminToken('tok')
+    vi.stubGlobal('fetch', reply(409, { error: { code: 'conflict', message: 'not flow' } }))
+    expect(await failure(correctZone(zone, 1, '', { base: BASE }))).toMatchObject({
+      code: 'conflict',
+      status: 409,
+    })
+    expect(getAdminToken()).toBe('tok')
+  })
+
+  it('reads the log with a limit and checks the shape', async () => {
+    setAdminToken('tok')
+    const fetch = reply(200, [entry])
+    vi.stubGlobal('fetch', fetch)
+    expect(await getCorrections(50, { base: BASE })).toEqual([entry])
+    expect((fetch.mock.calls[0] as unknown[])[0]).toBe(
+      'http://api.test/api/admin/corrections?limit=50',
+    )
+    vi.stubGlobal('fetch', reply(200, [{ ...entry, old_occupied: '5' }]))
+    expect(await failure(getCorrections(50, { base: BASE }))).toMatchObject({
+      code: 'bad_response',
+    })
   })
 })

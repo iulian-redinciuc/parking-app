@@ -8,6 +8,7 @@ from parking.config import LotConfig, SlotFile
 from parking.core.clock import FakeClock
 from parking.core.flow_counter import FlowCounter
 from parking.core.fusion import (
+    NotCorrectableError,
     SlotChange,
     StateStore,
     TrendBuffer,
@@ -374,6 +375,30 @@ def test_flow_confidence_decays():
     z = zone(store, "underground")
     assert z.occupied == 10
     assert z.confidence == pytest.approx(1 - 0.10 - 0.10)
+
+
+def test_correct_flow_zone_resets_confidence_and_clamps():
+    store, clock = make_store()
+    counter = store.flow["underground"]
+    for i in range(10):
+        counter.apply(f"e{i}", "in")
+    clock.advance(hours=5)
+    old, new, changes = store.correct("underground", 37)
+    assert (old, new) == (10, 37)
+    (change,) = zone_changes(changes, "underground")
+    assert (change.source, change.occupied, change.count_changed) == ("correction", 37, True)
+    z = zone(store, "underground")
+    assert (z.occupied, z.confidence, z.updated_at) == (37, 1.0, clock.now())
+    capacity = store.capacity["underground"]
+    assert store.correct("underground", capacity + 5)[1] == capacity
+
+
+def test_correct_only_flow_zones():
+    store, _ = make_store()
+    with pytest.raises(NotCorrectableError):
+        store.correct("ground", 3)
+    with pytest.raises(KeyError):
+        store.correct("nowhere", 3)
 
 
 # --- restore ---

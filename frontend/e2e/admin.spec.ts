@@ -94,3 +94,29 @@ test('slot editor: tap to add a space, move all, save', async ({ page }) => {
   await page.getByRole('button', { name: 'Save reference frame' }).last().click()
   await expect(page.getByText(/^Reference frame saved/)).toBeVisible()
 })
+
+// P7.4: correct the underground (entry/exit) count from the phone; the saved message and the log
+// show old → new with the note (the mock feed's own random walk may move the live count again).
+test('count correction with a note shows in the log', async ({ page }) => {
+  await page.goto('./#/admin')
+  await page.getByLabel('Password').fill('demo')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page.getByText('No corrections yet.')).toBeVisible()
+  const form = page.getByRole('form', { name: 'Underground' })
+  await expect(form).toContainText(/Now \d+ of 60 taken/)
+  await expect(page.getByRole('form', { name: 'Ground', exact: true })).toHaveCount(0)
+
+  await form.getByLabel('Real number of cars').fill('61')
+  await form.getByRole('button', { name: 'Save' }).click()
+  await expect(form.getByRole('alert')).toHaveText('Enter a whole number from 0 to 60.')
+
+  await form.getByLabel('Real number of cars').fill('37')
+  await form.getByLabel('Note (optional)').fill('counted on foot')
+  await form.getByRole('button', { name: 'Save' }).click()
+  await expect(form.getByRole('status')).toHaveText('Saved: Underground now has 37 taken.')
+  const log = page.getByRole('region', { name: 'Corrections log' })
+  await expect(log.getByRole('listitem')).toHaveCount(1)
+  await expect(log).toContainText(/Underground: \d+ → 37/)
+  await expect(log).toContainText('counted on foot')
+  await expect(log).toContainText('sign-in #mock')
+})

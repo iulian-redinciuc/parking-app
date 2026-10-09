@@ -145,7 +145,6 @@
     "signed_in": "Signed in",
     "signed_in_until": "Signed in until {{time}}.",
     "signed_in_token": "Signed in with the admin token.",
-    "coming_soon": "Count corrections are coming soon.",
     "log_out": "Log out",
     "error": {
       "unauthorized": "Wrong password.",
@@ -245,6 +244,37 @@
       "reloaded": "The worker reloaded it; the counts use the new shapes from the next frame.",
       "not_reloaded": "The worker didn't reload it ({{reason}}); it will use the file when it restarts.",
       "reference_hint": "Re-calibrated after the camera moved? Save a new reference frame so shift detection compares against today's view."
+    },
+    "zones": {
+      "title": "Count corrections",
+      "intro": "The entry/exit counter can drift. Count the cars, enter the real number and save: every app shows it at once.",
+      "none": "No entry/exit zones: the other zones are counted from the camera picture and need no corrections.",
+      "loading": "Loading the zones…",
+      "load_failed": "Couldn't load the zones. Check your connection and reload.",
+      "current": "Now {{occupied}} of {{capacity}} taken ({{free}} free)",
+      "no_count": "No count yet (capacity {{capacity}}).",
+      "stale": "not live",
+      "real_count": "Real number of cars",
+      "note": "Note (optional)",
+      "note_placeholder": "e.g. counted on foot",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Saved: {{zone}} now has {{value}} taken.",
+      "invalid": "Enter a whole number from 0 to {{capacity}}.",
+      "rejected": "Not saved: {{reason}}",
+      "failed": "Couldn't save. Check your connection and try again."
+    },
+    "corrections": {
+      "title": "Corrections log",
+      "loading": "Loading the log…",
+      "empty": "No corrections yet.",
+      "failed": "Couldn't load the log.",
+      "entry": "{{zone}}: {{old}} → {{new}}",
+      "actor": {
+        "token": "admin token",
+        "session": "sign-in #{{id}}",
+        "reset": "scheduled reset"
+      }
     }
   }
 }

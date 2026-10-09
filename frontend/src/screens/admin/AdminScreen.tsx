@@ -13,9 +13,10 @@ import CameraDetail from './CameraDetail'
 import Cameras from './Cameras'
 import Login from './Login'
 import SlotEditor from './SlotEditor'
+import Zones from './Zones'
 
 // `#/admin` (frontend.md §2.4), a lazy chunk: the login without a token, else the admin home
-// (session + camera list), `#/admin/cameras/<id>` (camera detail with a snapshot) and
+// (session, camera list, count corrections + log), `#/admin/cameras/<id>` (camera detail with a snapshot) and
 // `#/admin/cameras/<id>/edit` (the slot/line editor).
 // A 401 from any admin call forgets the token (client.ts), which brings the login back.
 
@@ -64,7 +65,7 @@ function AdminHome({ token }: { token: string }) {
         )}
       </div>
       <Cameras />
-      <p className="text-muted">{t('admin.coming_soon')}</p>
+      <Zones />
       <button
         type="button"
         onClick={() => void adminLogout().catch(() => undefined)}

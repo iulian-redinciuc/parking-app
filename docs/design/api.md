@@ -157,8 +157,8 @@ Why not cookies: the frontend and the API can be on different sites (e.g. the Gi
 | PUT | `/api/admin/cameras/{id}/slots` | 7 | Validates, writes `config/slots/<id>.json`, keeps a `.bak`, calls the worker's `/control/reload` |
 | GET / PUT | `/api/admin/cameras/{id}/lines` | 7 | Same, for line files |
 | POST | `/api/admin/cameras/{id}/reference-frame` | 7 | Saves the current frame as the shift-detection reference |
-| POST | `/api/admin/zones/{id}/correct` | 5 | `{"occupied": 37, "note": "manual count"}` → new zone status. `flow` zones only (409 otherwise) |
-| GET | `/api/admin/corrections?limit=50` | 7 | Audit log |
+| POST | `/api/admin/zones/{id}/correct` | 7 | `{"occupied": 37, "note": "manual count"}` → new zone status. `flow` zones only (409 otherwise) |
+| GET | `/api/admin/corrections?limit=50` | 7 | Audit log, newest first |
 
 **Cameras and snapshots** (`parking/api/routes/admin.py`, P7.2):
 - The list comes from each camera's latest health message: `state` is `unknown` (other fields `null`) until a worker has reported. `last_frame_age_s` is the worker's value **plus** the seconds since that message arrived, so a silent worker's frame keeps ageing; `last_health_age_s` is the time since the message itself. `snapshot` is `true` when the camera has a `control_url`. Numbers are rounded to 0.1.
@@ -171,6 +171,12 @@ Why not cookies: the frontend and the API can be on different sites (e.g. the Gi
 - Then the file is written atomically in the slot editor's layout (one slot per line), the previous one kept as `<file>.bak` (git-ignored), and the worker's `/control/reload` is called (5 s). Answer `200 {"saved": "config/slots/cam-ground.json", "backup": true, "reloaded": true, "message": null, "slots": 17}` (`slots` only for slot files). A worker that can't be reached or refuses the file gives `reloaded: false` and its reason in `message`; the file stays saved (the worker reads it when it restarts).
 - After a slot save the API also swaps its own slot ids and `slots`-zone capacities (`StateStore.replace_slot_file`): removed slots stop counting at once, new ones count from the worker's next reading, and the new status is published (`zone_state.source = config`).
 - `POST …/reference-frame` calls the worker's `/control/save-reference`: `200` with the worker's `{"saved", "ts"}`; the worker's `409` (no frame yet) → `409 conflict`; unreachable or any other error → `503 unavailable`.
+
+**Count corrections** (`parking/api/routes/admin.py`, P7.4; built ahead of P5.7):
+- `POST …/zones/{id}/correct` body `{"occupied": int ≥ 0, "note": str ≤ 200 chars (optional, trimmed)}`, unknown keys rejected. Unknown zone `404`; a `slots`/`count` zone `409 conflict` (those are measured from the picture); `occupied` above the zone's capacity or a bad body `422 bad_request`. Nothing changes on an error.
+- On success `FlowCounter.correct` sets the count and resets the confidence counters (confidence 1.0), the zone's `updated_at` becomes now (so a fresh API with no data yet starts answering `/api/status`), a `correction` row (actor `admin-token` or `session:<id>`) and a `zone_state` row (`source: correction`) are written, and the new status is published on `/api/stream` at once. Answer: the zone's `ZoneStatus` (in `?lang=`).
+- `GET …/corrections?limit=50` (1–200, else `422`): `[{"id", "ts", "zone_id", "zone_name", "old_occupied", "new_occupied", "actor", "note"}]`, newest first; `zone_name` in `?lang=` / `Accept-Language` (the id when the zone has left lot.yaml).
+- After a restart a flow zone's confidence continues from its last correction: `corrected_at` = that row's `ts`, events since = `flow_event` rows of the zone after it.
 
 ---
 

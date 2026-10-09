@@ -11,6 +11,7 @@ Camera health (P7.2) comes from the latest worker health messages; a snapshot is
 the worker's `/control/snapshot` (api.md §5.2, `cameras[].control_url`, `WORKER_TOKEN`).
 The slot/line editor (P7.3) reads and writes `config/slots|lines/<camera>.json`, then asks the
 worker to `/control/reload`; the reference frame goes to `/control/save-reference`.
+Count corrections (P7.4) set a `flow` zone's count and are kept in the `correction` audit log.
 """
 
 from __future__ import annotations
@@ -30,16 +31,26 @@ import anyio
 import httpx
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import col, select
 
-from parking.api.deps import ApiError, Runtime, RuntimeDep, public_limit, rate_limit, runtime
+from parking.api.deps import (
+    ApiError,
+    LangDep,
+    Runtime,
+    RuntimeDep,
+    public_limit,
+    rate_limit,
+    runtime,
+)
 from parking.api.deps import token_ok as static_token_ok
 from parking.config import Camera, LineFile, SlotFile
+from parking.core.fusion import NotCorrectableError
+from parking.db import repo
 from parking.db.engine import session_scope
 from parking.db.models import AdminSession
-from parking.messages import format_ts
+from parking.messages import ZoneStatus, format_ts
 
 log = logging.getLogger(__name__)
 
@@ -412,6 +423,66 @@ async def reference_frame(camera_id: str, admin: AdminDep, rt: RuntimeDep) -> di
         raise ApiError(503, "unavailable", f"the worker answered: {_worker_message(r)}")
     log.info("camera %s: reference frame saved by %s", camera_id, admin.actor)
     return r.json()
+
+
+# --- count corrections (P7.4) ---
+
+NOTE_MAX = 200
+
+
+class CorrectBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    occupied: int = Field(ge=0)
+    note: str = Field(default="", max_length=NOTE_MAX)
+
+
+@router.post("/zones/{zone_id}/correct", dependencies=[Depends(public_limit)])
+async def correct_zone(
+    zone_id: str, body: CorrectBody, admin: AdminDep, rt: RuntimeDep, lang: LangDep
+) -> ZoneStatus:
+    """Sets a `flow` zone's count (the entry/exit counter drifts; slots/count zones are
+    measured, so 409). Above the capacity 422. Writes a `correction` row with the caller as
+    actor, resets the zone's confidence and publishes the new status to every app."""
+    if zone_id not in rt.store.capacity:
+        raise ApiError(404, "not_found", f"unknown zone '{zone_id}'")
+    capacity = rt.store.capacity[zone_id]
+    if body.occupied > capacity:
+        raise _bad(f"occupied {body.occupied} is above the zone's capacity ({capacity})")
+    try:
+        await rt.ingestor.correct(zone_id, body.occupied, admin.actor, body.note.strip())
+    except NotCorrectableError as e:
+        raise ApiError(409, "conflict", f"{e}: only entry/exit counts can be corrected") from None
+    return next(z for z in rt.store.status(lang).zones if z.id == zone_id)
+
+
+@router.get("/corrections", dependencies=[Depends(public_limit)])
+async def corrections(
+    _: AdminDep,
+    rt: RuntimeDep,
+    lang: LangDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[dict]:
+    """The audit log, newest first: who, when, old -> new and the note."""
+
+    def load() -> list[dict]:
+        with session_scope(rt.engine) as session:
+            return [row.model_dump() for row in repo.recent_corrections(session, limit)]
+
+    names = {z.id: z.display_name(lang) for z in rt.config.zones}
+    return [
+        {
+            "id": row["id"],
+            "ts": format_ts(row["ts"]),
+            "zone_id": row["zone_id"],
+            "zone_name": names.get(row["zone_id"], row["zone_id"]),
+            "old_occupied": row["old_occupied"],
+            "new_occupied": row["new_occupied"],
+            "actor": row["actor"],
+            "note": row["note"],
+        }
+        for row in await anyio.to_thread.run_sync(load)
+    ]
 
 
 def format_config_json(value: object) -> str:

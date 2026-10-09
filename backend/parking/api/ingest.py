@@ -21,6 +21,7 @@ from parking.config import SlotFile
 from parking.core.fusion import Change, SlotChange, StateStore, ZoneChange
 from parking.db import repo
 from parking.db.engine import session_scope
+from parking.db.models import Correction
 from parking.messages import (
     CameraHealthMsg,
     FlowEventAck,
@@ -56,6 +57,7 @@ class _Pending:
     changes: list[Change] = field(default_factory=list)
     flow: list[tuple[FlowEventMsg, str, bool]] = field(default_factory=list)
     health: list[CameraHealthMsg] = field(default_factory=list)
+    correction: Correction | None = None
 
 
 class Ingestor:
@@ -87,7 +89,7 @@ class Ingestor:
     async def restore(self) -> None:
         """Seed the store from the DB (data-model.md §2); restored zones stay stale."""
         since = self.store.clock.now() - self.store.trend_window
-        slots, zones, samples = await anyio.to_thread.run_sync(self._load, since)
+        slots, zones, samples, corrections = await anyio.to_thread.run_sync(self._load, since)
         counts = {
             zone_id: row.occupied
             for zone_id, row in zones.items()
@@ -96,7 +98,7 @@ class Ingestor:
         updated = {z: row.ts for z, row in zones.items() if z in self.store.capacity}
         trend = {z: s for z, s in samples.items() if z in self.store.capacity}
         async with self._lock:
-            changes = self.store.restore(slots, counts, updated, trend)
+            changes = self.store.restore(slots, counts, updated, trend, corrections)
             self._log(changes)
             self._publish()
         if updated:
@@ -108,7 +110,9 @@ class Ingestor:
             zones = repo.latest_zone_states(session)
             for row in zones.values():
                 session.expunge(row)
-            return slots, zones, repo.zone_samples_since(session, since)
+            samples = repo.zone_samples_since(session, since)
+            corrections = repo.correction_counters(session, self.store.flow)
+            return slots, zones, samples, corrections
 
     # --- inputs ---
 
@@ -181,11 +185,28 @@ class Ingestor:
             changes = self.store.replace_slot_file(camera_id, slot_file)
             await self._commit(_Pending(changes=changes))
 
+    async def correct(self, zone_id: str, occupied: int, actor: str, note: str) -> Correction:
+        """An admin's count for a `flow` zone (P7.4): store -> `correction` + `zone_state`
+        rows -> published. `KeyError` unknown zone, `NotCorrectableError` not a flow zone."""
+        async with self._lock:
+            old, new, changes = self.store.correct(zone_id, occupied)
+            row = Correction(
+                ts=self.store.clock.now(),
+                zone_id=zone_id,
+                old_occupied=old,
+                new_occupied=new,
+                actor=actor,
+                note=note,
+            )
+            log.info("zone %s corrected by %s: %d -> %d", zone_id, actor, old, new)
+            await self._commit(_Pending(changes=changes, correction=row))
+            return row
+
     # --- output ---
 
     async def _commit(self, pending: _Pending) -> None:
         """Write the changes, log them and publish the new status (called with the lock)."""
-        if not (pending.changes or pending.flow or pending.health):
+        if not (pending.changes or pending.flow or pending.health or pending.correction):
             return
         try:
             await anyio.to_thread.run_sync(self._write, pending)
@@ -203,6 +224,10 @@ class Ingestor:
             repo.record_changes(session, pending.changes)
             for msg in pending.health:
                 repo.upsert_camera_health(session, msg)
+            if pending.correction is not None:
+                session.add(pending.correction)
+                session.flush()
+                session.expunge(pending.correction)
 
     def _publish(self) -> None:
         status = self.store.status()
