@@ -176,6 +176,7 @@ frontend/
 | `parking evaluate-flow --video PATH --truth CSV --camera ID` | 5 | Flow accuracy on a clip |
 | `parking push vapid-keys` | 6 | Generate VAPID keys |
 | `parking admin hash-password` | 7 | Argon2 hash for `.env` |
+| `parking health-stats LOG... --camera ID [--since ISO] [--until ISO] [--json]` | 4 | Per lot-local hour p1/median of the logged frame-health metrics and suggested `health:` thresholds ([vision.md §5](vision.md#5-frame-health-parkingvisionhealthpy), P4.4) |
 | `parking db prune` / `parking db aggregate` | 7 | Retention + rollups (also scheduled) |
 | `parking backup --out DIR` | 8 | Consistent SQLite + config backup |
 

@@ -141,6 +141,8 @@ A camera is **`degraded`** if more than 50% of the last 20 frames were unhealthy
 
 Checks run in the table's order and the first match wins (`connect_failed` → `black` → `frozen` → `blurry`). The `frozen` run counts consecutive frame pairs that differ by less than `frozen_diff_max`. **Replay sources** (`file:`, `folder:`) repeat stored images on purpose, so the worker turns the `frozen` check off for them (`FrameHealth(check_frozen=False)`, driven by `FrameSource.replay`). `down` is counted from worker start-up if there has never been a healthy frame.
 
+**Tuning (P4.4).** All three numbers (`mean`, `laplacian_var`, `frame_diff`) are measured on every frame, even when an earlier check already matched, and kept in `FrameHealth.last_metrics`. With `LOG_LEVEL=DEBUG` the occupancy worker logs one line per frame: `health_metrics camera=… ts=<ISO> mean=… lap=… diff=…|- issue=…|-`. `parking health-stats <log> --camera ID` groups those by lot-local hour (frames, p1 and median of each) and suggests `black_mean_max` = ½ × p1 of `mean` and `blur_laplacian_min` = ½ × p1 of `laplacian_var` (below the darkest / softest valid frame), and lowers `frozen_diff_max` to ½ × p1 of `frame_diff` only if real frame-to-frame differences go under it. It uses p1, not the minimum, so a few odd frames don't set the threshold; cut lens-cover tests out with `--since/--until`. It warns if fewer than 24 hours are covered.
+
 ## 6. Camera shift detection (`parking/vision/shift.py`)
 
 A bumped camera makes every slot polygon point at the wrong pixels.

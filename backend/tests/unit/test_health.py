@@ -137,3 +137,26 @@ def test_is_down_counts_from_start_if_never_healthy():
     now = datetime.now(UTC)
     assert not h.is_down(60, now=now)
     assert h.is_down(60, now=now + timedelta(seconds=61))
+
+
+def test_metrics_recorded_on_every_frame():
+    h = FrameHealth()
+    assert h.check(None) == "connect_failed" and h.last_metrics is None
+    img = texture()
+    h.check(frame(img))
+    m1 = h.last_metrics
+    assert m1 is not None and m1.frame_diff is None
+    assert m1.mean == pytest.approx(float(small_gray(img).mean()))
+    assert m1.laplacian_var == pytest.approx(blur_score(small_gray(img)))
+    # black frames still get all three numbers (checks stop at the first match, metrics don't)
+    assert h.check(frame(np.zeros((480, 640, 3), np.uint8), 1)) == "black"
+    m2 = h.last_metrics
+    assert m2.mean == 0 and m2.laplacian_var == 0 and m2.frame_diff == pytest.approx(m1.mean)
+
+
+def test_metrics_without_frozen_check():
+    h = FrameHealth(check_frozen=False)
+    img = texture()
+    h.check(frame(img))
+    h.check(frame(img, 1))
+    assert h.last_metrics.frame_diff == 0

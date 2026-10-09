@@ -60,6 +60,15 @@ docker compose run --rm --no-deps --entrypoint /app/backend/.venv/bin/python vis
 1. Tune the [health thresholds](../design/vision.md#5-frame-health-parkingvisionhealthpy) on real frames: record `mean`, `laplacian_var` and `frame_diff` at noon, dusk, night and in rain (log them at DEBUG for 24 h).
 2. Set `blur_laplacian_min` below the night value; `black_mean_max` below the darkest valid frame.
 
+**How (prepared on the dev Pi):** run the worker with `LOG_LEVEL=DEBUG` in the vision host's `deploy/.env` for 24 h (one `health_metrics …` line per frame), then
+```bash
+docker compose logs --no-color vision-occupancy > /tmp/health.log   # or the log file
+docker compose run --rm --no-deps -v /tmp/health.log:/tmp/health.log \
+  --entrypoint /app/backend/.venv/bin/parking vision-occupancy \
+  health-stats /tmp/health.log --camera cam-ground --until <time you covered the lens>
+```
+Put the suggested values in `cameras[].health` in `lot.yaml` (check the night and rain rows by eye), set `LOG_LEVEL` back to `INFO`, then cover the lens and watch the `health` message turn `black`.
+
 **Done when:** no false `blurry`/`black` during a normal day + night, and covering the lens triggers `black` within 30 s.
 
 ## P4.5: Calibrate slots on the real view

@@ -10,12 +10,15 @@ Each frame is checked on a 320-px-wide grayscale copy, in this order (first matc
 - `blurry`: variance of the Laplacian < `blur_laplacian_min`.
 
 `FrameHealth` also keeps the last `WINDOW` results: `unhealthy_ratio`, `degraded` (> 50% of
-them unhealthy) and `is_down()` (no healthy frame for `stale_after_s`).
+them unhealthy) and `is_down()` (no healthy frame for `stale_after_s`). `last_metrics` holds the
+numbers behind the last check (`mean`, `laplacian_var`, `frame_diff`) so they can be logged and
+the thresholds tuned per camera (P4.4, `parking health-stats`).
 """
 
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -30,6 +33,15 @@ Issue = Literal["black", "frozen", "blurry", "connect_failed"]
 CHECK_WIDTH = 320
 WINDOW = 20
 DEGRADED_RATIO = 0.5
+
+
+@dataclass(frozen=True)
+class HealthMetrics:
+    """What the checks measured on one frame (all on the 320-px grayscale copy)."""
+
+    mean: float
+    laplacian_var: float
+    frame_diff: float | None  # mean abs difference vs the previous frame; None for the first
 
 
 def small_gray(image: np.ndarray, width: int = CHECK_WIDTH) -> np.ndarray:
@@ -50,6 +62,7 @@ class FrameHealth:
         self.cfg = cfg or HealthCfg()
         self.check_frozen = check_frozen
         self.last_issue: Issue | None = None
+        self.last_metrics: HealthMetrics | None = None
         self.last_healthy_at: datetime | None = None
         self._started_at = datetime.now(UTC)
         self._prev: np.ndarray | None = None
@@ -66,25 +79,33 @@ class FrameHealth:
         return issue
 
     def _issue(self, frame: Frame | None) -> Issue | None:
+        self.last_metrics = None
         if frame is None or frame.image is None or frame.image.size == 0:
             return "connect_failed"
         gray = small_gray(frame.image)
-        frozen = self._update_frozen(gray)
-        if gray.mean() < self.cfg.black_mean_max:
+        diff = self._frame_diff(gray)
+        frozen = self._update_frozen(diff)
+        # All three are measured on every frame (not just up to the first match) for tuning.
+        m = self.last_metrics = HealthMetrics(float(gray.mean()), blur_score(gray), diff)
+        if m.mean < self.cfg.black_mean_max:
             return "black"
         if frozen:
             return "frozen"
-        if blur_score(gray) < self.cfg.blur_laplacian_min:
+        if m.laplacian_var < self.cfg.blur_laplacian_min:
             return "blurry"
         return None
 
-    def _update_frozen(self, gray: np.ndarray) -> bool:
+    def _frame_diff(self, gray: np.ndarray) -> float | None:
         prev, self._prev = self._prev, gray
+        if prev is None or prev.shape != gray.shape:
+            return None
+        return float(np.abs(gray - prev).mean())
+
+    def _update_frozen(self, diff: float | None) -> bool:
         if not self.check_frozen:
             return False
-        if prev is not None and prev.shape == gray.shape:
-            still = float(np.abs(gray - prev).mean()) < self.cfg.frozen_diff_max
-            self._still = self._still + 1 if still else 0
+        if diff is not None and diff < self.cfg.frozen_diff_max:
+            self._still += 1
         else:
             self._still = 0
         return self._still >= self.cfg.frozen_frames

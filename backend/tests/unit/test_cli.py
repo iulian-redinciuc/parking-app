@@ -371,3 +371,38 @@ def test_api_runs_the_factory(tmp_path, monkeypatch):
     import os
 
     assert os.environ["PARKING_CONFIG"] == str(lot.resolve())
+
+
+def test_health_stats(tmp_path, monkeypatch):
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    from parking.vision.health import HealthMetrics
+    from parking.vision.health_stats import format_metrics
+
+    _write_lot(tmp_path, monkeypatch)
+    t0 = datetime(2026, 10, 9, tzinfo=UTC)
+    lines = [
+        "x DEBUG "
+        + format_metrics("cam-ground", t0 + timedelta(hours=i), HealthMetrics(m, 100, 2), None)
+        for i, m in enumerate([40, 50, 60, 2])
+    ]
+    lines.append(format_metrics("other", t0, HealthMetrics(1, 1, None), "black"))
+    (tmp_path / "w.log").write_text("\n".join(lines) + "\n")
+    args = ["health-stats", "w.log", "--camera", "cam-ground"]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert "Suggested health" in result.output and "03h" in result.output
+
+    # --until drops the lens-covered frame at 03:00
+    result = runner.invoke(app, [*args, "--json", "--until", "2026-10-09T02:30:00"])
+    assert result.exit_code == 0, result.output
+    out = json.loads(result.output)
+    assert out["all"]["frames"] == 3 and out["all"]["mean"]["min"] == 40
+    assert out["current"]["black_mean_max"] == 12 and out["suggested"]["black_mean_max"] > 12
+
+    result = runner.invoke(
+        app, ["health-stats", "w.log", "--camera", "cam-ground", "--since", "2027-01-01"]
+    )
+    assert result.exit_code == 1 and "LOG_LEVEL=DEBUG" in result.output
+    assert runner.invoke(app, [*args, "--since", "nope"]).exit_code == 2

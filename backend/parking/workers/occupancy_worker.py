@@ -24,6 +24,7 @@ from parking.config import Camera, ConfigError, LotConfig, SlotFile, load_slots
 from parking.messages import CameraHealthMsg, Observation, SlotScore
 from parking.vision.detector import Detection, Detector, FakeDetector
 from parking.vision.health import FrameHealth
+from parking.vision.health_stats import format_metrics
 from parking.vision.pipeline import AnalysisResult, analyze_frame
 from parking.vision.sources import FolderReplaySource, Frame, FrameSource, make_source
 from parking.workers.base import Schedule, Worker, WorkerError, load_camera
@@ -198,6 +199,11 @@ class OccupancyWorker(Worker):
             self._last_frame_at = time.monotonic()
             self._latest = (frame, None)
         issue = self.health.check(frame)
+        if self.health.last_metrics is not None and log.isEnabledFor(logging.DEBUG):
+            assert frame is not None
+            log.debug(
+                "%s", format_metrics(self.camera_id, frame.ts, self.health.last_metrics, issue)
+            )
         if issue:
             self._summary.unhealthy += 1
             log.debug("%s: frame skipped: %s", self.camera_id, issue)

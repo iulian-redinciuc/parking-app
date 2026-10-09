@@ -639,6 +639,74 @@ def benchmark(
     typer.echo(f"report -> {json_path}")
 
 
+@app.command("health-stats")
+def health_stats(
+    logs: Annotated[
+        list[Path], typer.Argument(help="Worker log files with LOG_LEVEL=DEBUG ('-' = stdin).")
+    ],
+    camera: Annotated[str, typer.Option(help="Occupancy camera id in the config.")],
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    since: Annotated[
+        str | None, typer.Option(help="Ignore frames before this ISO time (e.g. a lens test).")
+    ] = None,
+    until: Annotated[str | None, typer.Option(help="Ignore frames after this ISO time.")] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON instead of a table.")] = False,
+) -> None:
+    """Summarise logged frame-health metrics per lot-local hour and suggest thresholds (P4.4)."""
+    import sys
+    from datetime import UTC, datetime
+
+    from parking.vision.health_stats import parse_lines, report, suggest, summarize
+
+    lot, cam, _ = _occupancy_camera(config, camera, "health-stats")
+
+    def when(value: str | None, name: str) -> datetime | None:
+        if value is None:
+            return None
+        try:
+            t = datetime.fromisoformat(value)
+        except ValueError:
+            raise typer.BadParameter("not an ISO time", param_hint=name) from None
+        return t if t.tzinfo else t.replace(tzinfo=UTC)
+
+    lo, hi = when(since, "--since"), when(until, "--until")
+
+    def lines():
+        for path in logs:
+            if str(path) == "-":
+                yield from sys.stdin
+                continue
+            if not path.is_file():
+                _fail(f"{path}: no such file")
+            with path.open(errors="replace") as f:
+                yield from f
+
+    records = [
+        r
+        for r in parse_lines(lines())
+        if r.camera == camera and (lo is None or r.ts >= lo) and (hi is None or r.ts <= hi)
+    ]
+    if not records:
+        _fail(
+            f"no health_metrics lines for camera '{camera}' (run the worker with LOG_LEVEL=DEBUG)"
+        )
+    hours, total = summarize(records, lot.lot.timezone)
+    if as_json:
+        out = {
+            "camera": camera,
+            "timezone": lot.lot.timezone,
+            "hours": {f"{h:02d}": g.as_dict() for h, g in hours.items()},
+            "all": total.as_dict(),
+            "suggested": suggest(total, cam.health),
+            "current": cam.health.model_dump(
+                include={"black_mean_max", "blur_laplacian_min", "frozen_diff_max"}
+            ),
+        }
+        typer.echo(json.dumps(out, indent=2))
+    else:
+        typer.echo(report(hours, total, cam.health))
+
+
 @worker_app.command("occupancy")
 def worker_occupancy(
     camera: Annotated[str, typer.Option(help="Occupancy camera id in the config.")],
