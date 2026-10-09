@@ -183,6 +183,8 @@ RTSP sub-stream (640×360, ~10 fps)
 - Active when the largest contour area is ≥ `motion_min_area_px` (scaled to the downscale).
 - Stay active for 2 s after motion stops, so a car that stops on the ramp keeps being tracked.
 
+As built (P5.3): the ROI's bounding box (the line file's `roi` scaled from its `image_size` to the frame; no ROI = the whole frame) is cropped, blacked out outside the polygon and scaled to ≤ 320 px wide; the foreground is opened with a 3×3 kernel before the contours. `motion_min_area_px` is in **pixels of the line file's `image_size`** (the frame's own pixels without a line file), so it means the same on any stream resolution. The first frame only teaches the background; a frame of another size, or `reset()` (reconnect/reload), starts over. `update(image, ts)` returns `active`, `moving` (motion in this frame) and the largest area. About 3 ms per 640×360 frame on the dev Pi. `parking motion-check --camera ID [--source URI] [--seconds 3600] [--max-ratio 0.2]` runs the gate over a camera or a recording (frame time, so `video:…?realtime=false` covers its own hour) and prints the active share and bursts; exit 1 when the share is ≥ `--max-ratio`.
+
 ### 7.3 Two-line counter (`parking/vision/flow.py`)
 
 For each track keep: which side of line A and line B its **anchor point** (bottom-centre of the box) is on, plus the order in which it crossed.

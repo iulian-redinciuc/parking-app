@@ -850,6 +850,75 @@ def stream_check(
         raise typer.Exit(1)
 
 
+@app.command("motion-check")
+def motion_check(
+    camera: Annotated[str, typer.Option(help="Flow camera id in the config, e.g. cam-ramp.")],
+    source: Annotated[
+        str | None,
+        typer.Option(help="Source URI instead of the camera's, e.g. video:data/recordings/x.mp4."),
+    ] = None,
+    seconds: Annotated[float, typer.Option(help="Frame time to cover, from the first frame.")] = (
+        3600.0
+    ),
+    max_ratio: Annotated[
+        float, typer.Option(help="Exit 1 when the gate is active for this share or more.")
+    ] = 0.20,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    as_json: Annotated[bool, typer.Option("--json", help="Print the stats as JSON.")] = False,
+) -> None:
+    """Run the motion gate over a flow camera or a recording and log how often it's active (P5.3).
+
+    Uses the camera's `flow.motion_min_area_px` and its line file's ROI (whole frame if the
+    line file is missing). For a recording pass `--source video:<file>?realtime=false`.
+    """
+    from parking.config import ConfigError, load_lines
+    from parking.vision.motion import MotionGate, measure_motion
+    from parking.vision.sources import make_source
+
+    if seconds <= 0 or not 0 < max_ratio <= 1:
+        raise typer.BadParameter("--seconds > 0 and 0 < --max-ratio ≤ 1")
+    _, cam, root = _camera(config, camera)
+    if cam.role != "flow":
+        _fail(f"camera '{camera}' is an {cam.role} camera; motion-check needs a flow camera")
+    lines = None
+    path = _resolve(cam.lines_file, root)
+    try:
+        lines = load_lines(path)
+    except (ConfigError, ValueError, OSError) as e:
+        typer.echo(f"warning: no usable line file ({e}); the gate watches the whole frame")
+    try:
+        src = make_source(source or cam.source, root)
+    except ValueError as e:
+        _fail(str(e))
+    gate = MotionGate(cam.flow.motion_min_area_px, lines)
+    minute = [-1]
+
+    def show(elapsed: float, res) -> None:
+        if not as_json and int(elapsed // 60) != minute[0]:
+            minute[0] = int(elapsed // 60)
+            typer.echo(f"{elapsed:7.0f} s  {'active' if res.active else 'idle'}")
+
+    try:
+        stats = measure_motion(src, gate, seconds, on_frame=show)
+    finally:
+        src.close()
+    if not stats.frames:
+        _fail("no frames from the source")
+    ok = stats.ratio < max_ratio
+    if as_json:
+        typer.echo(json.dumps(stats.to_dict() | {"max_ratio": max_ratio, "ok": ok}))
+    else:
+        typer.echo(
+            f"{stats.frames} frames over {stats.seconds:.0f} s: gate active "
+            f"{stats.ratio:.1%} of frames in {stats.bursts} burst(s) "
+            f"(limit {max_ratio:.0%}): {'ok' if ok else 'too often'}"
+        )
+    if stats.seconds < 0.95 * seconds:
+        typer.echo(f"warning: only {stats.seconds:.0f} of {seconds:g} s of frames")
+    if not ok:
+        raise typer.Exit(1)
+
+
 @app.command("lines-check")
 def lines_check(
     camera: Annotated[str, typer.Option(help="Flow camera id in the config, e.g. cam-ramp.")],

@@ -80,6 +80,7 @@ backend/
 │   │   ├── shift.py             # camera shift detection vs reference frame (ORB)
 │   │   ├── annotate.py          # draw slots, detections, lines, totals on a frame
 │   │   ├── lines.py             # line-file checks + A/B/IN overlay (`parking lines-check`)
+│   │   ├── motion.py            # MotionGate (MOG2 on the ROI, 2 s hold-over) + `motion-check` stats
 │   │   ├── bootstrap.py         # propose slots from detections
 │   │   └── evaluate.py          # metrics for occupancy and flow
 │   ├── workers/
@@ -174,6 +175,7 @@ frontend/
 | `parking benchmark --image PATH [--runs 20] [--warmup 3] [--runtimes pytorch,ncnn] [--imgsz 640,1280] [--models yolo11n,yolo11n-seg] [--camera cam-ground]` | 1 | Median/p95 ms and peak RSS per runtime × size × model, plus the appearance scorer ([vision.md §11](vision.md#11-runtimes-and-performance)) |
 | `parking worker occupancy --camera ID [--print] [--fake-detector] [--control-port 9000] [--control-host 0.0.0.0] [--max-frames N]` | 2 | Run the occupancy worker (`--print`: JSON lines to stdout, nothing sent; `--fake-detector` / `PARKING_FAKE_DETECTOR=1`: `<image>.json` sidecars next to replayed images) |
 | `parking lines-check --camera ID [--image FILE] [--out FILE]` | 5 | Check a flow camera's line file (config.md §3) and draw ROI, A/B and the IN arrow on the reference frame (default `out/lines/<camera>.jpg`); exit 1 lists what to fix (P5.1) |
+| `parking motion-check --camera ID [--source URI] [--seconds 3600] [--max-ratio 0.2] [--json]` | 5 | Run the motion gate (vision.md §7.2) over a flow camera or a recording and print the share of frames it's active and the bursts; exit 1 when the share is ≥ `--max-ratio` (P5.3) |
 | `parking worker flow --camera ID` | 5 | Run the flow worker |
 | `parking api [--config config/lot.yaml] [--host 127.0.0.1] [--port 8000]` | 2 | Run the API (uvicorn); start-up runs `db upgrade`, restores the state from the DB and starts the 1 s tick |
 | `parking db upgrade` | 2 | Apply Alembic migrations |

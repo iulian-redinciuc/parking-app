@@ -50,7 +50,13 @@ Without Camera A, `backend/scripts/fake_rtsp.py` (run where FFmpeg is, e.g. the 
 
 Implement [vision.md §7.2](../design/vision.md#72-motion-gate-parkingvisionmotionpy). Tests: a static synthetic scene → inactive; a moving rectangle → active; the hold-over keeps it active for 2 s after the motion stops.
 
-**Done when:** on a recorded clip, the gate is active for < 20% of an off-peak hour (log the ratio).
+As built: `motion_min_area_px` is in pixels of the line file's `image_size`; details in vision.md §7.2. To check an off-peak hour of a P5.2 recording:
+
+```bash
+parking motion-check --camera cam-ramp --source "video:data/recordings/cam-ramp-<date-time>.mp4?realtime=false"
+```
+
+**Done when:** on a recorded clip, the gate is active for < 20% of an off-peak hour (log the ratio): `motion-check` prints the share and exits 0.
 
 ## P5.4: Tracker integration
 **Files:** `parking/vision/tracking.py`

@@ -98,7 +98,7 @@ cameras:
       use_masks: false
     flow:
       min_track_frames: 5
-      motion_min_area_px: 1500
+      motion_min_area_px: 1500     # motion gate: px² at the line file's image_size
 
 api:
   stale_after_s: 60
