@@ -131,6 +131,17 @@
       "rate_limited": "Too many tries. Please wait a while and try again.",
       "gone": "This device isn't registered for notifications any more. Enable them again.",
       "failed": "That didn't work. Check your connection and try again."
+    },
+    "admin": "Receive admin alerts",
+    "admin_hint": "On this device: a camera down or shifted, stale data, an entry/exit count that keeps hitting its limit. At most one per issue per hour, plus a \"resolved\".",
+    "admin_error": "Couldn't load or save the admin alert setting. Try again.",
+    "admin_issues": "Open issues",
+    "admin_no_issues": "None right now.",
+    "admin_issue": {
+      "camera_down": "Camera {{subject}} down since {{time}}",
+      "camera_shifted": "Camera {{subject}} shifted since {{time}}",
+      "stale": "{{subject}}: no fresh data since {{time}}",
+      "clamps": "{{subject}}: entry/exit count off since {{time}}"
     }
   },
   "admin": {

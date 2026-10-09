@@ -81,6 +81,7 @@ Migration `0005` (P7.5), primary key `(zone_id, bucket_ts)`. `total` = the sum o
 | last_sent_at | datetime null | |
 | last_sent_free | int null | for "changed significantly" checks: the watched zones' summed free count in the last on-my-way push |
 | last_sent_level | text null | |
+| admin_alerts | bool | gets `admin_alert` pushes; set by a logged-in admin (`PUT /api/admin/alerts`); migration `0006` (P7.8) |
 | failures | int | consecutive send failures; delete at 404/410 or ≥ 5 |
 
 ### `notification_log`

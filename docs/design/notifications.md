@@ -82,6 +82,24 @@ As built (P6.7): rules in `parking/push/rules.py`, jobs in `parking/push/schedul
 - **Almost full** (`almost_full_zones`, `AlmostFullNotifier`): an ingest hook next to the on-my-way one. A watched zone (`prefs.zones`, all when unset) counts when its level gets **worse** into `almost_full` or `full` (`filling → almost_full`, `almost_full → full`, `plenty → full`; getting better, an unchanged level, a stale zone or the start-up restore don't). The 2 h cooldown is the last `almost_full` row with status `sent` in `notification_log`, so a quiet-hours skip doesn't start it. `Urgency: high`, `kind: almost_full`, the normal status payload.
 - Neither touches `last_sent_free` / `last_sent_level` (the on-my-way "last push"). The two hooks and the reminder job share one lock, so their DB updates never race; prefs are JSON, so the subscriptions are filtered in Python (fine for hundreds).
 
+### 5.1 Admin alerts (P7.8)
+
+For the people running the lot, not the drivers. A logged-in admin turns on **Receive admin alerts** on the Alerts screen of a device with push enabled; that sets `push_subscription.admin_alerts` ([api.md §4](api.md#4-admin-endpoints)). `AdminAlertMonitor` (`parking/push/admin_alerts.py`) runs in the API every 10 s when push is configured, behind the same lock as the other push dispatches:
+
+| Issue (`kind:<id>`) | Condition | Alert after |
+|---------------------|-----------|-------------|
+| `camera_down:<camera>` | the camera's latest health is `down` (the worker's own, after `stale_after_s` without a healthy frame, or the API's after 30 s of silence) | 2 min |
+| `camera_shifted:<camera>` | its latest health issue is `shifted` and it isn't down | at once |
+| `stale:<zone>` | the zone is stale, has had data before, and none of its cameras is down (that's already the camera alert) | 5 min |
+| `clamps:<zone>` | more than 3 clamped entry/exit events (`flow_event.applied = false`) today, lot-local day, counted after the zone's last correction | at once |
+
+- The grace time counts from the first check that saw the condition, continuously; it clearing resets it.
+- **One alert per issue per hour:** `kind: admin_alert`, `Urgency: high`. While the issue lasts the alert repeats hourly (same tag, so it replaces the last one); an issue that clears and comes back within the hour of its last alert waits for that hour.
+- **Resolved:** when an issue that got an alert clears, one push "…is back up / live data again / count fixed" with the time span, `Urgency: normal`, same tag. An issue that cleared before its alert sends nothing.
+- Quiet hours and the drivers' prefs don't apply. Text is English; zone names follow the subscription's `lang`, times its `tz`.
+- The state is in memory (per API process): after a restart an issue still there alerts again. Every attempt is a `notification_log` row like any push.
+- A camera unplugged reaches the API as `down` after `stale_after_s` (60 s) plus up to one 10 s heartbeat, so the alert lands ~3 min after the unplug.
+
 ## 6. Test matrix (Phase 6)
 
 | Device | Browser | Install? | Push | Tier 1 | Tier 2 | Tier 3 |

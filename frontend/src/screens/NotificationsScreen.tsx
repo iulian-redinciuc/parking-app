@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getLot } from '../api/client'
+import {
+  getAdminAlerts,
+  getAdminToken,
+  getLot,
+  onAdminTokenChange,
+  setAdminAlerts,
+  type AdminIssue,
+} from '../api/client'
 import { IS_MOCK } from '../api/base'
 import type { LotInfo } from '../api/types'
 import InstallHint from '../components/InstallHint'
@@ -20,6 +27,7 @@ import {
   saveLocalPrefs,
   sendTest,
   startOnMyWay,
+  storedEndpoint,
   subscribe,
   unsubscribe,
   updatePrefs,
@@ -29,7 +37,8 @@ import {
 
 // The Alerts screen (frontend.md §2.2, notifications.md §2): never asks for permission until
 // "Enable notifications" is tapped; iPhone Safari outside the installed app gets the install hint.
-// Settings save themselves with a PATCH 500 ms after the last change.
+// Settings save themselves with a PATCH 500 ms after the last change. A logged-in admin also gets
+// "Receive admin alerts" for this device's subscription (P7.8).
 
 type View = 'checking' | 'unsupported' | 'ios-not-installed' | 'default' | 'denied' | 'subscribed'
 
@@ -302,6 +311,8 @@ function PushSettings({ onGone }: { onGone: () => void }) {
         )}
       </fieldset>
 
+      <AdminAlertsSetting />
+
       <p className="min-h-5 text-sm text-muted" aria-live="polite">
         {save === 'saving' && t('alerts.saving')}
         {save === 'saved' && t('alerts.saved')}
@@ -326,6 +337,83 @@ function PushSettings({ onGone }: { onGone: () => void }) {
 }
 
 const clockNow = () => Date.now()
+
+/** "Receive admin alerts" (notifications.md §5.1): only while an admin is logged in on this
+ * device; the flag lives on this device's push subscription. Lists the open issues too. */
+function AdminAlertsSetting() {
+  const { t, i18n } = useTranslation()
+  const token = useSyncExternalStore(onAdminTokenChange, getAdminToken, () => null)
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [issues, setIssues] = useState<AdminIssue[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const endpoint = storedEndpoint()
+
+  useEffect(() => {
+    if (!token || !endpoint) return
+    let live = true
+    getAdminAlerts(endpoint)
+      .then((a) => {
+        if (!live) return
+        setEnabled(a.enabled)
+        setIssues(a.issues)
+      })
+      .catch(() => live && setError(t('alerts.admin_error')))
+    return () => {
+      live = false
+    }
+  }, [token, endpoint, t])
+
+  if (!token || !endpoint) return null
+
+  const change = async (on: boolean) => {
+    setEnabled(on)
+    setError(null)
+    try {
+      setEnabled(await setAdminAlerts(endpoint, on))
+    } catch {
+      setEnabled(!on)
+      setError(t('alerts.admin_error'))
+    }
+  }
+
+  const time = (iso: string) =>
+    new Intl.DateTimeFormat(i18n.language, { hour: '2-digit', minute: '2-digit' }).format(
+      new Date(iso),
+    )
+
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-xl bg-surface p-4">
+      <legend className="sr-only">{t('alerts.admin')}</legend>
+      <Toggle
+        label={t('alerts.admin')}
+        hint={t('alerts.admin_hint')}
+        checked={enabled === true}
+        onChange={(on) => void change(on)}
+      />
+      {error && (
+        <p role="alert" className="text-sm text-bad">
+          {error}
+        </p>
+      )}
+      {enabled !== null && (
+        <div className="text-sm">
+          <h3 className="font-semibold">{t('alerts.admin_issues')}</h3>
+          {issues.length === 0 ? (
+            <p className="text-muted">{t('alerts.admin_no_issues')}</p>
+          ) : (
+            <ul className="list-disc pl-5">
+              {issues.map((i) => (
+                <li key={i.key}>
+                  {t(`alerts.admin_issue.${i.kind}`, { subject: i.subject, time: time(i.since) })}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </fieldset>
+  )
+}
 
 /**
  * *I'm on my way* (Tier 2, notifications.md §4): 15 / 30 / 60 min chips start the server's updates

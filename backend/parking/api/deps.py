@@ -23,6 +23,7 @@ from parking.api.jobs import MaintenanceJobs
 from parking.api.sse import Broadcaster
 from parking.config import LotConfig, Settings
 from parking.core.fusion import StateStore
+from parking.push.admin_alerts import AdminAlertMonitor
 from parking.push.on_my_way import OnMyWayNotifier
 from parking.push.scheduler import AlmostFullNotifier, PushScheduler
 from parking.push.sender import PushSender
@@ -64,6 +65,7 @@ class Runtime:
     root: Path = Path(".")  # the app root: `config/`, `data/`, `deploy/`
     jobs: MaintenanceJobs | None = None  # rollups + retention (data-model.md §4)
     cache: TtlCache | None = None  # history + forecast responses (60 s)
+    alerts: AdminAlertMonitor | None = None  # admin alerts (None without VAPID keys)
 
     def path(self, path: Path) -> Path:
         """A relative config path (e.g. `slots_file`) under the app root, whatever the cwd."""

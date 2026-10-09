@@ -12,6 +12,7 @@ the worker's `/control/snapshot` (api.md §5.2, `cameras[].control_url`, `WORKER
 The slot/line editor (P7.3) reads and writes `config/slots|lines/<camera>.json`, then asks the
 worker to `/control/reload`; the reference frame goes to `/control/save-reference`.
 Count corrections (P7.4) set a `flow` zone's count and are kept in the `correction` audit log.
+Admin alerts (P7.8): a logged-in admin opts a push subscription in; the open issues are listed.
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ from parking.config import Camera, LineFile, SlotFile
 from parking.core.fusion import NotCorrectableError
 from parking.db import repo
 from parking.db.engine import session_scope
-from parking.db.models import AdminSession
+from parking.db.models import AdminSession, PushSubscription
 from parking.messages import ZoneStatus, format_ts
 
 log = logging.getLogger(__name__)
@@ -512,3 +513,56 @@ def format_config_json(value: object) -> str:
         return inline(v)
 
     return fmt(value, "") + "\n"
+
+
+# --- admin alerts (P7.8, notifications.md §5.1) ---
+
+ENDPOINT_MAX = 2048
+
+
+class AlertsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint: str = Field(min_length=1, max_length=ENDPOINT_MAX)
+    enabled: bool
+
+
+def _subscription(rt: Runtime, endpoint: str, enabled: bool | None = None) -> bool | None:
+    """The subscription's `admin_alerts` (set to `enabled` first if given); None = unknown."""
+    with session_scope(rt.engine) as session:
+        query = select(PushSubscription).where(PushSubscription.endpoint == endpoint)
+        row = session.exec(query).first()
+        if row is None:
+            return None
+        if enabled is not None:
+            row.admin_alerts = enabled
+            row.last_seen_at = rt.store.clock.now()
+        return row.admin_alerts
+
+
+@router.get("/alerts", dependencies=[Depends(public_limit)])
+async def alerts(
+    _: AdminDep,
+    rt: RuntimeDep,
+    endpoint: Annotated[str | None, Query(max_length=ENDPOINT_MAX)] = None,
+) -> dict:
+    """Whether this browser's subscription gets admin alerts (`enabled`, false for an unknown
+    or missing endpoint), whether push is on (`available`) and the open issues."""
+    enabled = await anyio.to_thread.run_sync(_subscription, rt, endpoint) if endpoint else None
+    now = rt.store.clock.now()
+    issues = rt.alerts.tracker.issues(now) if rt.alerts is not None else []
+    for issue in issues:
+        issue["since"] = format_ts(issue["since"])
+        if issue["last_alert_at"] is not None:
+            issue["last_alert_at"] = format_ts(issue["last_alert_at"])
+    return {"enabled": bool(enabled), "available": rt.alerts is not None, "issues": issues}
+
+
+@router.put("/alerts", dependencies=[Depends(public_limit)])
+async def set_alerts(body: AlertsBody, admin: AdminDep, rt: RuntimeDep) -> dict:
+    """Turns admin alerts on or off for a push subscription (this browser's); 404 unknown."""
+    enabled = await anyio.to_thread.run_sync(_subscription, rt, body.endpoint, body.enabled)
+    if enabled is None:
+        raise ApiError(404, "not_found", "unknown subscription endpoint")
+    log.info("admin alerts %s for a subscription by %s", "on" if enabled else "off", admin.actor)
+    return {"enabled": enabled}

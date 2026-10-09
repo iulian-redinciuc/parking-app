@@ -38,7 +38,7 @@ def status_payload(
         }
     shown = [z for z in status.zones if not zones or z.id in zones] or status.zones
     parts = [f"{z.name} {'≈' if z.method == 'flow' else ''}{z.free}" for z in shown]
-    parts.append(_local_time(status.updated_at, tz))
+    parts.append(local_time(status.updated_at, tz))
     return {
         "title": f"Parking: {status.total.free} free",
         "body": " · ".join(parts),
@@ -49,7 +49,7 @@ def status_payload(
     }
 
 
-def _local_time(ts: datetime, tz: str) -> str:
+def local_time(ts: datetime, tz: str) -> str:
     try:
         return ts.astimezone(ZoneInfo(tz)).strftime("%H:%M")
     except (ValueError, KeyError):  # a tz that went away from the tz database

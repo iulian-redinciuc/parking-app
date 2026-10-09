@@ -161,6 +161,8 @@ Why not cookies: the frontend and the API can be on different sites (e.g. the Gi
 | POST | `/api/admin/cameras/{id}/reference-frame` | 7 | Saves the current frame as the shift-detection reference |
 | POST | `/api/admin/zones/{id}/correct` | 7 | `{"occupied": 37, "note": "manual count"}` → new zone status. `flow` zones only (409 otherwise) |
 | GET | `/api/admin/corrections?limit=50` | 7 | Audit log, newest first |
+| GET | `/api/admin/alerts?endpoint=…` | 7 | `{"enabled": bool, "available": bool, "issues": [{"key","kind","subject","detail","since","active","last_alert_at"}]}` (see below) |
+| PUT | `/api/admin/alerts` | 7 | `{"endpoint":"…","enabled":true}` → `{"enabled":true}`; unknown endpoint `404` |
 
 **Cameras and snapshots** (`parking/api/routes/admin.py`, P7.2):
 - The list comes from each camera's latest health message: `state` is `unknown` (other fields `null`) until a worker has reported. `last_frame_age_s` is the worker's value **plus** the seconds since that message arrived, so a silent worker's frame keeps ageing; `last_health_age_s` is the time since the message itself. `snapshot` is `true` when the camera has a `control_url`. Numbers are rounded to 0.1.
@@ -179,6 +181,10 @@ Why not cookies: the frontend and the API can be on different sites (e.g. the Gi
 - On success `FlowCounter.correct` sets the count and resets the confidence counters (confidence 1.0), the zone's `updated_at` becomes now (so a fresh API with no data yet starts answering `/api/status`), a `correction` row (actor `admin-token` or `session:<id>`) and a `zone_state` row (`source: correction`) are written, and the new status is published on `/api/stream` at once. Answer: the zone's `ZoneStatus` (in `?lang=`).
 - `GET …/corrections?limit=50` (1–200, else `422`): `[{"id", "ts", "zone_id", "zone_name", "old_occupied", "new_occupied", "actor", "note"}]`, newest first; `zone_name` in `?lang=` / `Accept-Language` (the id when the zone has left lot.yaml).
 - After a restart a flow zone's confidence continues from its last correction: `corrected_at` = that row's `ts`, events since = `flow_event` rows of the zone after it.
+
+**Admin alerts** (`parking/api/routes/admin.py` + `parking/push/admin_alerts.py`, P7.8; rules in [notifications.md §5.1](notifications.md#51-admin-alerts-p78)):
+- `PUT /api/admin/alerts` sets `push_subscription.admin_alerts` for the subscription with that `endpoint` (this browser's, from the Alerts screen); unknown keys `422`, unknown endpoint `404`. Re-subscribing the same endpoint (`POST /api/push/subscriptions`) keeps the flag; a new endpoint (the browser renewed it) starts without it.
+- `GET /api/admin/alerts`: `enabled` is that subscription's flag (`false` for no or an unknown `endpoint`), `available` whether push is configured (no VAPID keys = no alerts), `issues` the open ones, oldest first: `kind` `camera_down | camera_shifted | stale | clamps`, `subject` the camera or zone id, `detail` the camera issue or the clamp count, `since` when first seen, `active` past its grace period, `last_alert_at` the last alert for that issue (or `null`).
 
 ---
 
@@ -263,7 +269,7 @@ Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `
   "kind": "on_my_way"
 }
 ```
-`tag` makes a new notification replace the previous one instead of stacking. `kind`: `test | on_my_way | schedule | almost_full | admin_alert`.
+`tag` makes a new notification replace the previous one instead of stacking. `kind`: `test | on_my_way | schedule | almost_full | admin_alert`. An `admin_alert` (P7.8) has an English title starting `Admin: `, `level: null`, a per-issue `tag` (`admin-<kind>:<id>`, so its hourly repeat and its "resolved" replace it), `url` the camera page (`#/admin/cameras/<id>`) or `#/admin`, plus `"issue": "<kind>:<id>"` and `"resolved": bool`.
 
 ---
 

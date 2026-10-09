@@ -139,6 +139,7 @@ class PushSubscription(SQLModel, table=True):
     last_sent_free: int | None = None
     last_sent_level: str | None = None
     failures: int = 0  # consecutive send failures; deleted at 404/410 or >= 5
+    admin_alerts: bool = False  # set by a logged-in admin: gets `admin_alert` pushes (P7.8)
 
     def subscription_info(self) -> dict[str, Any]:
         """The `PushSubscription` JSON shape pywebpush expects."""

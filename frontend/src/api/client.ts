@@ -691,3 +691,67 @@ export async function getCorrections(limit = 50, options?: RequestOptions): Prom
   }
   return adminRequest(`/api/admin/corrections?limit=${limit}`, isCorrectionList, options)
 }
+
+// --- admin alerts (P7.8) ---
+
+/** One open issue of `GET /api/admin/alerts` (notifications.md §5.1). */
+export interface AdminIssue {
+  key: string
+  kind: 'camera_down' | 'camera_shifted' | 'stale' | 'clamps'
+  subject: string
+  detail: string | null
+  since: string
+  /** Past its grace period (2 min down, 5 min stale). */
+  active: boolean
+  last_alert_at: string | null
+}
+
+export interface AdminAlerts {
+  /** This browser's push subscription gets admin alerts. */
+  enabled: boolean
+  /** Push is configured on the server. */
+  available: boolean
+  issues: AdminIssue[]
+}
+
+const isAdminAlerts = (x: unknown): x is AdminAlerts =>
+  isObject(x) &&
+  typeof x.enabled === 'boolean' &&
+  typeof x.available === 'boolean' &&
+  Array.isArray(x.issues)
+const isEnabled = (x: unknown): x is { enabled: boolean } =>
+  isObject(x) && typeof x.enabled === 'boolean'
+
+// The mock build keeps the flag in memory.
+let mockAdminAlerts = false
+
+/** `GET /api/admin/alerts?endpoint=`: whether this subscription gets admin alerts. */
+export async function getAdminAlerts(
+  endpoint: string,
+  options?: RequestOptions,
+): Promise<AdminAlerts> {
+  if (IS_MOCK && !options?.base) {
+    mockAdminOnly()
+    return { enabled: mockAdminAlerts, available: true, issues: [] }
+  }
+  const path = `/api/admin/alerts?endpoint=${encodeURIComponent(endpoint)}`
+  return adminRequest(path, isAdminAlerts, options)
+}
+
+/** `PUT /api/admin/alerts`: turns admin alerts on/off for a subscription (404 unknown). */
+export async function setAdminAlerts(
+  endpoint: string,
+  enabled: boolean,
+  options?: RequestOptions,
+): Promise<boolean> {
+  if (IS_MOCK && !options?.base) {
+    mockAdminOnly()
+    mockAdminAlerts = enabled
+    return enabled
+  }
+  const saved = await adminRequest('/api/admin/alerts', isEnabled, options, {
+    method: 'PUT',
+    body: { endpoint, enabled },
+  })
+  return saved.enabled
+}

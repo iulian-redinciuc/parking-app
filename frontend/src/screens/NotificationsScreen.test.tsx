@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { adminLogin, getAdminAlerts, MOCK_ADMIN_PASSWORD, setAdminToken } from '../api/client'
 import * as push from '../lib/push'
 import NotificationsScreen from './NotificationsScreen'
 
@@ -108,6 +109,28 @@ describe('NotificationsScreen', () => {
 
   describe('when subscribed', () => {
     beforeEach(() => localStorage.setItem('parking.pushEndpoint', push.MOCK_ENDPOINT))
+
+    it('offers admin alerts only to a logged-in admin', async () => {
+      stubPush('granted')
+      const { unmount } = render(<NotificationsScreen />)
+      await screen.findByRole('switch', { name: /Warn when almost full/ })
+      expect(screen.queryByRole('switch', { name: /Receive admin alerts/ })).toBeNull()
+      unmount()
+      await adminLogin(MOCK_ADMIN_PASSWORD)
+      try {
+        render(<NotificationsScreen />)
+        const admin = await screen.findByRole('switch', { name: /Receive admin alerts/ })
+        expect(await screen.findByText('None right now.')).toBeInTheDocument()
+        expect(admin).not.toBeChecked()
+        await act(async () => fireEvent.click(admin))
+        expect(admin).toBeChecked()
+        expect((await getAdminAlerts(push.MOCK_ENDPOINT)).enabled).toBe(true)
+        act(() => setAdminToken(null)) // logged out: the setting goes away
+        expect(screen.queryByRole('switch', { name: /Receive admin alerts/ })).toBeNull()
+      } finally {
+        setAdminToken(null)
+      }
+    })
 
     it('saves a burst of changes with one PATCH 500 ms after the last', async () => {
       stubPush('granted')

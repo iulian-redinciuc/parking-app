@@ -9,6 +9,7 @@ import {
   ApiRequestError,
   apiUrl,
   correctZone,
+  getAdminAlerts,
   getAdminCameras,
   getForecast,
   getHistory,
@@ -23,6 +24,7 @@ import {
   onAdminTokenChange,
   putCameraConfig,
   saveReferenceFrame,
+  setAdminAlerts,
   setAdminToken,
 } from './client'
 import type { ApiError } from './types'
@@ -474,5 +476,41 @@ describe('history and forecast (real API)', () => {
       }),
     )
     expect((await getForecast({}, { base: BASE })).free_expected).toBe(9)
+  })
+})
+
+describe('admin alerts (real API)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setAdminToken(null)
+  })
+
+  it('reads the flag for this endpoint and sets it with a PUT', async () => {
+    setAdminToken('tok')
+    const body = { enabled: true, available: true, issues: [] }
+    let fetch = reply(200, body)
+    vi.stubGlobal('fetch', fetch)
+    expect(await getAdminAlerts('https://push.test/a b', { base: BASE })).toEqual(body)
+    expect((fetch.mock.calls[0] as unknown[])[0]).toBe(
+      'http://api.test/api/admin/alerts?endpoint=https%3A%2F%2Fpush.test%2Fa%20b',
+    )
+    fetch = reply(200, { enabled: false })
+    vi.stubGlobal('fetch', fetch)
+    expect(await setAdminAlerts('https://push.test/a', false, { base: BASE })).toBe(false)
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('http://api.test/api/admin/alerts')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body as string)).toEqual({
+      endpoint: 'https://push.test/a',
+      enabled: false,
+    })
+  })
+
+  it('an unknown subscription is a 404', async () => {
+    setAdminToken('tok')
+    vi.stubGlobal('fetch', reply(404, { error: { code: 'not_found', message: 'unknown' } }))
+    expect(
+      await failure(setAdminAlerts('https://push.test/x', true, { base: BASE })),
+    ).toMatchObject({ status: 404 })
   })
 })

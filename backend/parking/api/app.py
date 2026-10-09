@@ -5,7 +5,8 @@ DB (stale until fresh data, data-model.md §2) and start the 1 s `tick()` task. 
 status goes to the SSE `Broadcaster` (`/api/stream`) and, with push configured, to the
 on-my-way and almost-full rules (`OnMyWayNotifier`, `AlmostFullNotifier`, notifications.md
 §4-5); the minutely reminder job (`PushScheduler`, APScheduler) runs alongside, and so do the
-rollup and retention jobs (`MaintenanceJobs`, data-model.md §4).
+rollup and retention jobs (`MaintenanceJobs`, data-model.md §4) and, with push, the admin
+alert checks every 10 s (`AdminAlertMonitor`, notifications.md §5.1).
 
 Around the routes (api.md §7): CORS for `CORS_ORIGINS` only, gzip for responses over 1 KB
 (Starlette never compresses `text/event-stream`), every error as `{"error": {code, message}}`
@@ -41,6 +42,7 @@ from parking.config import LotConfig, Settings, SlotFile, cli_env, load_config, 
 from parking.core.clock import Clock, SystemClock
 from parking.db.engine import default_url, make_engine, upgrade
 from parking.messages import LotStatus
+from parking.push.admin_alerts import AdminAlertMonitor
 from parking.push.on_my_way import OnMyWayNotifier
 from parking.push.payload import app_url
 from parking.push.scheduler import AlmostFullNotifier, PushScheduler
@@ -111,8 +113,9 @@ def create_app(
     webpush: Callable[..., Any] | None = None,
 ) -> FastAPI:
     """The API. `config_path` is lot.yaml; its folder's parent is the app root (`config/`,
-    `data/`, `deploy/.env`). `tick=False` leaves the tick task, the reminder job and the
-    rollup/retention jobs off (tests call `tick()` / `run_due()` / `run_minutes()`);
+    `data/`, `deploy/.env`). `tick=False` leaves the tick task, the reminder job, the
+    rollup/retention jobs and the admin alert checks off (tests call `tick()` / `run_due()` /
+    `run_minutes()` / `check()`);
     `webpush` replaces pywebpush's sender (tests)."""
     config_path = find_config(config_path)
     root = config_path.resolve().parent.parent
@@ -130,7 +133,7 @@ def create_app(
         store = StateStore(config, clk, load_slot_files(config, root))
         broadcaster = Broadcaster()
         sender = _push_sender(engine, settings, clk, webpush)
-        notifier = almost_full = scheduler = hook = None
+        notifier = almost_full = scheduler = hook = alerts = None
         if sender is not None:
             url = app_url(settings.public_app_url)
             lock = asyncio.Lock()  # one push dispatch at a time
@@ -139,6 +142,7 @@ def create_app(
             scheduler = PushScheduler(
                 engine, sender, config, clk, url, lambda: _current(store), lock
             )
+            alerts = AdminAlertMonitor(engine, sender, config, clk, url, store, lock)
 
             def hook(old, new):
                 notifier.status_changed(old, new)
@@ -160,6 +164,7 @@ def create_app(
             root,
             jobs,
             TtlCache(clk),
+            alerts,
         )
         if settings.worker_token is None:
             log.warning("WORKER_TOKEN is not set: every /internal/* request gets 401")
@@ -169,6 +174,8 @@ def create_app(
             scheduler.start()
         if tick:
             jobs.start()
+        if alerts is not None and tick:
+            alerts.start()
         log.info("API ready: lot %s, %d zone(s), db %s", config.lot.id, len(config.zones), url)
         try:
             yield
@@ -179,6 +186,8 @@ def create_app(
                     await task
             if scheduler is not None:
                 scheduler.shutdown()
+            if alerts is not None:
+                await alerts.shutdown()
             jobs.shutdown()
             if notifier is not None:
                 pending = asyncio.gather(notifier.drain(), almost_full.drain())
