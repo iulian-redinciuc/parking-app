@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router'
 import { ApiRequestError, getCameraSnapshot } from '../../api/client'
 import { useAdminCameras } from '../../hooks/useAdminCameras'
 import { CameraHealth } from './Cameras'
+import ReferenceFrame from './ReferenceFrame'
 
 // One camera (P7.2, frontend.md §2.4): its health and a live snapshot, annotated with the
 // worker's last analysis by default. The JPEG comes with the bearer header and is shown through
@@ -100,6 +101,17 @@ export default function CameraDetail() {
       >
         {busy ? t('admin.camera.loading') : t('admin.camera.refresh')}
       </button>
+      {camera?.snapshot && (
+        <>
+          <Link
+            to="edit"
+            className="flex min-h-11 items-center justify-center rounded-xl bg-surface px-4 font-semibold"
+          >
+            {t(camera.role === 'flow' ? 'admin.camera.edit_lines' : 'admin.camera.edit_slots')}
+          </Link>
+          <ReferenceFrame cameraId={id} />
+        </>
+      )}
     </section>
   )
 }

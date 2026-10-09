@@ -44,7 +44,7 @@ class ZoneState(SQLModel, table=True):
     occupied: int
     free: int
     confidence: float
-    source: str  # observation | health | tick | flow | correction | reset
+    source: str  # observation | health | tick | flow | correction | reset | config
 
 
 class SlotState(SQLModel, table=True):

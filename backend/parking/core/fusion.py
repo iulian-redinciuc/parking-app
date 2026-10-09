@@ -8,6 +8,7 @@ rows when a count changed, `slot_state` rows when a slot flipped) and the SSE br
 - `apply_flow_event(msg)`: one line crossing -> the flow zone's `FlowCounter`.
 - `apply_health(msg)`: camera state -> confidence (`degraded`) and staleness (`down`).
 - `tick()`: once a second; staleness (`stale_after_s` without data) and trend flips.
+- `replace_slot_file(camera_id, slot_file)`: an admin saved new slots (P7.3).
 - `restore(...)`: seeds the state from the DB at start-up; restored zones stay stale until
   fresh data arrives (data-model.md §2).
 
@@ -46,7 +47,7 @@ TREND_BUFFER = timedelta(minutes=20)
 # (confidence when the camera is ok, when it's degraded) per zone method (vision.md §8)
 CAMERA_CONFIDENCE = {"slots": (1.0, 0.6), "count": (0.9, 0.5)}
 
-ChangeSource = Literal["observation", "flow", "health", "tick", "startup"]
+ChangeSource = Literal["observation", "flow", "health", "tick", "startup", "config"]
 
 
 class UnknownCameraError(ValueError):
@@ -171,10 +172,10 @@ class StateStore:
             for cam_id, f in (slot_files or {}).items()
             if any(c.id == cam_id and c.role == "occupancy" for c in config.cameras)
         }
+        self.slot_files = dict(slot_files)
         # camera id -> slot id -> zone id (only slots of zones the camera reports on)
         self._slot_zone: dict[str, dict[str, str]] = {
-            cam_id: {s.id: s.zone for s in f.slots if s.zone in config.camera(cam_id).zones}
-            for cam_id, f in slot_files.items()
+            cam_id: self._zone_map(cam_id, f) for cam_id, f in slot_files.items()
         }
         self.capacity = {
             z.id: config.zone_capacity(z.id, list(slot_files.values())) for z in config.zones
@@ -257,6 +258,21 @@ class StateStore:
                     if self.config.zone(zone_id).method == "flow":
                         self._updated_at[zone_id] = self._updated_at[zone_id] or now
         return self._diff("health")
+
+    def replace_slot_file(self, camera_id: str, slot_file: SlotFile) -> list[Change]:
+        """An admin saved a new slot file (P7.3): new slot ids, zones and `slots` capacities.
+
+        Smoothed states of slots that are gone are dropped; kept ids keep theirs (the worker's
+        next readings correct them)."""
+        self._camera(camera_id, "occupancy")
+        self.slot_files[camera_id] = slot_file
+        self._slot_zone[camera_id] = self._zone_map(camera_id, slot_file)
+        self._slots[camera_id].forget(set(self._slots[camera_id].states) - set(slot_file.ids()))
+        files = list(self.slot_files.values())
+        for zone in self.config.zones:
+            if zone.method == "slots":
+                self.capacity[zone.id] = self.config.zone_capacity(zone.id, files)
+        return self._diff("config")
 
     def tick(self) -> list[Change]:
         """Call every second: zones going stale (or trends shifting) produce changes."""
@@ -351,6 +367,10 @@ class StateStore:
             kind = f"{role} camera" if role else "camera"
             raise UnknownCameraError(f"unknown {kind} '{camera_id}'")
         return camera
+
+    def _zone_map(self, camera_id: str, slot_file: SlotFile) -> dict[str, str]:
+        zones = self.config.camera(camera_id).zones
+        return {s.id: s.zone for s in slot_file.slots if s.zone in zones}
 
     def _zone_cameras(self, zone_id: str):
         method = self.config.zone(zone_id).method

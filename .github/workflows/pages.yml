@@ -5,7 +5,7 @@ name: Deploy preview frontend
 on:
   push:
     branches: [main]
-    paths: ['frontend/**', '.github/workflows/pages.yml']
+    paths: ['frontend/**', 'tools/slot-editor/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:

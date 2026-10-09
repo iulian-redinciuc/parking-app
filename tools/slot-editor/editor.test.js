@@ -19,6 +19,7 @@ import {
   toLabelsFile,
   toLineFile,
   toSlotFile,
+  translatePolys,
   validateSlots,
 } from './editor.js'
 
@@ -165,4 +166,37 @@ test('a slot file from parking bootstrap-slots opens and exports unchanged', () 
   assert.equal(parsed.slots.length, 5)
   assert.deepEqual(validateSlots(parsed.slots), [])
   assert.equal(formatJson(toSlotFile(parsed)), text)
+})
+
+test('translatePolys moves every shape; points past the edge stop at it', () => {
+  const a = [
+    [10, 10],
+    [20, 10],
+    [20, 20],
+  ]
+  const b = [
+    [50, 40],
+    [99, 40],
+    [99, 50],
+  ]
+  assert.deepEqual(translatePolys([a, b], 5.4, -3.6, [100, 100]), [
+    [
+      [15, 6],
+      [25, 6],
+      [25, 16],
+    ],
+    [
+      [55, 36],
+      [99, 36],
+      [99, 46],
+    ],
+  ])
+  assert.deepEqual(translatePolys([a], -15, 0, [100, 100]), [
+    [
+      [0, 10],
+      [5, 10],
+      [5, 20],
+    ],
+  ])
+  assert.deepEqual(translatePolys([], 5, 5, [100, 100]), [])
 })

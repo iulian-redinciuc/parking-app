@@ -10,12 +10,15 @@ import {
   apiUrl,
   getAdminCameras,
   getAdminSession,
+  getCameraConfig,
   getAdminToken,
   getCameraSnapshot,
   getLot,
   getStatus,
   IS_MOCK,
   onAdminTokenChange,
+  putCameraConfig,
+  saveReferenceFrame,
   setAdminToken,
 } from './client'
 import type { ApiError } from './types'
@@ -278,5 +281,77 @@ describe('admin cameras client', () => {
       vi.fn(async () => Promise.reject(new TypeError('offline'))),
     )
     expect((await failure(getCameraSnapshot('cam-ground', { base: BASE }))).code).toBe('network')
+  })
+})
+
+describe('admin slot/line editor client', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setAdminToken(null)
+  })
+
+  const file = { version: 1, camera_id: 'cam-ground', image_size: [640, 360], slots: [] }
+
+  it('GETs and PUTs the slot file with the bearer token', async () => {
+    setAdminToken('tok')
+    const get = reply(200, file)
+    vi.stubGlobal('fetch', get)
+    expect(await getCameraConfig('cam-ground', 'slots', { base: BASE })).toEqual(file)
+    expect((get.mock.calls[0] as unknown[])[0]).toBe(
+      'http://api.test/api/admin/cameras/cam-ground/slots',
+    )
+
+    const saved = {
+      saved: 'config/slots/cam-ground.json',
+      backup: true,
+      reloaded: true,
+      message: null,
+      slots: 0,
+    }
+    const put = reply(200, saved)
+    vi.stubGlobal('fetch', put)
+    expect(await putCameraConfig('cam-ground', 'slots', file, { base: BASE })).toEqual(saved)
+    const [url, init] = put.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('http://api.test/api/admin/cameras/cam-ground/slots')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body as string)).toEqual(file)
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer tok' })
+  })
+
+  it('a rejected file is `bad_request` with the reason; a missing file is 404', async () => {
+    setAdminToken('tok')
+    vi.stubGlobal(
+      'fetch',
+      reply(422, { error: { code: 'bad_request', message: 'slots.0.polygon: self-intersecting' } }),
+    )
+    const error = await failure(putCameraConfig('cam-ground', 'slots', file, { base: BASE }))
+    expect(error).toMatchObject({
+      code: 'bad_request',
+      message: 'slots.0.polygon: self-intersecting',
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      reply(404, { error: { code: 'not_found', message: 'no lines file yet' } }),
+    )
+    expect((await failure(getCameraConfig('cam-ramp', 'lines', { base: BASE }))).status).toBe(404)
+  })
+
+  it('saves the reference frame; 409 before the first frame', async () => {
+    setAdminToken('tok')
+    const fetch = reply(200, { saved: 'data/reference/cam-ground.jpg', ts: '2026-10-09T12:00:00Z' })
+    vi.stubGlobal('fetch', fetch)
+    expect((await saveReferenceFrame('cam-ground', { base: BASE })).saved).toBe(
+      'data/reference/cam-ground.jpg',
+    )
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('http://api.test/api/admin/cameras/cam-ground/reference-frame')
+    expect(init.method).toBe('POST')
+
+    vi.stubGlobal(
+      'fetch',
+      reply(409, { error: { code: 'conflict', message: 'no frame read yet' } }),
+    )
+    expect((await failure(saveReferenceFrame('cam-ground', { base: BASE }))).code).toBe('conflict')
   })
 })

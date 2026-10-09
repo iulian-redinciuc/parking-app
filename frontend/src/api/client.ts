@@ -423,3 +423,141 @@ export async function getCameraSnapshot(
     signal?.removeEventListener('abort', onAbort)
   }
 }
+
+// --- slot / line editor (P7.3) ---
+
+export type CameraConfigKind = 'slots' | 'lines'
+
+/** `PUT …/slots|lines`: saved (the old file kept as `.bak`) and whether the worker reloaded. */
+export interface ConfigSaved {
+  saved: string
+  backup: boolean
+  reloaded: boolean
+  /** Why the worker didn't reload (the file is saved either way). */
+  message: string | null
+  slots?: number
+}
+
+/** `POST …/reference-frame`: where the worker saved its current frame. */
+export interface ReferenceSaved {
+  saved: string
+  ts: string
+}
+
+const isConfigFile = (x: unknown): x is Record<string, unknown> =>
+  isObject(x) && x.version === 1 && typeof x.camera_id === 'string'
+const isConfigSaved = (x: unknown): x is ConfigSaved =>
+  isObject(x) &&
+  typeof x.saved === 'string' &&
+  typeof x.backup === 'boolean' &&
+  typeof x.reloaded === 'boolean' &&
+  (x.message === null || typeof x.message === 'string')
+const isReferenceSaved = (x: unknown): x is ReferenceSaved =>
+  isObject(x) && typeof x.saved === 'string' && typeof x.ts === 'string'
+
+// The mock build keeps edits in memory, on the 640×360 demo snapshot.
+const mockConfigs = new Map<string, Record<string, unknown>>([
+  [
+    'cam-ground/slots',
+    {
+      version: 1,
+      camera_id: 'cam-ground',
+      image_size: [640, 360],
+      slots: [
+        {
+          id: 'G01',
+          zone: 'ground',
+          polygon: [
+            [60, 220],
+            [160, 220],
+            [160, 330],
+            [60, 330],
+          ],
+          type: 'standard',
+        },
+        {
+          id: 'G02',
+          zone: 'ground',
+          polygon: [
+            [160, 220],
+            [260, 220],
+            [260, 330],
+            [160, 330],
+          ],
+          type: 'standard',
+        },
+        {
+          id: 'G03',
+          zone: 'ground',
+          polygon: [
+            [260, 220],
+            [360, 220],
+            [360, 330],
+            [260, 330],
+          ],
+          type: 'accessible',
+        },
+      ],
+      count_zones: [],
+    },
+  ],
+])
+
+const configPath = (cameraId: string, kind: CameraConfigKind) =>
+  `/api/admin/cameras/${encodeURIComponent(cameraId)}/${kind}`
+
+/** `GET /api/admin/cameras/{id}/slots|lines`: the file as stored; 404 when there is none yet. */
+export async function getCameraConfig(
+  cameraId: string,
+  kind: CameraConfigKind,
+  options?: RequestOptions,
+): Promise<Record<string, unknown>> {
+  if (IS_MOCK && !options?.base) {
+    mockAdminOnly()
+    const file = mockConfigs.get(`${cameraId}/${kind}`)
+    if (!file) throw new ApiRequestError({ code: 'not_found', message: 'no file', status: 404 })
+    return structuredClone(file)
+  }
+  return adminRequest(configPath(cameraId, kind), isConfigFile, options)
+}
+
+/** `PUT /api/admin/cameras/{id}/slots|lines`: validated by the API (422 with the reason), written
+ * with a `.bak`, and the worker asked to reload it. */
+export async function putCameraConfig(
+  cameraId: string,
+  kind: CameraConfigKind,
+  file: Record<string, unknown>,
+  options?: RequestOptions,
+): Promise<ConfigSaved> {
+  if (IS_MOCK && !options?.base) {
+    mockAdminOnly()
+    const backup = mockConfigs.has(`${cameraId}/${kind}`)
+    mockConfigs.set(`${cameraId}/${kind}`, structuredClone(file))
+    const slots = Array.isArray(file.slots) ? file.slots.length : undefined
+    return {
+      saved: `config/${kind}/${cameraId}.json`,
+      backup,
+      reloaded: true,
+      message: null,
+      slots,
+    }
+  }
+  return adminRequest(configPath(cameraId, kind), isConfigSaved, options, {
+    method: 'PUT',
+    body: file,
+  })
+}
+
+/** `POST /api/admin/cameras/{id}/reference-frame`: the worker keeps its current frame as the
+ * shift-detection reference (409 before its first frame, 503 unreachable). */
+export async function saveReferenceFrame(
+  cameraId: string,
+  options?: RequestOptions,
+): Promise<ReferenceSaved> {
+  if (IS_MOCK && !options?.base) {
+    mockAdminOnly()
+    return { saved: `data/reference/${cameraId}.jpg`, ts: new Date().toISOString() }
+  }
+  const path = `/api/admin/cameras/${encodeURIComponent(cameraId)}/reference-frame`
+  return adminRequest(path, isReferenceSaved, options, { method: 'POST' })
+}

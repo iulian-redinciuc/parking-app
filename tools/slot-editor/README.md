@@ -40,8 +40,11 @@ duplicate down · <kbd>←</kbd> <kbd>→</kbd> previous / next image · <kbd>F<
 
 ## Code
 
-`editor.js` exports `createEditor(canvas, opts)` (used by the Phase 7 admin) and the pure helpers
-(geometry, id naming, file formats, labels). Checks, from the repo root after `npm ci` in `frontend/`:
+`editor.js` exports `createEditor(canvas, opts)` and the pure helpers (geometry, id naming, file
+formats, labels). The admin's editor (`#/admin/cameras/<id>/edit`, P7.3) imports it through the
+Vite alias `@slot-editor`, so a change here ships in the frontend too. Touch is built in: 24 px
+hit areas and bigger handles for fingers, two-finger pan/zoom, and `setMoveAll(true)` to drag
+every shape at once (`translatePolys`); `undoPoint()` and `destroy()` are for the admin page. Checks, from the repo root after `npm ci` in `frontend/`:
 
 ```bash
 node --test tools/slot-editor/editor.test.js

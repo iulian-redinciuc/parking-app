@@ -258,6 +258,9 @@ class SlotFile(Strict):
         _require_unique("slot", [s.id for s in self.slots])
         return self
 
+    def ids(self) -> list[str]:
+        return [s.id for s in self.slots]
+
     def scaled(self, frame_w: int, frame_h: int) -> list[Slot]:
         """Slots with polygons rescaled from `image_size` to the frame size (both axes)."""
         sx, sy = frame_w / self.image_size[0], frame_h / self.image_size[1]

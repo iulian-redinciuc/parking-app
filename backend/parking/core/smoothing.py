@@ -50,6 +50,12 @@ class SlotSmoother:
             self._state[slot_id] = bool(taken)
             self._pending.pop(slot_id, None)
 
+    def forget(self, slot_ids: set[str]) -> None:
+        """Drop slots that no longer exist (a new slot file)."""
+        for slot_id in slot_ids:
+            self._state.pop(slot_id, None)
+            self._pending.pop(slot_id, None)
+
     def state(self, slot_id: str) -> bool | None:
         """Smoothed state, or None for a slot never seen."""
         return self._state.get(slot_id)

@@ -153,6 +153,7 @@ def create_app(
             notifier,
             almost_full,
             scheduler,
+            root,
         )
         if settings.worker_token is None:
             log.warning("WORKER_TOKEN is not set: every /internal/* request gets 401")

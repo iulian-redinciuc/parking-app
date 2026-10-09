@@ -4,6 +4,8 @@ data/*
 models/*
 !models/.gitkeep
 out/
+# backups the admin slot/line editor keeps (P7.3)
+config/**/*.bak
 deploy/.env
 *.sqlite*
 # python

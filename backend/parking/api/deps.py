@@ -8,6 +8,7 @@ import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, Query, Request
@@ -58,6 +59,11 @@ class Runtime:
     on_my_way: OnMyWayNotifier | None = None  # likewise
     almost_full: AlmostFullNotifier | None = None  # likewise
     scheduler: PushScheduler | None = None  # likewise
+    root: Path = Path(".")  # the app root: `config/`, `data/`, `deploy/`
+
+    def path(self, path: Path) -> Path:
+        """A relative config path (e.g. `slots_file`) under the app root, whatever the cwd."""
+        return path if path.is_absolute() else self.root / path
 
 
 def runtime(request: Request) -> Runtime:

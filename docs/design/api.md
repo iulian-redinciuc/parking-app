@@ -165,6 +165,13 @@ Why not cookies: the frontend and the API can be on different sites (e.g. the Gi
 - The snapshot is a plain HTTP GET to `<control_url>/control/snapshot` with `WORKER_TOKEN` (§5.2): `annotated` defaults to `true`. Unknown camera `404`; no `control_url`, no `WORKER_TOKEN`, no answer in 5 s, any non-200 (e.g. the worker's own `503` before its first frame) or a body that isn't a JPEG → `503 unavailable` with a message saying which. The full frame is passed through unscaled (at most 20 MB).
 - The frontend fetches it with the bearer header and shows it through a blob URL (an `<img src>` can't send headers), revoking the previous URL on each new picture.
 
+**Slot / line editor** (`parking/api/routes/admin.py`, P7.3):
+- `GET …/slots` (occupancy cameras) and `GET …/lines` (flow cameras) return the stored file as is. The other kind for a camera, or no file yet → `404 not_found`; a file that isn't JSON → `409 conflict`. Paths are lot.yaml's `slots_file` / `lines_file` under the app root.
+- `PUT` takes the whole file and validates it with the loader's models (`SlotFile` / `LineFile`: unknown keys, < 3 points, self-crossing polygons, duplicate ids) plus: `camera_id` must be the path's camera, every slot / count-zone `zone` must be one of that camera's zones, and slot ids must not be used by another camera's slot file. Any failure → `422 bad_request` and nothing is written.
+- Then the file is written atomically in the slot editor's layout (one slot per line), the previous one kept as `<file>.bak` (git-ignored), and the worker's `/control/reload` is called (5 s). Answer `200 {"saved": "config/slots/cam-ground.json", "backup": true, "reloaded": true, "message": null, "slots": 17}` (`slots` only for slot files). A worker that can't be reached or refuses the file gives `reloaded: false` and its reason in `message`; the file stays saved (the worker reads it when it restarts).
+- After a slot save the API also swaps its own slot ids and `slots`-zone capacities (`StateStore.replace_slot_file`): removed slots stop counting at once, new ones count from the worker's next reading, and the new status is published (`zone_state.source = config`).
+- `POST …/reference-frame` calls the worker's `/control/save-reference`: `200` with the worker's `{"saved", "ts"}`; the worker's `409` (no frame yet) → `409 conflict`; unreachable or any other error → `503 unavailable`.
+
 ---
 
 ## 5. Internal endpoints (workers ↔ API)

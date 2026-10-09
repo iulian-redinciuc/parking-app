@@ -18,6 +18,9 @@ const COLORS = {
 }
 const HIT_PX = 10 // screen pixels for "close to a point"
 const DRAG_PX = 4 // screen pixels before a press becomes a drag
+// Fingers (P7.3): handles answer within 24 px, and a tap may wobble 10 px without panning.
+const TOUCH_HIT_PX = 24
+const TOUCH_DRAG_PX = 10
 
 // ---------- geometry ----------
 
@@ -94,6 +97,16 @@ export function sideOffset(poly, dir = 'right') {
 // ---------- slots ----------
 
 /** Next free id for a zone: zone letter + two digits (G01, G02, … / U01 …). */
+/**
+ * `polys` moved by (dx, dy), rounded. Points pushed past the image edge stop at it: that part
+ * of a space is out of the picture. The "move all" drag for a camera that was nudged (P7.3).
+ */
+export function translatePolys(polys, dx, dy, size) {
+  const [w, h] = size || [Infinity, Infinity]
+  const clamp = (v, hi) => Math.round(Math.min(Math.max(v, 0), hi))
+  return polys.map((poly) => poly.map(([x, y]) => [clamp(x + dx, w - 1), clamp(y + dy, h - 1)]))
+}
+
 export function nextSlotId(slots, zone) {
   const prefix = (zone || 'x')[0].toUpperCase()
   const re = new RegExp(`^${prefix}(\\d+)$`)
@@ -292,7 +305,8 @@ export function formatJson(value) {
  *
  * opts: { zone: 'ground', cameraId: 'cam-ground', onChange(editor), onStatus(text) }
  * Modes: 'slots' | 'lines' | 'label'. Mouse: click adds points / selects / labels; drag pans,
- * or moves a corner of the selected shape; wheel or pinch zooms. Keys go through
+ * or moves a corner of the selected shape (or, with `setMoveAll(true)`, every shape); wheel or
+ * pinch zooms. Touch gets 24 px hit areas and bigger handles. Keys go through
  * `editor.handleKey(event)` so the page decides when the editor gets them.
  */
 export function createEditor(canvas, opts = {}) {
@@ -314,9 +328,11 @@ export function createEditor(canvas, opts = {}) {
     lineTarget: 'line_a',
     labelImages: {},
     hover: null,
+    moveAll: false, // a one-finger / left-button drag moves every shape of the mode
+    touch: false, // the last pointer was a finger or pen: bigger handles and hit areas
   }
   const pointers = new Map()
-  let press = null // { x, y, kind: 'pan' | 'vertex' | 'pinch', ... }
+  let press = null // { kind: 'pan' | 'vertex' | 'move' | 'pinch', start, moved, ... }
 
   const changed = () => {
     draw()
@@ -333,7 +349,7 @@ export function createEditor(canvas, opts = {}) {
     x * state.view.scale + state.view.ox,
     y * state.view.scale + state.view.oy,
   ]
-  const hitRadius = () => HIT_PX / state.view.scale
+  const hitRadius = () => (state.touch ? TOUCH_HIT_PX : HIT_PX) / state.view.scale
 
   function resize() {
     const rect = canvas.getBoundingClientRect()
@@ -372,10 +388,11 @@ export function createEditor(canvas, opts = {}) {
   }
 
   function handles(poly, color) {
+    const r = state.touch ? 7 : 4
     ctx.fillStyle = color
     for (const p of poly) {
       const [x, y] = toScreen(p)
-      ctx.fillRect(x - 4, y - 4, 8, 8)
+      ctx.fillRect(x - r, y - r, 2 * r, 2 * r)
     }
   }
 
@@ -546,6 +563,22 @@ export function createEditor(canvas, opts = {}) {
     return null
   }
 
+  /** The shapes "move all" drags in this mode, as getters/setters on the state. */
+  function movable() {
+    if (state.mode === 'slots') {
+      return [...state.slots, ...state.countZones].map((o) => ({
+        get: () => o.polygon,
+        set: (p) => (o.polygon = p),
+      }))
+    }
+    if (state.mode === 'lines') {
+      return ['lineA', 'lineB', 'roi']
+        .filter((k) => state.lines[k])
+        .map((k) => ({ get: () => state.lines[k], set: (p) => (state.lines[k] = p) }))
+    }
+    return []
+  }
+
   function finishDraft() {
     const pts = state.draft
     if (state.mode === 'slots') {
@@ -633,17 +666,27 @@ export function createEditor(canvas, opts = {}) {
 
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId)
+    const touch = e.pointerType === 'touch' || e.pointerType === 'pen'
+    if (touch !== state.touch) {
+      state.touch = touch
+      draw()
+    }
     const s = local(e)
     pointers.set(e.pointerId, s)
     if (pointers.size === 2) {
+      // a second finger turns the press into a pinch: undo what the first finger dragged
+      if (press?.kind === 'move') press.shapes.forEach((o, i) => o.set(press.from[i]))
+      if (press?.kind === 'vertex') press.poly[press.index] = press.orig
       const [a, b] = [...pointers.values()]
       press = { kind: 'pinch', dist: Math.hypot(a[0] - b[0], a[1] - b[1]), mid: mean([a, b]) }
       return
     }
     const v = e.button === 0 ? vertexAt(toImage(...s)) : null
-    press = v
-      ? { kind: 'vertex', ...v, start: s, moved: false }
-      : { kind: 'pan', start: s, last: s, moved: false, button: e.button }
+    const shapes = state.moveAll && e.button === 0 && !v ? movable() : []
+    if (v) press = { kind: 'vertex', ...v, orig: v.poly[v.index], start: s, moved: false }
+    else if (shapes.length) {
+      press = { kind: 'move', shapes, from: shapes.map((o) => o.get()), start: s, moved: false }
+    } else press = { kind: 'pan', start: s, last: s, moved: false, button: e.button }
   })
 
   canvas.addEventListener('pointermove', (e) => {
@@ -668,10 +711,19 @@ export function createEditor(canvas, opts = {}) {
       press.mid = mid
       return
     }
-    if (!press.moved && Math.hypot(s[0] - press.start[0], s[1] - press.start[1]) < DRAG_PX) return
+    const dragPx = state.touch ? TOUCH_DRAG_PX : DRAG_PX
+    if (!press.moved && Math.hypot(s[0] - press.start[0], s[1] - press.start[1]) < dragPx) return
     press.moved = true
     if (press.kind === 'vertex') {
       press.poly[press.index] = clampPt(toImage(...s))
+      draw()
+    } else if (press.kind === 'move') {
+      const d = [
+        (s[0] - press.start[0]) / state.view.scale,
+        (s[1] - press.start[1]) / state.view.scale,
+      ]
+      const moved = translatePolys(press.from, d[0], d[1], state.imageSize)
+      press.shapes.forEach((o, i) => o.set(moved[i]))
       draw()
     } else {
       state.view.ox += s[0] - press.last[0]
@@ -690,8 +742,12 @@ export function createEditor(canvas, opts = {}) {
       return
     }
     press = null
-    if (p.kind === 'vertex' && p.moved) return changed()
-    if (!p.moved && e.type === 'pointerup' && (p.kind === 'vertex' || p.button === 0)) {
+    if ((p.kind === 'vertex' || p.kind === 'move') && p.moved) return changed()
+    if (
+      !p.moved &&
+      e.type === 'pointerup' &&
+      (p.kind === 'vertex' || (p.kind === 'pan' && p.button === 0))
+    ) {
       clickAt(toImage(...local(e)))
     }
   }
@@ -708,7 +764,8 @@ export function createEditor(canvas, opts = {}) {
     { passive: false },
   )
   canvas.style.touchAction = 'none'
-  new ResizeObserver(resize).observe(canvas)
+  const observer = new ResizeObserver(resize)
+  observer.observe(canvas)
 
   function currentLabels() {
     return state.labelImages[state.imageName] || { conditions: [], taken: [], unsure: [] }
@@ -760,6 +817,12 @@ export function createEditor(canvas, opts = {}) {
     },
     setCameraId(id) {
       state.cameraId = id
+      changed()
+    },
+    /** While on, a drag moves every shape of the mode (slots + count zones, or the lines). */
+    setMoveAll(on) {
+      state.moveAll = Boolean(on)
+      state.draft = []
       changed()
     },
     setLineTarget(target) {
@@ -819,6 +882,16 @@ export function createEditor(canvas, opts = {}) {
     },
     finish: finishDraft,
     cancel,
+    /** Remove the last point of the polygon being drawn. */
+    undoPoint() {
+      if (!state.draft.length) return
+      state.draft.pop()
+      changed()
+    },
+    /** Stop watching the canvas size (the page is removing the canvas). */
+    destroy() {
+      observer.disconnect()
+    },
     fit,
     zoom: (factor) => {
       const rect = canvas.getBoundingClientRect()

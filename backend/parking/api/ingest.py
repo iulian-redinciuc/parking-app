@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 import anyio
 from sqlalchemy import Engine
 
+from parking.config import SlotFile
 from parking.core.fusion import Change, SlotChange, StateStore, ZoneChange
 from parking.db import repo
 from parking.db.engine import session_scope
@@ -173,6 +174,12 @@ class Ingestor:
                 pending.health.append(msg)
             pending.changes += self.store.tick()
             await self._commit(pending)
+
+    async def slot_file(self, camera_id: str, slot_file: SlotFile) -> None:
+        """An admin saved a new slot file (P7.3): new slot ids and capacities, published."""
+        async with self._lock:
+            changes = self.store.replace_slot_file(camera_id, slot_file)
+            await self._commit(_Pending(changes=changes))
 
     # --- output ---
 

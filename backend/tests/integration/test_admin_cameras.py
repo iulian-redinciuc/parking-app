@@ -202,7 +202,7 @@ async def test_snapshot_wrong_worker_token_or_none(tmp_path, clock, worker):
 
 async def test_snapshot_worker_down_or_too_slow(tmp_path, clock, worker, monkeypatch):
     handler, url = worker
-    monkeypatch.setattr(admin, "SNAPSHOT_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(admin, "WORKER_TIMEOUT_S", 0.3)
     handler.hang = True
     async with client_for(make_app(tmp_path, clock, url)) as c:
         r = await c.get("/api/admin/cameras/cam-ground/snapshot", headers=ADMIN_H)

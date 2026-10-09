@@ -145,7 +145,7 @@
     "signed_in": "Signed in",
     "signed_in_until": "Signed in until {{time}}.",
     "signed_in_token": "Signed in with the admin token.",
-    "coming_soon": "Slot editing and count corrections are coming soon.",
+    "coming_soon": "Count corrections are coming soon.",
     "log_out": "Log out",
     "error": {
       "unauthorized": "Wrong password.",
@@ -188,7 +188,63 @@
       "snapshot": "Current picture from {{id}}",
       "snapshot_annotated": "Current picture from {{id}} with slots and detections",
       "unavailable": "No snapshot right now: the worker isn't reachable or has no frame yet.",
-      "failed": "Couldn't load the snapshot. Check your connection and try again."
+      "failed": "Couldn't load the snapshot. Check your connection and try again.",
+      "edit_slots": "Edit parking spaces",
+      "edit_lines": "Edit counting lines"
+    },
+    "reference": {
+      "save": "Save reference frame",
+      "saving": "Saving reference frame…",
+      "saved": "Reference frame saved. Camera-shift checks now compare against this picture.",
+      "no_frame": "The worker has no frame yet. Try again in a few seconds.",
+      "unavailable": "The worker isn't reachable, so the reference frame wasn't saved.",
+      "failed": "Couldn't save the reference frame. Check your connection and try again."
+    },
+    "editor": {
+      "back": "← {{id}}",
+      "title_slots": "Parking spaces: {{id}}",
+      "title_lines": "Counting lines: {{id}}",
+      "help_slots": "Tap the corners of a space, then tap the first corner (or Finish) to close it. Tap a space to select it and drag its corners. Two fingers move and zoom. If the camera was nudged, turn on Move all and drag every space into place.",
+      "help_lines": "Pick what to draw, then tap its points: two for a line, three or more for the area to watch. Drag a point to move it. Two fingers move and zoom.",
+      "canvas": "Camera picture from {{id}} with the shapes to edit",
+      "loading": "Loading the picture and the current file…",
+      "load_failed": "Couldn't load the picture or the file. Check your connection and try again.",
+      "move_all": "Move all",
+      "fit": "Fit",
+      "finish": "Finish shape",
+      "undo": "Undo point",
+      "cancel": "Cancel",
+      "zone": "New spaces in zone",
+      "selected": "Space {{id}}",
+      "slot_id": "Id",
+      "slot_type": "Type",
+      "types": {
+        "standard": "standard",
+        "accessible": "accessible",
+        "ev": "EV charging",
+        "motorcycle": "motorcycle",
+        "reserved": "reserved"
+      },
+      "duplicate": "Duplicate",
+      "delete": "Delete",
+      "draw": "Draw",
+      "line_a": "line A",
+      "line_b": "line B",
+      "roi": "area to watch",
+      "in_direction": "In is",
+      "a_to_b": "A → B",
+      "b_to_a": "B → A",
+      "count_one": "{{count}} space",
+      "count_other": "{{count}} spaces",
+      "save": "Save",
+      "saving": "Saving…",
+      "unsaved": "Unsaved changes.",
+      "rejected": "Not saved: {{reason}}",
+      "save_failed": "Couldn't save. Check your connection and try again.",
+      "saved": "Saved {{file}}.",
+      "reloaded": "The worker reloaded it; the counts use the new shapes from the next frame.",
+      "not_reloaded": "The worker didn't reload it ({{reason}}); it will use the file when it restarts.",
+      "reference_hint": "Re-calibrated after the camera moved? Save a new reference frame so shift detection compares against today's view."
     }
   }
 }

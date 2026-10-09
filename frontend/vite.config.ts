@@ -1,13 +1,21 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'node:url'
+import { searchForWorkspaceRoot } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vitest/config'
 
 // `/parking-app/` for the GitHub Pages preview; production usually sets VITE_BASE=/.
 const base = process.env.VITE_BASE ?? '/parking-app/'
 
+// The admin's slot/line editor (P7.3) is the standalone tool's core, imported as `@slot-editor`
+// (types in src/types/slot-editor.d.ts), so both stay one implementation.
+const slotEditor = fileURLToPath(new URL('../tools/slot-editor', import.meta.url))
+
 export default defineConfig({
   base,
+  resolve: { alias: { '@slot-editor': `${slotEditor}/editor.js` } },
+  server: { fs: { allow: [searchForWorkspaceRoot(process.cwd()), slotEditor] } },
   plugins: [
     react(),
     tailwindcss(),

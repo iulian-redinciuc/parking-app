@@ -77,6 +77,8 @@ As built (P6.4, `src/screens/NotificationsScreen.tsx`, `src/lib/push.ts`): the s
 ### 2.4 Admin (`#/admin`): Phase 7, lazy chunk
 Login → camera list (state, issue, fps, last frame age, inference ms; refreshed every 10 s) → camera detail (`#/admin/cameras/<id>`: annotated snapshot with a plain-picture switch, *Edit slots/lines* (editor), *Save reference frame*) → zone corrections (number input + note) → corrections log.
 
+Slot/line editor (`#/admin/cameras/<id>/edit`, `screens/admin/SlotEditor.tsx`, P7.3): the standalone editor's core `tools/slot-editor/editor.js`, imported through the Vite alias `@slot-editor` (types in `src/types/slot-editor.d.ts`), on the camera's **plain** snapshot with the stored slot file (occupancy) or line file (flow); 404 = start empty. Touch: tap adds a corner, tap the first corner (or *Finish shape*) closes a space, handles answer within 24 px, a tap may wobble 10 px, two fingers pan and zoom; *Move all* makes a drag shift every shape (points past the picture edge stop there) for a nudged camera. Buttons: Fit, Finish shape, Undo point, Cancel; a selected space shows id, type, Duplicate, Delete. *Save* checks `validate()` locally, then `PUT`s; a `422` shows the API's reason. After a save the screen says whether the worker reloaded and offers *Save reference frame* (also on the camera page). The editor's own status hints (e.g. "Added G18") come from editor.js in English.
+
 ### 2.5 Privacy (`#/privacy`): Phase 8
 Static text: what is processed, what's stored, location never leaves the phone.
 

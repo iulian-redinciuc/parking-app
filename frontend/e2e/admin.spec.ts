@@ -46,3 +46,51 @@ test('camera health list and snapshot', async ({ page }) => {
   await page.getByRole('link', { name: /cam-ramp/ }).click()
   await expect(page.getByRole('alert')).toContainText('No snapshot right now')
 })
+
+// P7.3: the slot editor on the mock build (demo snapshot 640×360, three demo spaces), driven by
+// touch: tap four corners and the first one again to add a space, "Move all" + drag, save, then
+// save a new reference frame.
+test('slot editor: tap to add a space, move all, save', async ({ page }) => {
+  await page.goto('./#/admin')
+  await page.getByLabel('Password').fill('demo')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.getByRole('link', { name: /cam-ground/ }).click()
+  await page.getByRole('link', { name: 'Edit parking spaces' }).click()
+  await expect(page).toHaveURL(/#\/admin\/cameras\/cam-ground\/edit$/)
+  await expect(page.getByText('3 spaces')).toBeVisible()
+
+  // image pixels → page pixels, as the editor fits the picture (98 % of the canvas, centred)
+  const canvas = page.getByRole('img', { name: /cam-ground with the shapes/ })
+  const box = (await canvas.boundingBox())!
+  const scale = Math.min(box.width / 640, box.height / 360) * 0.98
+  const at = (x: number, y: number) => ({
+    x: box.x + box.width / 2 + (x - 320) * scale,
+    y: box.y + box.height / 2 + (y - 180) * scale,
+  })
+  for (const [x, y] of [
+    [420, 40],
+    [540, 40],
+    [540, 160],
+    [420, 160],
+    [420, 40],
+  ]) {
+    const p = at(x, y)
+    await page.touchscreen.tap(p.x, p.y)
+  }
+  await expect(page.getByText('4 spaces')).toBeVisible()
+  await expect(page.getByText('Space G04')).toBeVisible()
+
+  await page.getByRole('checkbox', { name: 'Move all' }).check()
+  const from = at(300, 100)
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  await page.mouse.move(from.x + 20, from.y + 10, { steps: 5 })
+  await page.mouse.up()
+  await expect(page.getByText('Unsaved changes.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByText('Saved config/slots/cam-ground.json.')).toBeVisible()
+  await expect(page.getByText(/The worker reloaded it/)).toBeVisible()
+  await page.getByRole('button', { name: 'Save reference frame' }).last().click()
+  await expect(page.getByText(/^Reference frame saved/)).toBeVisible()
+})
