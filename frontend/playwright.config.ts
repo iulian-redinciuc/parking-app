@@ -7,6 +7,9 @@ const chromiumPath = process.env.PW_CHROMIUM_PATH
 
 export default defineConfig({
   testDir: './e2e',
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: { baseURL: 'http://localhost:4173/parking-app/' },
   projects: [
     { name: 'iPhone 13', use: { ...devices['iPhone 13'] } },

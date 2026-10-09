@@ -1,5 +1,5 @@
-# Jobs 1–4 from docs/design/testing.md §5. Playwright e2e and the multi-arch
-# image build are added in later tasks.
+# Jobs from docs/design/testing.md §5 (+ Lighthouse CI, P3.10). The multi-arch
+# image build is added in a later task.
 name: CI
 
 on:
@@ -52,7 +52,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: frontend
@@ -74,6 +74,39 @@ jobs:
           frontend/node_modules/.bin/eslint tools/slot-editor
           frontend/node_modules/.bin/prettier --config frontend/.prettierrc.json --check tools/slot-editor
           node --test tools/slot-editor/editor.test.js
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: frontend/test-results
+          retention-days: 7
+
+  lighthouse:
+    # Lighthouse CI on the mock-mode preview build (frontend/lighthouserc.cjs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build -- --mode development
+      - run: npm run lhci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lighthouse-reports
+          path: frontend/.lighthouseci/reports
+          include-hidden-files: true
+          retention-days: 14
 
   secrets:
     runs-on: ubuntu-latest

@@ -116,7 +116,7 @@ Implement the state table in [frontend.md §2.1](../design/frontend.md#21-live-)
 **Steps**
 1. Playwright projects `iPhone 13` (webkit) and `Pixel 7` (chromium), with `VITE_API_BASE=mock` and `npm run preview`.
 2. Specs: the live screen shows numbers; a count change is reflected; the offline banner shows with `context.setOffline(true)`; no horizontal scroll at 320 px; the bottom nav works.
-3. Lighthouse CI (`@lhci/cli`) on the preview build: assertions PWA installable, accessibility ≥ 90, performance ≥ 90 (mobile).
+3. Lighthouse CI (`@lhci/cli`) on the preview build: assertions accessibility ≥ 90, performance ≥ 90 (mobile). Lighthouse 12 removed the PWA category, so "installable" is asserted by `e2e/pwa.spec.ts` instead.
 4. Go through the manual checklist in [testing.md §6](../design/testing.md#6-manual-release-checklist-from-phase-3-on).
 
 **Done when:** CI is green with the e2e and Lighthouse jobs, and the manual checklist is done.

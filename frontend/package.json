@@ -11,7 +11,8 @@
     "test": "vitest",
     "e2e": "playwright test",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "lhci": "lhci autorun"
   },
   "dependencies": {
     "i18next": "^26.4.2",
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@lhci/cli": "^0.15.1",
     "@playwright/test": "^1.64.0",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/dom": "^10.4.2",
