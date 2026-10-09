@@ -406,3 +406,30 @@ def test_health_stats(tmp_path, monkeypatch):
     )
     assert result.exit_code == 1 and "LOG_LEVEL=DEBUG" in result.output
     assert runner.invoke(app, [*args, "--since", "nope"]).exit_code == 2
+
+
+def test_grab_saves_frame(tmp_path, monkeypatch):
+    import cv2
+
+    _write_lot(tmp_path, monkeypatch)
+    res = CliRunner().invoke(app, ["grab", "--camera", "cam-ground"])
+    assert res.exit_code == 0, res.output
+    saved = tmp_path / "data" / "reference" / "cam-ground.jpg"
+    assert "200x100" in res.output
+    assert cv2.imread(str(saved)).shape == (100, 200, 3)
+
+    res = CliRunner().invoke(app, ["grab", "--camera", "cam-ground"])
+    assert res.exit_code == 1 and "--force" in res.output
+    res = CliRunner().invoke(app, ["grab", "--camera", "cam-ground", "--force"])
+    assert res.exit_code == 0, res.output
+
+
+def test_grab_errors(tmp_path, monkeypatch):
+    _write_lot(tmp_path, monkeypatch)
+    args = ["grab", "--camera", "cam-ground", "--out", "o.jpg"]
+    res = CliRunner().invoke(app, [*args, "--source", "file:missing.jpg", "--timeout", "0.3"])
+    assert res.exit_code == 1 and "no frame" in res.output
+    res = CliRunner().invoke(app, [*args, "--source", "bogus:x"])
+    assert res.exit_code == 1 and "unknown source scheme" in res.output
+    res = CliRunner().invoke(app, ["grab", "--camera", "nope"])
+    assert res.exit_code == 1 and "not in" in res.output

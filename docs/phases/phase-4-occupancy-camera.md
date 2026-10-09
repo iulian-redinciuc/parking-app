@@ -73,7 +73,11 @@ Put the suggested values in `cameras[].health` in `lot.yaml` (check the night an
 
 ## P4.5: Calibrate slots on the real view
 **Steps**
-1. Grab a full-resolution frame at a busy time → `data/reference/cam-ground.jpg`.
+1. Grab a full-resolution frame at a busy time → `data/reference/cam-ground.jpg` (`--force` replaces an older grab; without `--source` it reads the camera's `source` from `lot.yaml`). Use the main stream's 2560×1440, not the sub-stream:
+   ```bash
+   docker compose run --rm --no-deps --entrypoint sh vision-occupancy -c \
+     '/app/backend/.venv/bin/parking grab --camera cam-ground --source "snapshot:$CAM_GROUND_SNAPSHOT_URL"'
+   ```
 2. `parking bootstrap-slots` → refine in the slot editor → `config/slots/cam-ground.json`.
 3. Check the polygons cover the **ground area of each space** (where tyres are), not the space's air above.
 4. Commit the slot file. Restart the worker (or send `reload`).

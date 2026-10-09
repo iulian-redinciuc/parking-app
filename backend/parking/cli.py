@@ -98,7 +98,7 @@ def _fake_detector_on(flag: bool) -> bool:
     return flag or os.environ.get("PARKING_FAKE_DETECTOR", "") not in ("", "0", "false")
 
 
-def _occupancy_camera(config: Path, camera: str, command: str):
+def _camera(config: Path, camera: str):
     """Load lot.yaml and return `(lot, camera, root)`; exits with a message on any problem."""
     from parking.config import ConfigError, cli_env, load_config
 
@@ -111,7 +111,12 @@ def _occupancy_camera(config: Path, camera: str, command: str):
     cams = {c.id: c for c in lot.cameras}
     if camera not in cams:
         _fail(f"camera '{camera}' is not in {config} (cameras: {', '.join(cams) or 'none'})")
-    cam = cams[camera]
+    return lot, cams[camera], root
+
+
+def _occupancy_camera(config: Path, camera: str, command: str):
+    """`_camera`, but only for an occupancy camera."""
+    lot, cam, root = _camera(config, camera)
     if cam.role != "occupancy":
         _fail(f"camera '{camera}' is a {cam.role} camera; {command} needs an occupancy camera")
     return lot, cam, root
@@ -637,6 +642,56 @@ def benchmark(
     json_path = out / f"benchmark-{stamp}.json"
     json_path.write_text(json.dumps(report, indent=2) + "\n")
     typer.echo(f"report -> {json_path}")
+
+
+@app.command()
+def grab(
+    camera: Annotated[str, typer.Option(help="Camera id in the config, e.g. cam-ground.")],
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    source: Annotated[
+        str | None, typer.Option(help="Source URI to use instead of the camera's `source`.")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option(help="Image to write (default data/reference/<camera>.jpg).")
+    ] = None,
+    timeout: Annotated[float, typer.Option(help="Seconds to wait for a frame.")] = 20.0,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite an existing file.")] = False,
+) -> None:
+    """Save one full-resolution frame from a camera, e.g. the slot reference image (P4.5)."""
+    import time
+
+    import cv2
+
+    from parking.vision.sources import make_source
+
+    if timeout <= 0:
+        raise typer.BadParameter("must be positive", param_hint="--timeout")
+    _, cam, root = _camera(config, camera)
+    target = out or root / "data" / "reference" / f"{camera}.jpg"
+    if target.exists() and not force:
+        _fail(f"{target} exists; pass --force to overwrite it")
+    try:
+        src = make_source(source or cam.source, root)
+    except (ValueError, NotImplementedError) as e:
+        _fail(str(e))  # make_source never echoes the URI (it may hold credentials)
+
+    deadline = time.monotonic() + timeout
+    frame = None
+    try:
+        while frame is None and time.monotonic() < deadline:
+            frame = src.read()
+            if frame is None:
+                time.sleep(0.2)  # rtsp: the reader thread is connecting; snapshot: backoff
+    finally:
+        src.close()
+    if frame is None:
+        _fail(f"no frame from '{camera}' within {timeout:g} s")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(target), frame.image, [cv2.IMWRITE_JPEG_QUALITY, 95]):
+        _fail(f"can't write {target}")
+    h, w = frame.image.shape[:2]
+    typer.echo(f"{w}x{h} frame from '{camera}' at {frame.ts.isoformat()} -> {target}")
 
 
 @app.command("health-stats")
