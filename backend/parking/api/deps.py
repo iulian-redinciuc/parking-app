@@ -20,6 +20,7 @@ from parking.api.ingest import Ingestor
 from parking.api.sse import Broadcaster
 from parking.config import LotConfig, Settings
 from parking.core.fusion import StateStore
+from parking.push.on_my_way import OnMyWayNotifier
 from parking.push.sender import PushSender
 
 
@@ -53,6 +54,7 @@ class Runtime:
     ingestor: Ingestor
     broadcaster: Broadcaster
     push: PushSender | None = None  # None without VAPID keys in .env
+    on_my_way: OnMyWayNotifier | None = None  # likewise
 
 
 def runtime(request: Request) -> Runtime:

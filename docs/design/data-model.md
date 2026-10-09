@@ -75,8 +75,9 @@
 | created_at | datetime | |
 | last_seen_at | datetime | updated on any API call with this endpoint |
 | on_my_way_until | datetime null | |
+| on_my_way_sent | int | pushes in the current on-my-way window (cap 6, notifications.md §4); reset by each `POST on-my-way`; migration `0003` (P6.6) |
 | last_sent_at | datetime null | |
-| last_sent_free | int null | for "changed significantly" checks |
+| last_sent_free | int null | for "changed significantly" checks: the watched zones' summed free count in the last on-my-way push |
 | last_sent_level | text null | |
 | failures | int | consecutive send failures; delete at 404/410 or ≥ 5 |
 

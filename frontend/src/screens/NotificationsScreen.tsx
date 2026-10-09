@@ -6,15 +6,20 @@ import type { LotInfo } from '../api/types'
 import InstallHint from '../components/InstallHint'
 import { requestLocation } from '../lib/geo'
 import {
+  cancelOnMyWay,
+  formatCountdown,
   isSubscribed,
   loadPrefs,
   MAX_SCHEDULES,
+  ON_MY_WAY_MINUTES,
+  onMyWayUntil,
   PREFS_SAVE_DELAY_MS,
   permission,
   PushError,
   pushSupport,
   saveLocalPrefs,
   sendTest,
+  startOnMyWay,
   subscribe,
   unsubscribe,
   updatePrefs,
@@ -233,6 +238,8 @@ function PushSettings({ onGone }: { onGone: () => void }) {
         {t('alerts.enabled')}
       </p>
 
+      <OnMyWay onGone={() => onGoneRef.current()} />
+
       <fieldset className="flex flex-col gap-3 rounded-xl bg-surface p-4">
         <legend className="sr-only">{t('alerts.near_legend')}</legend>
         <NearSettings prefs={prefs} lot={lot} onChange={change} />
@@ -315,6 +322,102 @@ function PushSettings({ onGone }: { onGone: () => void }) {
         </p>
       )}
     </div>
+  )
+}
+
+const clockNow = () => Date.now()
+
+/**
+ * *I'm on my way* (Tier 2, notifications.md §4): 15 / 30 / 60 min chips start the server's updates
+ * (a push now, then when the numbers change enough, also with the app closed); while it runs a
+ * countdown and *Stop updates* (`minutes: 0`) replace the chips.
+ */
+function OnMyWay({ onGone }: { onGone: () => void }) {
+  const { t, i18n } = useTranslation()
+  const [until, setUntil] = useState<number | null>(() => onMyWayUntil())
+  const [now, setNow] = useState(() => Date.now())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (until === null) return
+    const timer = setInterval(() => {
+      const current = Date.now()
+      setNow(current)
+      if (current >= until) setUntil(null)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [until])
+
+  const run = async (action: () => Promise<number | null>) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const next = await action()
+      setNow(clockNow())
+      setUntil(next)
+    } catch (err) {
+      setError(t(errorKey(err)))
+      if (err instanceof PushError && err.code === 'gone') onGone()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const ends = until && new Intl.DateTimeFormat(i18n.language, { timeStyle: 'short' }).format(until)
+  return (
+    <section aria-labelledby="on-my-way" className="flex flex-col gap-3 rounded-xl bg-surface p-4">
+      <h2 id="on-my-way" className="font-semibold">
+        {t('alerts.on_my_way')}
+      </h2>
+      {until === null ? (
+        <>
+          <p className="text-sm text-muted">{t('alerts.on_my_way_hint')}</p>
+          <div className="flex gap-2">
+            {ON_MY_WAY_MINUTES.map((minutes) => (
+              <button
+                key={minutes}
+                type="button"
+                disabled={busy}
+                onClick={() => void run(() => startOnMyWay(minutes))}
+                className="min-h-11 flex-1 rounded-full border border-accent px-3 font-semibold text-accent disabled:opacity-60"
+              >
+                {t('alerts.on_my_way_minutes', { count: minutes })}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="flex items-center gap-3">
+          <p className="flex flex-1 flex-col">
+            <span role="timer" className="text-2xl font-bold tabular-nums">
+              {t('alerts.on_my_way_left', { time: formatCountdown(until - now) })}
+            </span>
+            <span className="text-sm text-muted">
+              {t('alerts.on_my_way_until', { time: ends })}
+            </span>
+          </p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                await cancelOnMyWay()
+                return null
+              })
+            }
+            className="min-h-11 rounded-xl border border-muted px-4 disabled:opacity-60"
+          >
+            {t('alerts.on_my_way_cancel')}
+          </button>
+        </div>
+      )}
+      {error && (
+        <p role="status" className="text-sm text-bad">
+          {error}
+        </p>
+      )}
+    </section>
   )
 }
 

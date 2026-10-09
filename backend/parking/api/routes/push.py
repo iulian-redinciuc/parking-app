@@ -24,7 +24,8 @@ from sqlmodel import select
 from parking.api.deps import ApiError, RateLimiter, Runtime, RuntimeDep, public_limit, rate_limit
 from parking.db.engine import session_scope
 from parking.db.models import PushSubscription
-from parking.messages import format_ts
+from parking.messages import LotStatus, format_ts
+from parking.push.on_my_way import record_sent
 from parking.push.payload import app_url, status_payload
 from parking.push.sender import PushSender, SendResult, Urgency
 
@@ -171,12 +172,14 @@ def _touch(rt: Runtime, endpoint: str, **changes) -> PushSubscription | None:
         return sub
 
 
-async def _send(rt: Runtime, sub: PushSubscription, kind: str, urgency: Urgency) -> SendResult:
+async def _send(
+    rt: Runtime, sub: PushSubscription, kind: str, urgency: Urgency
+) -> tuple[SendResult, LotStatus | None]:
     sender = _sender(rt)
     status = rt.store.status(sub.lang) if rt.store.has_data else None
     zones = (sub.prefs or {}).get("zones")
     payload = status_payload(status, kind, app_url(rt.settings.public_app_url), sub.tz, zones)
-    return await anyio.to_thread.run_sync(sender.send, sub, payload, urgency)
+    return await anyio.to_thread.run_sync(sender.send, sub, payload, urgency), status
 
 
 # --- routes ---
@@ -241,16 +244,21 @@ async def unsubscribe(body: EndpointBody, rt: RuntimeDep) -> Response:
 
 @router.post("/on-my-way", status_code=202, dependencies=[Depends(push_limit)])
 async def on_my_way(body: OnMyWayBody, rt: RuntimeDep) -> dict:
-    """Push updates for `minutes` (notifications.md §4), starting with one now; 0 cancels."""
+    """Push updates for `minutes` (notifications.md §4), starting with one now; 0 cancels.
+    Starting again opens a new window (its push count starts over)."""
     if body.minutes:
         _sender(rt)  # 503 before changing anything
     until = rt.store.clock.now() + timedelta(minutes=body.minutes) if body.minutes else None
-    sub = await anyio.to_thread.run_sync(lambda: _touch(rt, body.endpoint, on_my_way_until=until))
+    sub = await anyio.to_thread.run_sync(
+        lambda: _touch(rt, body.endpoint, on_my_way_until=until, on_my_way_sent=0)
+    )
     if sub is None:
         raise _not_found()
     if until is None:
         return {"until": None, "sent": False}
-    result = await _send(rt, sub, "on_my_way", "high")
+    result, status = await _send(rt, sub, "on_my_way", "high")
+    if result.ok:  # the baseline for the rules, and push 1 of the window's 6
+        await anyio.to_thread.run_sync(record_sent, rt.engine, sub, status, rt.config)
     return {"until": format_ts(until), "sent": result.ok}
 
 
@@ -267,5 +275,5 @@ async def test_push(body: EndpointBody, rt: RuntimeDep, request: Request) -> dic
         retry = str(max(math.ceil(wait), 1))
         headers = {"Retry-After": retry}
         raise ApiError(429, "rate_limited", "too many test pushes (3/hour)", headers=headers)
-    result = await _send(rt, sub, "test", "normal")
+    result, _ = await _send(rt, sub, "test", "normal")
     return {"sent": result.ok, "deleted": result.deleted}

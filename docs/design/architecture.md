@@ -109,6 +109,7 @@ backend/
 │       ├── sender.py            # pywebpush wrapper, expiry cleanup
 │       ├── payload.py           # push payload (api.md §6) from the current status
 │       ├── rules.py             # when to notify (on-my-way, schedules, quiet hours)
+│       ├── on_my_way.py         # Tier 2 dispatch on every status change (ingest hook)
 │       └── scheduler.py         # APScheduler jobs
 └── tests/
     ├── unit/

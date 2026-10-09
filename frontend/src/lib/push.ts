@@ -85,6 +85,7 @@ export function permission(): NotificationPermission {
 
 const ENDPOINT = 'parking.pushEndpoint'
 const PREFS = 'parking.pushPrefs'
+const ON_MY_WAY = 'parking.onMyWayUntil'
 export const MOCK_ENDPOINT = 'mock:local'
 
 function getItem(key: string): string | null {
@@ -139,6 +140,8 @@ export function saveLocalPrefs(prefs: Prefs) {
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null
 const isKey = (x: unknown): x is { key: string } => isObject(x) && typeof x.key === 'string'
 const isAny = (x: unknown): x is unknown => (void x, true)
+const isOnMyWayResult = (x: unknown): x is { until: string | null; sent: boolean } =>
+  isObject(x) && (typeof x.until === 'string' || x.until === null) && typeof x.sent === 'boolean'
 const isTestResult = (x: unknown): x is { sent: boolean; deleted: boolean } =>
   isObject(x) && typeof x.sent === 'boolean' && typeof x.deleted === 'boolean'
 
@@ -260,6 +263,7 @@ export async function updatePrefs(prefs: Prefs, base = API_BASE): Promise<void> 
 export async function unsubscribe(base = API_BASE): Promise<void> {
   const endpoint = storedEndpoint()
   remember(null, loadPrefs()) // the prefs stay: Tier 1 keeps working without push
+  setItem(ON_MY_WAY, null)
   if (base === 'mock') return
   await clearPushRegistration().catch(() => undefined)
   if (endpoint)
@@ -331,4 +335,68 @@ export async function sendTest(base = API_BASE): Promise<void> {
     throw new PushError('gone')
   }
   if (!result.sent) throw new PushError('failed', 'push service refused')
+}
+
+// --- Tier 2: "I'm on my way" (notifications.md §4) ---
+
+export const ON_MY_WAY_MINUTES = [15, 30, 60] as const
+
+/** When this device's on-my-way window ends (`Date.now()` ms), or null when none is running. */
+export function onMyWayUntil(now = Date.now()): number | null {
+  const until = Number(getItem(ON_MY_WAY))
+  return Number.isFinite(until) && until > now ? until : null
+}
+
+/**
+ * "I'm on my way" for `minutes`: the server pushes the status now and then whenever it changes
+ * enough, until the window ends, also with the app closed. Returns the end (`Date.now()` ms). In
+ * mock mode the first notification is shown locally and nothing follows.
+ */
+export async function startOnMyWay(minutes: number, base = API_BASE): Promise<number> {
+  const endpoint = storedEndpoint()
+  if (!endpoint) throw new PushError('gone')
+  let until: number
+  if (base === 'mock') {
+    until = Date.now() + minutes * 60_000
+    const status = mockStatus()
+    const payload = {
+      title: t('alerts.on_my_way_title', { count: status.total.free }),
+      body: zonesSummary(status),
+      kind: 'on_my_way',
+    }
+    await showLocalNotification(payload).catch(() => undefined)
+  } else {
+    let result: { until: string | null; sent: boolean }
+    try {
+      const body = { endpoint, minutes }
+      result = await sendJson('POST', '/api/push/on-my-way', body, isOnMyWayResult, { base })
+    } catch (err) {
+      throw asPushError(err)
+    }
+    until = result.until ? Date.parse(result.until) : Date.now() + minutes * 60_000
+  }
+  setItem(ON_MY_WAY, String(until))
+  return until
+}
+
+/** Stops the on-my-way updates (`minutes: 0`). On a network error the window is kept. */
+export async function cancelOnMyWay(base = API_BASE): Promise<void> {
+  const endpoint = storedEndpoint()
+  if (endpoint && base !== 'mock') {
+    try {
+      await sendJson('POST', '/api/push/on-my-way', { endpoint, minutes: 0 }, isAny, { base })
+    } catch (err) {
+      const e = asPushError(err)
+      if (e.code !== 'gone') throw e // unknown to the server: nothing left to cancel
+    }
+  }
+  setItem(ON_MY_WAY, null)
+}
+
+/** "14:59" left of a window, from milliseconds. */
+export function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${m}:${String(s).padStart(2, '0')}`
 }

@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
 
 // P6.4: the Alerts screen on the mock build. Chromium (Pixel 7): no prompt until the tap, enable →
-// settings → test → the notification is shown. WebKit runs as iPhone Safari outside the installed
-// app, so it gets the install hint instead of the button.
+// settings → test → the notification is shown; P6.6: the I'm on my way chips. WebKit runs as
+// iPhone Safari outside the installed app, so it gets the install hint instead of the button.
 test.describe('Alerts', () => {
   test('iPhone Safari, not installed: the install hint instead of the button', async ({
     page,
@@ -53,6 +53,32 @@ test.describe('Alerts', () => {
 
       await page.getByRole('button', { name: 'Turn off notifications' }).click()
       await expect(page.getByRole('button', { name: 'Enable notifications' })).toBeVisible()
+    })
+
+    test("I'm on my way: chip → first update + countdown → stop", async ({ page, context }) => {
+      await page.goto('./#/alerts')
+      await page.evaluate(() => navigator.serviceWorker.ready)
+      await context.grantPermissions(['notifications'])
+      await page.getByRole('button', { name: 'Enable notifications' }).click()
+      await page.getByRole('button', { name: '15 min' }).click()
+      await expect(page.getByRole('timer')).toHaveText(/^1[45]:\d\d left$/)
+      await expect(page.getByText(/^Updates until /)).toBeVisible()
+      await expect
+        .poll(() =>
+          page.evaluate(async () =>
+            (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => [
+              /^Parking: \d+ free$/.test(n.title),
+              n.tag,
+            ]),
+          ),
+        )
+        .toEqual([[true, 'parking-status']])
+      // the window survives a reload
+      await page.reload()
+      await expect(page.getByRole('timer')).toBeVisible()
+      await page.getByRole('button', { name: 'Stop updates' }).click()
+      await expect(page.getByRole('button', { name: '30 min' })).toBeVisible()
+      await expect(page.getByRole('timer')).toHaveCount(0)
     })
 
     test('a refused prompt explains how to allow it', async ({ page }) => {

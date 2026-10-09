@@ -114,6 +114,7 @@ class PushSubscription(SQLModel, table=True):
     created_at: datetime = _ts()
     last_seen_at: datetime = _ts()
     on_my_way_until: datetime | None = _ts(default=None)
+    on_my_way_sent: int = 0  # pushes in the current on-my-way window (max 6, rules.py)
     last_sent_at: datetime | None = _ts(default=None)
     last_sent_free: int | None = None
     last_sent_level: str | None = None

@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mockStatus } from '../api/mock'
 import {
+  cancelOnMyWay,
   DEFAULT_PREFS,
+  formatCountdown,
+  onMyWayUntil,
+  startOnMyWay,
   isSubscribed,
   loadPrefs,
   saveLocalPrefs,
@@ -315,5 +319,92 @@ describe('loadPrefs', () => {
     expect(loadPrefs()).toEqual({ ...DEFAULT_PREFS, proximity: true })
     localStorage.setItem('parking.pushPrefs', '{nope')
     expect(loadPrefs()).toEqual(DEFAULT_PREFS)
+  })
+})
+
+describe("I'm on my way", () => {
+  const UNTIL = '2026-10-09T14:35:00.000Z'
+  const omw = (c: Call) =>
+    c.url.endsWith('/on-my-way')
+      ? json(
+          202,
+          (c.body as { minutes: number }).minutes
+            ? { until: UNTIL, sent: true }
+            : { until: null, sent: false },
+        )
+      : api(c)
+
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-09T14:05:00Z'))
+    stubBrowser()
+    stubFetch(api)
+    await subscribe(DEFAULT_PREFS, API)
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('starts a window and remembers when it ends', async () => {
+    const calls = stubFetch(omw)
+    expect(onMyWayUntil()).toBeNull()
+    const until = await startOnMyWay(30, API)
+    expect(calls).toEqual([
+      {
+        url: `${API}/api/push/on-my-way`,
+        method: 'POST',
+        body: { endpoint: ENDPOINT, minutes: 30 },
+      },
+    ])
+    expect(until).toBe(Date.parse(UNTIL))
+    expect(onMyWayUntil()).toBe(until)
+    vi.setSystemTime(new Date(UNTIL))
+    expect(onMyWayUntil()).toBeNull() // over
+  })
+
+  it('cancels with minutes 0', async () => {
+    const calls = stubFetch(omw)
+    await startOnMyWay(15, API)
+    await cancelOnMyWay(API)
+    expect(calls[1].body).toEqual({ endpoint: ENDPOINT, minutes: 0 })
+    expect(onMyWayUntil()).toBeNull()
+  })
+
+  it('keeps the window when the cancel fails, drops it when the server forgot the device', async () => {
+    stubFetch(omw)
+    await startOnMyWay(15, API)
+    stubFetch(() => json(503, { error: { code: 'unavailable', message: 'down' } }))
+    await expect(cancelOnMyWay(API)).rejects.toMatchObject({ code: 'unavailable' })
+    expect(onMyWayUntil()).not.toBeNull()
+    stubFetch(() => json(404, { error: { code: 'not_found', message: 'no' } }))
+    await cancelOnMyWay(API)
+    expect(onMyWayUntil()).toBeNull()
+  })
+
+  it('maps errors like the test push', async () => {
+    stubFetch(() => json(429, { error: { code: 'rate_limited', message: 'slow down' } }))
+    await expect(startOnMyWay(15, API)).rejects.toMatchObject({ code: 'rate_limited' })
+    expect(onMyWayUntil()).toBeNull()
+  })
+
+  it('turning push off forgets the window', async () => {
+    stubFetch(omw)
+    await startOnMyWay(60, API)
+    await unsubscribe(API)
+    expect(onMyWayUntil()).toBeNull()
+  })
+
+  it('mock mode shows the first update locally', async () => {
+    localStorage.setItem('parking.pushEndpoint', MOCK_ENDPOINT)
+    const { reg } = stubBrowser()
+    const until = await startOnMyWay(15, 'mock')
+    expect(until).toBe(Date.now() + 15 * 60_000)
+    expect(reg.showNotification).toHaveBeenCalledOnce()
+    const [title] = reg.showNotification.mock.calls[0] as unknown as [string]
+    expect(title).toMatch(/^Parking: \d+ free$/)
+  })
+
+  it('formats the countdown', () => {
+    expect(formatCountdown(15 * 60_000)).toBe('15:00')
+    expect(formatCountdown(61_001)).toBe('1:02')
+    expect(formatCountdown(-5)).toBe('0:00')
   })
 })

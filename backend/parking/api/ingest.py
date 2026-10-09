@@ -1,4 +1,5 @@
-"""Applies worker payloads to the `StateStore`, records the changes and publishes the status.
+"""Applies worker payloads to the `StateStore`, records the changes and publishes the status
+(SSE, then the on-my-way push hook).
 
 Every input goes through one `asyncio.Lock`, so changes are applied, written and published in
 the order they arrived. DB writes run in a worker thread (`anyio.to_thread`); a DB error is
@@ -34,6 +35,8 @@ log = logging.getLogger(__name__)
 HEALTH_TIMEOUT = timedelta(seconds=30)
 
 Publish = Callable[[LotStatus], None]
+# (previous status or None at start-up, new status); called with the ingest lock held
+StatusHook = Callable[[LotStatus | None, LotStatus], None]
 
 
 @dataclass
@@ -57,10 +60,18 @@ class _Pending:
 class Ingestor:
     """The API's single writer: worker payload -> `StateStore` -> DB -> `publish(status)`."""
 
-    def __init__(self, store: StateStore, engine: Engine, publish: Publish | None = None):
+    def __init__(
+        self,
+        store: StateStore,
+        engine: Engine,
+        publish: Publish | None = None,
+        on_status: StatusHook | None = None,
+    ):
         self.store = store
         self.engine = engine
         self.publish = publish
+        self.on_status = on_status  # the on-my-way push rules (P6.6)
+        self._last_status: LotStatus | None = None
         self.stats = IngestStats()
         self._lock = asyncio.Lock()
         # camera id -> store-clock time its last health message arrived
@@ -183,8 +194,15 @@ class Ingestor:
                 repo.upsert_camera_health(session, msg)
 
     def _publish(self) -> None:
+        status = self.store.status()
         if self.publish is not None:
-            self.publish(self.store.status())
+            self.publish(status)
+        if self.on_status is not None:
+            try:
+                self.on_status(self._last_status, status)
+            except Exception:
+                log.exception("status hook failed")
+        self._last_status = status
 
     @staticmethod
     def _log(changes: Iterable[Change]) -> None:

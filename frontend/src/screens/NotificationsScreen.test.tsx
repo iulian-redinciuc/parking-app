@@ -180,6 +180,39 @@ describe('NotificationsScreen', () => {
       expect(await screen.findByText(/It should arrive in a few seconds/)).toBeInTheDocument()
     })
 
+    it("I'm on my way: a chip starts the countdown, Stop updates ends it", async () => {
+      const { reg } = stubPush('granted')
+      render(<NotificationsScreen />)
+      const chip = await screen.findByRole('button', { name: '15 min' })
+      expect(screen.getByRole('button', { name: '30 min' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '60 min' })).toBeInTheDocument()
+      vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+      try {
+        await act(async () => fireEvent.click(chip))
+        expect(reg.showNotification).toHaveBeenCalledOnce() // mock: the first update, locally
+        expect(screen.getByRole('timer')).toHaveTextContent('15:00 left')
+        expect(screen.getByText(/^Updates until /)).toBeInTheDocument()
+        act(() => void vi.advanceTimersByTime(61_000))
+        expect(screen.getByRole('timer')).toHaveTextContent('13:59 left')
+        expect(screen.queryByRole('button', { name: '15 min' })).toBeNull()
+        await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Stop updates' })))
+        expect(screen.queryByRole('timer')).toBeNull()
+        expect(push.onMyWayUntil()).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("I'm on my way: the chips come back when the window ends, also after a reload", async () => {
+      stubPush('granted')
+      localStorage.setItem('parking.onMyWayUntil', String(Date.now() + 2_000))
+      render(<NotificationsScreen />)
+      expect(await screen.findByRole('timer')).toHaveTextContent(/0:0[12] left/)
+      expect(
+        await screen.findByRole('button', { name: '15 min' }, { timeout: 4000 }),
+      ).toBeInTheDocument()
+    })
+
     it('turns notifications off', async () => {
       stubPush('granted')
       render(<NotificationsScreen />)
