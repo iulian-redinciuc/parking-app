@@ -31,6 +31,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from parking import __version__
+from parking.api.cache import TtlCache
 from parking.api.deps import ApiError, RateLimiter, Runtime
 from parking.api.ingest import Ingestor
 from parking.api.jobs import MaintenanceJobs
@@ -158,6 +159,7 @@ def create_app(
             scheduler,
             root,
             jobs,
+            TtlCache(clk),
         )
         if settings.worker_token is None:
             log.warning("WORKER_TOKEN is not set: every /internal/* request gets 401")

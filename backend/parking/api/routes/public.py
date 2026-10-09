@@ -1,4 +1,5 @@
-"""Public routes (api.md §2): `/healthz`, `/api/lot`, `/api/status`, `/api/stream`.
+"""Public routes (api.md §2): `/healthz`, `/api/lot`, `/api/status`, `/api/stream`,
+`/api/history`, `/api/forecast`.
 
 All share the public GET rate limit; zone names follow `?lang=` / `Accept-Language`.
 """
@@ -7,20 +8,37 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator, Mapping
+from datetime import UTC, datetime, timedelta
+from typing import Annotated
+from zoneinfo import ZoneInfo
 
 import anyio
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import text
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from parking.api.deps import DEFAULT_LANG, ApiError, LangDep, Runtime, RuntimeDep, public_limit
 from parking.api.sse import RETRY_MS, Broadcaster
-from parking.messages import LotStatus
+from parking.db import history as hist
+from parking.db.engine import session_scope
+from parking.db.rollups import TOTAL
+from parking.messages import LotStatus, format_ts
 
 log = logging.getLogger(__name__)
 
 # a client that can't take an event (or ping) for this long is dropped
 SEND_TIMEOUT_S = 30
+
+# history / forecast answers are cached this long (in memory) and may be cached by clients
+CACHE_CONTROL = "public, max-age=60"
+# default ranges when `from` is left out
+DEFAULT_SPAN = {
+    "minute": timedelta(hours=24),
+    "hour": timedelta(hours=24),
+    "day": timedelta(days=30),
+}
+FORECAST_AHEAD = timedelta(minutes=30)
+FORECAST_BASIS = f"median of last {hist.FORECAST_WEEKS} same weekday/hour"
 
 router = APIRouter(dependencies=[Depends(public_limit)])
 
@@ -137,3 +155,109 @@ async def stream(rt: RuntimeDep, lang: LangDep) -> EventSourceResponse:
         ping_message_factory=lambda: ServerSentEvent("", event="ping"),
         send_timeout=SEND_TIMEOUT_S,
     )
+
+
+def _zone_capacity(rt: Runtime, zone: str) -> int:
+    """The zone's capacity (`total` = all zones); unknown zone -> 404."""
+    if zone == TOTAL:
+        return sum(rt.store.capacity.values())
+    if zone not in rt.store.capacity:
+        raise ApiError(404, "not_found", f"Zone '{zone}' does not exist")
+    return rt.store.capacity[zone]
+
+
+def _utc(ts: datetime) -> datetime:
+    return ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
+
+
+@router.get("/api/history")
+async def history(
+    rt: RuntimeDep,
+    response: Response,
+    zone: Annotated[str, Query(max_length=64, description="A zone id or `total`.")] = TOTAL,
+    start: Annotated[datetime | None, Query(alias="from")] = None,
+    end: Annotated[datetime | None, Query(alias="to")] = None,
+    bucket: hist.BucketName = "hour",
+) -> dict:
+    """Free/occupied per minute, hour or lot-local day from the rollups (max 2000 points)."""
+    _zone_capacity(rt, zone)
+    response.headers["Cache-Control"] = CACHE_CONTROL
+    key = ("history", zone, start, end, bucket)
+    if (cached := rt.cache.get(key)) is not None:
+        return cached
+    tz = ZoneInfo(rt.config.lot.timezone)
+    end_ts = _utc(end) if end else rt.store.clock.now()
+    start_ts = _utc(start) if start else end_ts - DEFAULT_SPAN[bucket]
+    if start_ts >= end_ts:
+        raise ApiError(422, "bad_request", "`from` must be before `to`")
+    count = hist.point_count(start_ts, end_ts, bucket, tz)
+    if count > hist.MAX_POINTS:
+        raise ApiError(
+            422,
+            "bad_request",
+            f"range too long: {count} {bucket} points, at most {hist.MAX_POINTS}",
+        )
+
+    def load() -> list[hist.HistoryPoint]:
+        with session_scope(rt.engine) as session:
+            return hist.history(session, zone, start_ts, end_ts, bucket, tz)
+
+    points = await anyio.to_thread.run_sync(load)
+    body = {
+        "zone": zone,
+        "bucket": bucket,
+        "from": format_ts(start_ts),
+        "to": format_ts(end_ts),
+        "points": [
+            {
+                "t": format_ts(p.t),
+                "free_avg": p.free_avg,
+                "free_min": p.free_min,
+                "free_max": p.free_max,
+                "occupied_avg": p.occupied_avg,
+            }
+            for p in points
+        ],
+    }
+    rt.cache.put(key, body)
+    return body
+
+
+@router.get("/api/forecast")
+async def forecast(
+    rt: RuntimeDep,
+    response: Response,
+    zone: Annotated[str, Query(max_length=64, description="A zone id or `total`.")] = TOTAL,
+    at: Annotated[datetime | None, Query(description="Default: now + 30 min.")] = None,
+) -> dict:
+    """The median free count of the same weekday and hour over the last 8 weeks;
+    404 `not_enough_data` with fewer than 3 of those hours in `zone_hour`."""
+    capacity = _zone_capacity(rt, zone)
+    key = ("forecast", zone, at)
+    if (cached := rt.cache.get(key)) is None:
+        at_ts = _utc(at) if at else rt.store.clock.now() + FORECAST_AHEAD
+        tz = ZoneInfo(rt.config.lot.timezone)
+
+        def load() -> list[float]:
+            with session_scope(rt.engine) as session:
+                return hist.forecast_values(session, zone, at_ts, tz)
+
+        values = await anyio.to_thread.run_sync(load)
+        cached = (at_ts, len(values), hist.expected_free(values, capacity))
+        rt.cache.put(key, cached)
+    at_ts, samples, expected = cached
+    if expected is None:
+        raise ApiError(
+            404,
+            "not_enough_data",
+            f"only {samples} of the last {hist.FORECAST_WEEKS} same weekday/hour have data"
+            f" (at least {hist.FORECAST_MIN_POINTS} needed)",
+        )
+    response.headers["Cache-Control"] = CACHE_CONTROL
+    return {
+        "zone": zone,
+        "at": format_ts(at_ts),
+        "free_expected": expected,
+        "basis": FORECAST_BASIS,
+        "samples": samples,
+    }

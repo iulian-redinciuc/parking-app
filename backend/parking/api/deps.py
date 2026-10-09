@@ -17,6 +17,7 @@ from limits.storage import MemoryStorage
 from limits.strategies import MovingWindowRateLimiter
 from sqlalchemy import Engine
 
+from parking.api.cache import TtlCache
 from parking.api.ingest import Ingestor
 from parking.api.jobs import MaintenanceJobs
 from parking.api.sse import Broadcaster
@@ -62,6 +63,7 @@ class Runtime:
     scheduler: PushScheduler | None = None  # likewise
     root: Path = Path(".")  # the app root: `config/`, `data/`, `deploy/`
     jobs: MaintenanceJobs | None = None  # rollups + retention (data-model.md §4)
+    cache: TtlCache | None = None  # history + forecast responses (60 s)
 
     def path(self, path: Path) -> Path:
         """A relative config path (e.g. `slots_file`) under the app root, whatever the cwd."""

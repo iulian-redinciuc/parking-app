@@ -55,7 +55,7 @@ The level is computed **by the server**. The client only maps it to words and co
 ```json
 { "error": { "code": "not_found", "message": "Zone 'roof' does not exist" } }
 ```
-Codes: `bad_request` (400; also 422 for a body or query that fails validation, with `details`: `[{"type","loc","msg"}]`), `unauthorized` (401), `forbidden` (403), `not_found` (404, also unknown paths), `method_not_allowed` (405), `conflict` (409), `rate_limited` (429, with `Retry-After` seconds), `unavailable` (503: no data received yet since start-up), `internal` (500, message `internal server error`; details only in the log). Every error, including FastAPI's own, uses this format (exception handlers in `parking/api/app.py`, P2.9).
+Codes: `bad_request` (400; also 422 for a body or query that fails validation, with `details`: `[{"type","loc","msg"}]`), `unauthorized` (401), `forbidden` (403), `not_found` (404, also unknown paths), `not_enough_data` (404, `/api/forecast` without 3 weeks of data), `method_not_allowed` (405), `conflict` (409), `rate_limited` (429, with `Retry-After` seconds), `unavailable` (503: no data received yet since start-up), `internal` (500, message `internal server error`; details only in the log). Every error, including FastAPI's own, uses this format (exception handlers in `parking/api/app.py`, P2.9).
 
 ---
 
@@ -69,8 +69,10 @@ Codes: `bad_request` (400; also 422 for a body or query that fails validation, w
 | GET | `/api/stream` | 2 | SSE (see §3) |
 
 Zone names (`/api/lot`, `/api/status`, `/api/stream`): `?lang=` first, then the `Accept-Language` languages by `q` (primary subtag only: `ro-RO` → `ro`; `q=0` and `*` ignored); the first one that any zone has a name in wins, else `en` (a zone without that name falls back to `en`, then its first name). `/api/lot` and `/api/status` send `Vary: Accept-Language`. `?lang=` longer than 35 characters → 422.
-| GET | `/api/history` | 7 | Query: `zone` (or `total`), `from`, `to`, `bucket=minute\|hour\|day`. Returns `{"zone":"ground","bucket":"hour","points":[{"t":"…","free_avg":12.4,"free_min":8,"occupied_avg":27.6}]}`. Max 2000 points |
-| GET | `/api/forecast` | 7 | Query: `zone`, `at` (ISO, default now + 30 min). Returns `{"zone":"ground","at":"…","free_expected":10,"basis":"median of last 8 same weekday/hour"}` |
+| GET | `/api/history` | 7 | Query: `zone` (a zone id or `total`, default `total`), `from`, `to` (ISO 8601; naive = UTC; default `to` = now, `from` = `to` − 24 h, or − 30 days for `day`), `bucket=minute\|hour\|day` (default `hour`). Returns `{"zone":"ground","bucket":"hour","from":"…","to":"…","points":[{"t":"…","free_avg":12.4,"free_min":8,"free_max":15,"occupied_avg":27.6}]}`: `minute` from `zone_minute`, `hour` from `zone_hour`, `day` = lot-local days (lot.yaml `timezone`) of `zone_hour` weighted by its `samples`; `t` = bucket start (UTC), buckets from the one holding `from` up to before `to`, empty buckets left out. Unknown zone `404 not_found`; `from` ≥ `to` or more than **2000** buckets `422 bad_request` |
+| GET | `/api/forecast` | 7 | Query: `zone` (default `total`), `at` (ISO, default now + 30 min). Returns `{"zone":"ground","at":"…","free_expected":10,"basis":"median of last 8 same weekday/hour","samples":6}`: the median `free_avg` of the `zone_hour` rows for the same lot-local weekday and hour 1…8 weeks before `at` (wall-clock, so it follows DST), rounded and kept within 0…capacity; `samples` = how many of the 8 had data. Fewer than 3 → `404 not_enough_data`; unknown zone `404 not_found` |
+
+`/api/history` and `/api/forecast` answers are cached in memory for 60 s per API process (keyed by the query as sent, so a default `to`/`at` can be up to 60 s old) and sent with `Cache-Control: public, max-age=60` (P7.6, `parking/db/history.py`, `parking/api/cache.py`).
 | GET | `/api/push/vapid-public-key` | 6 | `{"key":"BAx…"}`; `503 unavailable` when the VAPID keys aren't set |
 | POST | `/api/push/subscriptions` | 6 | Body: `{"subscription": <PushSubscription JSON>, "prefs": Prefs, "tz": "Europe/Bucharest", "lang": "en"}` → 201 `{"id":"…"}`. Upserts by endpoint (same `id`; keys, prefs, tz, lang replaced, `failures` reset) |
 | PATCH | `/api/push/subscriptions` | 6 | Body: `{"endpoint":"…","prefs":Prefs}` → 200 `{"id","prefs"}` (prefs replaced as a whole); unknown endpoint 404 |

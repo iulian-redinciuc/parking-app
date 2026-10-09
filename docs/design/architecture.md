@@ -94,14 +94,17 @@ backend/
 │   ├── db/
 │   │   ├── engine.py            # SQLModel engine/session (WAL mode)
 │   │   ├── models.py            # tables (see data-model.md)
-│   │   └── repo.py              # read/write helpers, aggregation, pruning
+│   │   ├── repo.py              # read/write helpers
+│   │   ├── rollups.py           # zone_minute / zone_hour rollups, pruning
+│   │   └── history.py           # /api/history and /api/forecast reads
 │   ├── api/
 │   │   ├── app.py               # create_app(): routers, CORS, rate limits, lifespan
 │   │   ├── deps.py              # settings, db session, state store, auth dependencies
 │   │   ├── sse.py               # Broadcaster (fan-out to SSE clients)
 │   │   ├── ingest.py            # applies worker payloads to core/, records changes, broadcasts
+│   │   ├── cache.py             # 60 s in-memory cache for history / forecast
 │   │   └── routes/
-│   │       ├── public.py        # /healthz, /api/lot, /api/status, /api/stream, /api/history
+│   │       ├── public.py        # /healthz, /api/lot, /api/status, /api/stream, /api/history, /api/forecast
 │   │       ├── internal.py      # /internal/* (worker token only)
 │   │       ├── push.py          # /api/push/*
 │   │       └── admin.py         # /api/admin/*
