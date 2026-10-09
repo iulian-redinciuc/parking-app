@@ -80,9 +80,8 @@ def make_worker(root, **kw):
     api = ApiClient(None, None, "cam-ground", print_mode=True, out=out)
     kw.setdefault("fake_detector", True)
     kw.setdefault("control_port", None)
-    w = OccupancyWorker(
-        root / "config" / "lot.yaml", "cam-ground", api=api, settings=Settings(), **kw
-    )
+    kw.setdefault("settings", Settings())
+    w = OccupancyWorker(root / "config" / "lot.yaml", "cam-ground", api=api, **kw)
     return w, out
 
 
@@ -337,3 +336,25 @@ def test_unreadable_reference_turns_the_shift_check_off(lot):
     assert w._setup.shift is None
     w.step()
     assert not w.shifted
+
+
+def test_debug_capture_saves_frames_with_their_observation(lot):
+    settings = Settings(debug_capture=True)
+    w, out = make_worker(lot, settings=settings)
+    w.loop()
+    days = list((lot / "data" / "debug" / "cam-ground").iterdir())
+    assert len(days) == 1
+    # a.jpg (G01 taken) is the periodic capture, b.jpg (G01 free) a flip
+    reasons = sorted(p.name.split("-", 1)[1] for p in days[0].iterdir())
+    assert reasons == ["flip.jpg", "flip.json", "periodic.jpg", "periodic.json"]
+    flip = next(days[0].glob("*-flip.json"))
+    meta = json.loads(flip.read_text())
+    assert meta["flipped"] == ["G01"]
+    assert meta["observation"] == lines(out)[1]
+
+
+def test_debug_capture_is_off_by_default(lot):
+    w, _ = make_worker(lot)
+    w.loop()
+    assert w.observations == 2
+    assert not (lot / "data" / "debug").exists()

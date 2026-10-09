@@ -223,8 +223,9 @@ video_time_s,direction,note
 | `VAPID_SUBJECT` | `mailto:you@example.com` | API |
 | `ADMIN_PASSWORD_HASH` | from `parking admin hash-password` (prints the line in single quotes so Compose and dotenv keep the `$`s) | API |
 | `ADMIN_TOKEN` | long random string | API (scripts / before Phase 7 login exists) |
-| `DEBUG_CAPTURE` | `false` | workers |
-| `DEBUG_RETENTION_HOURS` | `24` | workers |
+| `DEBUG_CAPTURE` | `false` (save frames + observations to `data/debug/`, [vision.md §6.1](vision.md#61-debug-frame-capture-parkingworkersdebug_capturepy)) | workers |
+| `DEBUG_CAPTURE_EVERY_MIN` | `10` (periodic capture interval; slot flips are captured too) | workers |
+| `DEBUG_RETENTION_HOURS` | `24` (captures older than this are deleted, even with capture off) | workers |
 | `TUNNEL_TOKEN` | from the Cloudflare dashboard | cloudflared |
 | `LOG_LEVEL` | `INFO` | all |
 | `PARKING_VERSION` | `latest` (dev) or `v0.x.y` (pinned in production) | compose (image tag) |

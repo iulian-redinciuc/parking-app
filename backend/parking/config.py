@@ -404,7 +404,8 @@ class Settings(BaseSettings):
     admin_password_hash: SecretStr | None = None
     admin_token: SecretStr | None = None
     debug_capture: bool = False
-    debug_retention_hours: int = 24
+    debug_capture_every_min: float = Field(default=10, gt=0)
+    debug_retention_hours: float = Field(default=24, gt=0)
     tunnel_token: SecretStr | None = None
     log_level: str = "INFO"
     parking_version: str = "latest"

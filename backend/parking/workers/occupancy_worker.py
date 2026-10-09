@@ -4,7 +4,7 @@ Every `interval` seconds (the `folder:` source's `interval`, otherwise the camer
 `sample_every_s`): read a frame → health check (unhealthy frames are recorded and skipped)
 → camera shift check every `shift_check_every_s` against `data/reference/<camera>.jpg`, if it
 exists (vision.md §6) → `analyze_frame` (the same pipeline as `parking analyze`) →
-`ApiClient.send_observation`.
+`ApiClient.send_observation` → debug capture (`DEBUG_CAPTURE`, workers/debug_capture.py).
 
 One DEBUG line per observation, an INFO summary every `SUMMARY_EVERY_S`.
 """
@@ -31,6 +31,7 @@ from parking.vision.pipeline import AnalysisResult, analyze_frame
 from parking.vision.shift import ShiftDetector
 from parking.vision.sources import FolderReplaySource, Frame, FrameSource, make_source
 from parking.workers.base import Schedule, Worker, WorkerError, load_camera
+from parking.workers.debug_capture import capture_from_settings
 
 log = logging.getLogger(__name__)
 
@@ -176,6 +177,9 @@ class OccupancyWorker(Worker):
         self._analysed_at: deque[float] = deque(maxlen=STATS_WINDOW)
         self._inference_ms: deque[float] = deque(maxlen=STATS_WINDOW)
         self._summary = _Summary()
+        self.debug = capture_from_settings(
+            self.settings, self.root, self.camera_id, self.lot.lot.timezone
+        )
 
     @property
     def interval(self) -> float:
@@ -191,6 +195,8 @@ class OccupancyWorker(Worker):
             len(self._setup.slot_file.slots),
             self.interval,
         )
+        log.info("%s: %s", self.camera_id, self.debug.describe())
+        self.debug.start(self.stop_event)
         schedule = Schedule(self.interval, self.stop_event.wait)
         next_summary = time.monotonic() + SUMMARY_EVERY_S
         while not self.stop_event.is_set():
@@ -252,6 +258,7 @@ class OccupancyWorker(Worker):
         sent = self.api.send_observation(obs)
         self.observations += 1
         self._summary.add(result, sent)
+        self.debug.maybe_save(frame.image, obs)
         log.debug(
             "%s: %s in %.0f ms%s",
             self.camera_id,

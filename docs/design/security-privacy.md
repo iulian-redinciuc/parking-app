@@ -52,7 +52,7 @@ If the lot is in the EU/EEA (or the UK), filming people and vehicles is personal
 - [ ] **Lawful basis** identified (usually legitimate interest), with a short balancing note.
 - [ ] **Data minimisation:** frames processed in memory and discarded. Only counts and slot states stored. Track IDs are ephemeral and never linked to identities. No licence-plate recognition.
 - [ ] **No public video:** the public API returns numbers only. Snapshots are admin-only.
-- [ ] **Debug captures** off by default. When on, auto-deleted after `DEBUG_RETENTION_HOURS` (24 h). Datasets kept longer get faces and plates blurred.
+- [ ] **Debug captures** off by default (`DEBUG_CAPTURE=false`). When on, full frames + observation JSON go to `data/debug/<camera>/<date>/` on the vision host only (never the API, never the repo) and are auto-deleted after `DEBUG_RETENTION_HOURS` (24 h; the pruning also runs with capture off). Turn it on only while debugging or collecting the validation set, and back off afterwards. Datasets kept longer get faces and plates blurred.
 - [ ] **Signage** at the lot: who operates the cameras, purpose, contact.
 - [ ] **Camera views** don't cover neighbouring private property, windows or public streets beyond what's necessary (use privacy masks in the camera settings).
 - [ ] **DPIA** considered: likely needed for systematic monitoring of a publicly accessible area at scale. For a small private lot, document why it isn't.

@@ -99,6 +99,8 @@ Put the suggested values in `cameras[].health` in `lot.yaml` (check the night an
 
 **Done when:** captures appear when enabled and disappear after the retention period (test with 1 h).
 
+**Implementation:** `parking/workers/debug_capture.py`, spec in [vision.md §6.1](../design/vision.md#61-debug-frame-capture-parkingworkersdebug_capturepy). N = `DEBUG_CAPTURE_EVERY_MIN` (10). On the vision host: set `DEBUG_CAPTURE=true` in `deploy/.env`, `docker compose up -d vision-occupancy`, and the files appear under `data/debug/cam-ground/`.
+
 ## P4.8: Build the validation set
 **Steps**
 1. Turn on debug capture for ~1–2 weeks (or write a small `parking grab --every 15m --days 7` command).
