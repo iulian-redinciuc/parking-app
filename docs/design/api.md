@@ -222,7 +222,7 @@ Each worker runs a tiny HTTP server on port **9000**, reachable only inside the 
 
 Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `parking worker … --control-port` (default 9000, `0` = off) and `--control-host` (default `0.0.0.0`; the port is never published outside the Docker network). **Without `WORKER_TOKEN` the server isn't started** (a warning is logged), so there is never an open control port. Responses:
 - `snapshot`: `annotated` accepts `true/1/yes/on`; the latest frame read (also an unhealthy one, so an admin can see why), annotated with the last analysis of that frame; `503 unavailable` before the first frame.
-- `reload`: `200 {"camera_id", "slots", "interval_s"}`; re-reads lot.yaml (this camera's section), the slot file and `reference_empty`; the detector, the slot classifier and the source are rebuilt only if their config changed. Anything invalid → `400 bad_request` and the old setup keeps running.
+- `reload`: `200 {"camera_id", "slots", "interval_s"}`; re-reads lot.yaml (this camera's section), the slot file and `reference_empty`; the detector, the slot classifier and the source are rebuilt only if their config changed. Anything invalid → `400 bad_request` and the old setup keeps running. Flow workers (P5.6) answer `200 {"camera_id", "in_direction"}` after re-reading lot.yaml and the line file (fresh motion gate and counter, tracker reset with ids still rising).
 - `save-reference`: `200 {"saved": "data/reference/<camera>.jpg", "ts"}`; `409 conflict` before the first frame. Later frames are compared with it and `shifted` clears.
 - Missing/wrong token `401 unauthorized`, unknown route `404 not_found`; errors use the §1 format.
 
@@ -250,9 +250,11 @@ Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `
 {
   "v": 1, "camera_id": "cam-ground", "ts": "…",
   "state": "ok", "issue": null,
-  "fps": 0.2, "last_frame_age_s": 3.1, "inference_ms_avg": 151, "unhealthy_ratio": 0.0
+  "fps": 0.2, "last_frame_age_s": 3.1, "inference_ms_avg": 151, "unhealthy_ratio": 0.0,
+  "gate_active_ratio": null
 }
 ```
+`gate_active_ratio` (flow workers only, P5.6, else `null`): share of the last 10 s of frames the motion gate let through to the detector. A flow worker's `fps` is frames processed per second over the last 10 s and `inference_ms_avg` the mean gate + detector + tracker time of the frames the gate let through (`null` while the ramp is quiet). Its frame-health check runs once a second without the `frozen` check (a quiet ramp looks the same for minutes); no new frame for 5 s is `connect_failed`.
 `state`: `ok | degraded | down`. `issue`: `null | black | frozen | blurry | shifted | connect_failed`. A `shifted` camera (vision.md §6) is `degraded` (unless `down`) and reports `issue: shifted` while its frames are otherwise healthy.
 
 ---

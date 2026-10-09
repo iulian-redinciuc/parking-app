@@ -152,6 +152,14 @@ services:
     networks: [internal, egress]
     deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: 1200M } } }
     environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
+    depends_on: { api: { condition: service_healthy } }
+    healthcheck:                                               # same as vision-occupancy
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
 
   tunnel:
     container_name: parking-tunnel

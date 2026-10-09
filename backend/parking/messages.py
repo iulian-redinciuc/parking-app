@@ -97,6 +97,8 @@ class CameraHealthMsg(Message):
     last_frame_age_s: float | None = Field(default=None, ge=0)
     inference_ms_avg: float | None = Field(default=None, ge=0)
     unhealthy_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    # flow cameras: share of the last 10 s of frames the motion gate let through
+    gate_active_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 # --- API -> clients (api.md §1) ---

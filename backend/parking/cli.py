@@ -1290,6 +1290,63 @@ def worker_occupancy(
         _fail(str(e))
 
 
+@worker_app.command("flow")
+def worker_flow(
+    camera: Annotated[str, typer.Option(help="Flow camera id in the config, e.g. cam-ramp.")],
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    print_mode: Annotated[
+        bool,
+        typer.Option(
+            "--print", help="Print flow events and health as JSON lines instead of sending."
+        ),
+    ] = False,
+    debug_video: Annotated[
+        Path | None,
+        typer.Option(
+            help="Write every frame annotated (ROI, lines, boxes, track ids, running IN/OUT) "
+            "to this MP4."
+        ),
+    ] = None,
+    control_port: Annotated[
+        int, typer.Option(help="Port of the /control/* server (0 = off).")
+    ] = 9000,
+    control_host: Annotated[str, typer.Option(help="Address the control server binds.")] = (
+        "0.0.0.0"
+    ),
+    max_frames: Annotated[int, typer.Option(help="Stop after this many frames (0 = never).")] = 0,
+) -> None:
+    """Run the flow worker: gate + track + two-line count every frame and send in/out events."""
+    import logging
+
+    from parking.workers.base import WorkerError, load_settings
+    from parking.workers.flow_worker import FlowWorker
+
+    if not 0 <= control_port <= 65535:
+        raise typer.BadParameter("must be 0..65535", param_hint="--control-port")
+    if max_frames < 0:
+        raise typer.BadParameter("must be >= 0", param_hint="--max-frames")
+
+    config = _find_config(config)
+    settings = load_settings(config.resolve().parent.parent)
+    logging.basicConfig(
+        level=settings.log_level.upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    try:
+        worker = FlowWorker(
+            config,
+            camera,
+            debug_video=debug_video,
+            print_mode=print_mode,
+            settings=settings,
+            control_port=control_port or None,
+            control_host=control_host,
+        )
+        worker.run(max_frames or None)
+    except WorkerError as e:
+        _fail(str(e))
+
+
 @app.command("api")
 def api(
     config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,

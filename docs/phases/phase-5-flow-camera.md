@@ -93,6 +93,17 @@ Implement `TwoLineCounter` per [vision.md §7.3](../design/vision.md#73-two-line
 
 **Done when:** driving or walking a car through the lines produces exactly one event in the right direction (check with `--print`, or the API log).
 
+As built: see [vision.md §7.1](../design/vision.md#71-frame-pipeline-flow-worker) and the health fields in [api.md](../design/api.md#health-every-10-s). On the vision host, once Camera A and its line file exist:
+
+```bash
+cd deploy
+docker compose --profile flow up -d                       # the vision-flow service
+docker compose logs -f vision-flow                        # one "IN (track #…)" / "OUT …" line per car
+# or by hand, without sending anything:
+docker compose run --rm vision-flow flow --camera cam-ramp --print --control-port 0 \
+  --debug-video /app/data/flow-debug.mp4
+```
+
 ## P5.7: FlowCounter in the API + corrections
 **Files:** `parking/core/flow_counter.py`, `parking/api/routes/admin.py`, `parking/api/deps.py` (bearer auth with `ADMIN_TOKEN`), migration if needed
 

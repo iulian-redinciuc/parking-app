@@ -5,7 +5,7 @@
 # Isolation (deployment.md §1.1): project "parking", its own networks, API on loopback only.
 # Public entry (deployment.md §5 Option A): only while testing,
 #   docker compose --profile public up -d   ...   docker compose --profile public down
-# Not yet here: vision-flow (Phase 5).
+# Entry/exit camera (Phase 5): docker compose --profile flow up -d
 name: parking
 
 x-common: &common
@@ -39,6 +39,25 @@ services:
     command: ["occupancy", "--camera", "cam-ground"]
     networks: [internal, egress]                               # egress: reach the camera
     deploy: { resources: { limits: { cpus: "${VISION_CPUS:-1.0}", memory: 1200M } } }
+    environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:                                               # the /control/* server is up
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
+
+  vision-flow:
+    <<: *common
+    container_name: parking-vision-flow
+    image: ghcr.io/iulian-redinciuc/parking-vision:${PARKING_VERSION:-latest}
+    command: ["flow", "--camera", "cam-ramp"]
+    profiles: ["flow"]                                         # enabled from Phase 5
+    networks: [internal, egress]                               # egress: reach the camera
+    deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: 1200M } } }
     environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
     depends_on:
       api: { condition: service_healthy }
