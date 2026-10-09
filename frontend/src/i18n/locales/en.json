@@ -77,7 +77,7 @@
     "away_m": "You're {{value}} m away",
     "away_km": "You're {{value}} km away",
     "free": "{{count}} free ({{zones}})",
-    "dismiss": "Hide"
+    "dismiss": "Hide this alert"
   },
   "alerts": {
     "intro": "Get told how many spaces are free. A web app can't follow your location in the background, so notifications come from reminders you set, or while the app is open.",

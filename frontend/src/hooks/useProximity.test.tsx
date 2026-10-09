@@ -194,7 +194,7 @@ describe('ProximityBanner', () => {
     expect(options.tag).toBe('parking-status')
     expect(options.body).toMatch(/^You're 400 m away · \d+ free/)
 
-    act(() => screen.getByRole('button', { name: 'Hide' }).click())
+    act(() => screen.getByRole('button', { name: 'Hide this alert' }).click())
     expect(screen.queryByTestId('proximity-banner')).toBeNull()
   })
 })

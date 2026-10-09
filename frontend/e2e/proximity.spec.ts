@@ -45,7 +45,7 @@ test('entering the radius shows the banner and one local notification', async ({
   }
 
   // Out and back in: no second alert within 2 h, even after a reload.
-  await page.getByRole('button', { name: 'Hide' }).click()
+  await banner.getByRole('button', { name: 'Hide this alert' }).click()
   await context.setGeolocation(FAR)
   await page.reload()
   await context.setGeolocation(NEAR)
