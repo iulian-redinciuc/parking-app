@@ -1,12 +1,11 @@
 // REST client for the public API (docs/design/api.md §2). Every failure becomes an
 // `ApiRequestError` carrying an `ApiError`; a caller's own abort is passed through unchanged.
+import { API_BASE, IS_MOCK } from './base'
 import { mockLotInfo, mockStatus } from './mock'
 import type { ApiError, LotInfo, LotStatus } from './types'
 import { isApiErrorBody, isLotInfo, isLotStatus } from './validate'
 
-/** `mock` (dev default), or the API origin, e.g. `http://localhost:8000`. */
-export const API_BASE: string = (import.meta.env.VITE_API_BASE ?? 'mock').replace(/\/+$/, '')
-export const IS_MOCK = API_BASE === 'mock'
+export { API_BASE, IS_MOCK } from './base'
 export const TIMEOUT_MS = 10_000
 
 export class ApiRequestError extends Error {
