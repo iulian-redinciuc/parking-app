@@ -62,12 +62,42 @@ export interface LotInfo {
   levels: { plenty: number; filling: number }
 }
 
+export type HistoryBucket = 'minute' | 'hour' | 'day'
+
+/** One bucket of `GET /api/history`; `t` = bucket start (UTC). */
+export interface HistoryPoint {
+  t: string
+  free_avg: number
+  free_min: number
+  free_max: number
+  occupied_avg: number
+}
+
+/** `GET /api/history` (api.md §2): empty buckets are left out. */
+export interface History {
+  zone: string
+  bucket: HistoryBucket
+  from: string
+  to: string
+  points: HistoryPoint[]
+}
+
+/** `GET /api/forecast`: 404 `not_enough_data` with fewer than 3 weeks of data. */
+export interface Forecast {
+  zone: string
+  at: string
+  free_expected: number
+  basis: string
+  samples: number
+}
+
 /** Codes the server sends (api.md §1 error format). */
 export type ServerErrorCode =
   | 'bad_request'
   | 'unauthorized'
   | 'forbidden'
   | 'not_found'
+  | 'not_enough_data'
   | 'method_not_allowed'
   | 'conflict'
   | 'rate_limited'

@@ -4,8 +4,16 @@
 // which sends the admin screens back to the login.
 import { API_BASE, IS_MOCK } from './base'
 import { correctMockZone, mockLotInfo, mockStatus } from './mock'
-import type { ApiError, LotInfo, LotStatus, ZoneStatus } from './types'
-import { isApiErrorBody, isLotInfo, isLotStatus } from './validate'
+import type {
+  ApiError,
+  Forecast,
+  History,
+  HistoryBucket,
+  LotInfo,
+  LotStatus,
+  ZoneStatus,
+} from './types'
+import { isApiErrorBody, isForecast, isHistory, isLotInfo, isLotStatus } from './validate'
 
 export { API_BASE, IS_MOCK } from './base'
 export const TIMEOUT_MS = 10_000
@@ -121,6 +129,38 @@ export function getStatus(options?: RequestOptions): Promise<LotStatus> {
 export function getLot(options?: RequestOptions): Promise<LotInfo> {
   if (IS_MOCK && !options?.base) return Promise.resolve(mockLotInfo())
   return request('/api/lot', isLotInfo, options)
+}
+
+export interface HistoryQuery {
+  /** A zone id or `total` (the default). */
+  zone?: string
+  from?: string
+  to?: string
+  bucket?: HistoryBucket
+}
+
+function query(params: Record<string, string | undefined>): string {
+  const q = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) if (value !== undefined) q.set(key, value)
+  const text = q.toString()
+  return text ? `?${text}` : ''
+}
+
+/** `GET /api/history` (api.md §2). The mock build answers with a synthetic 8-week curve from a
+ * lazily loaded module, so its code stays out of the main chunk. */
+export async function getHistory(params: HistoryQuery, options?: RequestOptions): Promise<History> {
+  if (IS_MOCK && !options?.base) return (await import('./mockHistory')).mockHistory(params)
+  return request(`/api/history${query({ ...params })}`, isHistory, options)
+}
+
+/** `GET /api/forecast` (`at` defaults to now + 30 min server-side); 404 `not_enough_data` with
+ * fewer than 3 weeks of data. */
+export async function getForecast(
+  params: { zone?: string; at?: string },
+  options?: RequestOptions,
+): Promise<Forecast> {
+  if (IS_MOCK && !options?.base) return (await import('./mockHistory')).mockForecast(params)
+  return request(`/api/forecast${query(params)}`, isForecast, options)
 }
 
 /** A JSON `POST`/`PATCH`/`DELETE` to the API (the push routes, api.md §2); never mocked here. */

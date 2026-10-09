@@ -10,6 +10,8 @@ import {
   apiUrl,
   correctZone,
   getAdminCameras,
+  getForecast,
+  getHistory,
   getAdminSession,
   getCameraConfig,
   getAdminToken,
@@ -417,5 +419,60 @@ describe('admin corrections client', () => {
     expect(await failure(getCorrections(50, { base: BASE }))).toMatchObject({
       code: 'bad_response',
     })
+  })
+})
+
+describe('history and forecast (real API)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('sends the query and validates the answer', async () => {
+    const body = {
+      zone: 'total',
+      bucket: 'minute',
+      from: '2026-10-09T09:00:00Z',
+      to: '2026-10-09T10:00:00Z',
+      points: [
+        {
+          t: '2026-10-09T09:00:00Z',
+          free_avg: 12.5,
+          free_min: 12,
+          free_max: 13,
+          occupied_avg: 87.5,
+        },
+      ],
+    }
+    const fetch = reply(200, body)
+    vi.stubGlobal('fetch', fetch)
+    const history = await getHistory(
+      { zone: 'total', from: body.from, bucket: 'minute' },
+      { base: BASE },
+    )
+    expect(history.points[0].free_avg).toBe(12.5)
+    expect(fetch).toHaveBeenCalledWith(
+      'http://api.test/api/history?zone=total&from=2026-10-09T09%3A00%3A00Z&bucket=minute',
+      expect.anything(),
+    )
+    vi.stubGlobal('fetch', reply(200, { ...body, points: [{ t: 'x' }] }))
+    expect((await failure(getHistory({}, { base: BASE }))).code).toBe('bad_response')
+  })
+
+  it('passes not_enough_data through as a 404', async () => {
+    vi.stubGlobal(
+      'fetch',
+      reply(404, { error: { code: 'not_enough_data', message: 'fewer than 3 weeks' } }),
+    )
+    const err = await failure(getForecast({ zone: 'ground' }, { base: BASE }))
+    expect(err).toMatchObject({ code: 'not_enough_data', status: 404 })
+    vi.stubGlobal(
+      'fetch',
+      reply(200, {
+        zone: 'ground',
+        at: '2026-10-09T10:30:00Z',
+        free_expected: 9,
+        basis: 'x',
+        samples: 6,
+      }),
+    )
+    expect((await getForecast({}, { base: BASE })).free_expected).toBe(9)
   })
 })

@@ -19,7 +19,6 @@
     "live": "Live",
     "alerts": "Alerts",
     "stats": "Stats",
-    "stats_note": "Charts of typical free spaces are coming soon.",
     "privacy": "Privacy",
     "privacy_note": "What we process and store will be described here."
   },
@@ -276,5 +275,43 @@
         "reset": "scheduled reset"
       }
     }
+  },
+  "stats": {
+    "zone_picker": "Zone",
+    "total": "All zones",
+    "loading": "Loading the stats…",
+    "error": "Couldn't load the stats. Check your connection and try again.",
+    "retry": "Try again",
+    "mock_note": "Preview with sample data.",
+    "forecast_title": "Soon",
+    "forecast": "Usually ~{{count}} free at {{time}}",
+    "forecast_basis_one": "From the same time {{count}} week earlier",
+    "forecast_basis_other": "From the same time over the last {{count}} weeks",
+    "forecast_none": "Not enough history yet to say what's usual at {{time}}.",
+    "today_title": "Today",
+    "today_caption": "Free spaces today compared with a typical {{weekday}}",
+    "today_none": "No data yet today.",
+    "legend_today": "Today",
+    "legend_median": "Typical",
+    "legend_band": "Usual range (middle half)",
+    "axis_time": "Time of day",
+    "axis_free": "Free spaces",
+    "tooltip_today": "Today: {{value}} free",
+    "tooltip_typical": "Typical: {{value}} free",
+    "tooltip_range": "Usual: {{low}}–{{high}} free",
+    "no_typical": "The typical band appears after 3 weeks of data.",
+    "heatmap_title": "Busiest hours",
+    "heatmap_caption": "Average free spaces by weekday and hour, over the last 8 weeks",
+    "heatmap_less": "Fewer free",
+    "heatmap_more": "More free",
+    "heatmap_cell": "{{weekday}} {{hour}}: {{value}} free on average",
+    "heatmap_cell_none": "{{weekday}} {{hour}}: no data",
+    "heatmap_none": "No history yet.",
+    "table_hour": "Hour",
+    "table_today": "Today (average free)",
+    "table_typical": "Typical (median free)",
+    "table_range": "Usual range",
+    "table_weekday": "Day",
+    "no_value": "–"
   }
 }

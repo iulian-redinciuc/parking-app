@@ -25,7 +25,7 @@ describe('App shell', () => {
     expect(screen.getByRole('link', { name: 'Live' })).toHaveAttribute('aria-current', 'page')
   })
 
-  it('switches screens from the bottom nav', () => {
+  it('switches screens from the bottom nav', async () => {
     renderAt('#/')
     fireEvent.click(screen.getByRole('link', { name: 'Alerts' }))
     expect(screen.getByRole('heading', { name: 'Alerts' })).toBeInTheDocument()
@@ -34,7 +34,7 @@ describe('App shell', () => {
     expect(screen.getByRole('link', { name: 'Live' })).not.toHaveAttribute('aria-current')
 
     fireEvent.click(screen.getByRole('link', { name: 'Stats' }))
-    expect(screen.getByRole('heading', { name: 'Stats' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Stats' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('link', { name: 'Live' }))
     expect(screen.getByRole('heading', { name: 'Live' })).toBeInTheDocument()

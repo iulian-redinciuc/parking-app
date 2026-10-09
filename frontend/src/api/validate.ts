@@ -1,5 +1,13 @@
 // Runtime shape checks for API responses (the server is another program: trust, but verify).
-import type { ApiErrorBody, LotInfo, LotStatus, Totals, ZoneStatus } from './types'
+import type {
+  ApiErrorBody,
+  Forecast,
+  History,
+  LotInfo,
+  LotStatus,
+  Totals,
+  ZoneStatus,
+} from './types'
 
 type Obj = Record<string, unknown>
 
@@ -11,6 +19,7 @@ const ERROR_CODES = [
   'unauthorized',
   'forbidden',
   'not_found',
+  'not_enough_data',
   'method_not_allowed',
   'conflict',
   'rate_limited',
@@ -97,5 +106,38 @@ export function isApiErrorBody(x: unknown): x is ApiErrorBody {
     (details === undefined ||
       (Array.isArray(details) &&
         details.every((d) => isObj(d) && isStr(d.type) && Array.isArray(d.loc) && isStr(d.msg))))
+  )
+}
+
+const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x)
+
+export function isHistory(x: unknown): x is History {
+  return (
+    isObj(x) &&
+    isStr(x.zone) &&
+    oneOf(['minute', 'hour', 'day'])(x.bucket) &&
+    isTs(x.from) &&
+    isTs(x.to) &&
+    Array.isArray(x.points) &&
+    x.points.every(
+      (p) =>
+        isObj(p) &&
+        isTs(p.t) &&
+        isNum(p.free_avg) &&
+        isNum(p.free_min) &&
+        isNum(p.free_max) &&
+        isNum(p.occupied_avg),
+    )
+  )
+}
+
+export function isForecast(x: unknown): x is Forecast {
+  return (
+    isObj(x) &&
+    isStr(x.zone) &&
+    isTs(x.at) &&
+    isCount(x.free_expected) &&
+    isStr(x.basis) &&
+    isCount(x.samples)
   )
 }
