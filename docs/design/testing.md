@@ -67,3 +67,12 @@ The vision image is large; the e2e job uses a `FakeDetector` (env `PARKING_FAKE_
 - [ ] Kill the API → banner appears within 30 s → restart → recovers by itself.
 - [ ] Airplane mode → offline banner → back online → recovers.
 - [ ] Lighthouse mobile: PWA installable, a11y ≥ 90, performance ≥ 90.
+
+## 7. Soak test (P4.11, on the vision host)
+
+`backend/scripts/soak.py` (standard library only; runs with the host's `python3`, needs `docker` and `/sys/class/thermal`, which the containers can't see):
+
+- `python3 backend/scripts/soak.py sample [--out out/soak/soak.jsonl] [--interval 60] [--api http://127.0.0.1:8000] [--duration S] [--once]` appends one JSON line per sample: host `temp_c`, `throttled` (`vcgencmd get_throttled`, if present), `load1`, `mem_avail_mb`; per container (`parking-api`, `parking-vision-occupancy`, `parking-tunnel`) `status`, `restarts`, `started_at`, `mem_mb`, `cpu_pct` (`docker inspect` / `docker stats`); the API's `/healthz` (camera states, ingest counters) and each zone's `stale`/`free` from `/api/status`; and per worker how many `camera back after …` lines it logged since the previous sample (`reconnects`).
+- `python3 backend/scripts/soak.py report FILE [--days 7] [--interval 60] [--mem-growth-mb 25] [--mem-growth-pct 10] [--json]` prints temperature (median/p95/max, throttle flags), reconnects, per-container memory, every outage (container not running, API unreachable, camera not `ok`, zone stale, or no samples for > max(5 × interval, 5 min)) with start/end/minutes, and the verdict. Only items that were fine at least once count: a camera that never reported (`unknown`, e.g. Camera A not installed), its always-stale zone and a container that was never running (`tunnel` without `--profile public`) are listed as "never ok, not counted" (an API that never answered fails the run). Exit 0 = **passed**: the samples span `--days`, nothing is still down at the last sample (no unrecovered outage), and no container's memory grew (median of the last 24 h vs the median of the first 24 h after a 1 h warm-up; growth allowed up to max(25 MB, 10%)). The least-squares slope (MB/day, runs of ≥ 1 day) is printed for information.
+
+The sample file lives in the git-ignored `out/`; it has no images, URLs or secrets.

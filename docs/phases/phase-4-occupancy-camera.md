@@ -142,9 +142,13 @@ The code, the methods and the training script are in place (prepared while P4.9 
 1. On the **vision host at the lot**, run the full stack (API + occupancy worker) from the same compose files. This is temporary: the production API moves to its final machine in Phase 8 if the topology is T2/T3. For phone testing, expose it with the tunnel container under a test hostname, and point the Pages preview at it.
 2. Run for 7 days with the Phase 3 app in use.
 3. Each day, glance at the app against reality once or twice and note any mismatch in PROGRESS.md.
-4. Watch for memory growth, CPU temperature, reconnects, and stale periods, and record the vision host's speed in Metrics.
+4. Watch for memory growth, CPU temperature, reconnects, and stale periods, and record the vision host's speed in Metrics. Run the sampler on the vision host for the whole week ([testing.md §7](../design/testing.md#7-soak-test-p411-on-the-vision-host)):
+   ```bash
+   mkdir -p out/soak && nohup python3 backend/scripts/soak.py sample --out out/soak/soak.jsonl --interval 60 > out/soak/sampler.log 2>&1 &
+   python3 backend/scripts/soak.py report out/soak/soak.jsonl   # any time; the verdict after 7 days
+   ```
 
-**Done when:** 7 days with no unrecovered outage and no memory growth.
+**Done when:** 7 days with no unrecovered outage and no memory growth (`soak.py report` says `verdict: PASSED`, exit 0).
 
 ---
 
