@@ -9,9 +9,13 @@
   `None` at the end and `exhausted` becomes true.
 - `snapshot:<http url>`: one HTTP GET per `read()` (JPEG), digest or basic auth from the URL's
   `user:pass@`. Preferred for occupancy: no decoding between samples, full resolution.
-- `rtsp:<rtsp url>`: a reader thread decodes the stream and keeps only the latest frame;
-  `read()` returns it, or `None` when it's older than 5 s. The fallback for occupancy.
-- `video:` comes with the flow camera (P5.2).
+- `rtsp:<rtsp url>`: a reader thread decodes the stream and keeps only the newest frame
+  (older ones are overwritten, never queued); `read()` returns it, or `None` when it's older
+  than 5 s. The fallback for occupancy, and the flow camera's live source.
+- `video:<path>?realtime=true&loop=false`: a recording (P5.2). `realtime=true` plays at the
+  file's native fps like a live camera (`read()` waits for the next frame and skips frames the
+  caller was too slow for); `realtime=false` returns every frame as fast as it's read, for
+  evaluation. Frame timestamps follow the video's timeline either way.
 
 `read()` returns `None` when no frame could be read (missing or unreadable file, camera
 unreachable); the caller reports that as `connect_failed` (vision.md §5). The camera sources
@@ -25,8 +29,9 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol, runtime_checkable
 from urllib.parse import parse_qs, unquote, urlsplit, urlunsplit
@@ -38,18 +43,21 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-LATER = {"video": "Phase 5 (P5.2)"}
 SNAPSHOT_TIMEOUT_S = 5.0
 RTSP_MAX_AGE_S = 5.0  # an RTSP frame older than this counts as no frame
 RTSP_TIMEOUT_MS = 5000  # open and read timeouts of the FFmpeg capture
-# FFmpeg ≥ 5 (OpenCV's wheels bundle 8.x) renamed RTSP's `stimeout` to `timeout` (µs)
-RTSP_CAPTURE_OPTIONS = "rtsp_transport;tcp|timeout;5000000"
+# FFmpeg ≥ 5 (OpenCV's wheels bundle 8.x) renamed RTSP's `stimeout` to `timeout` (µs);
+# `nobuffer` + `low_delay` stop FFmpeg buffering frames before handing them out (latency)
+RTSP_CAPTURE_OPTIONS = "rtsp_transport;tcp|timeout;5000000|fflags;nobuffer|flags;low_delay"
+FPS_WINDOW_S = 5.0  # `fps` = frames per second over this many recent seconds
+VIDEO_DEFAULT_FPS = 10.0  # when a file doesn't say (or says something absurd)
 
 
 class Frame(NamedTuple):
     image: np.ndarray  # BGR, as read by OpenCV
     ts: datetime  # UTC, when the frame was read
     path: Path | None = None  # the image file, for replay sources (fake-detector sidecars)
+    seq: int | None = None  # rtsp/video: frame number (equal = the same frame read again)
 
 
 @runtime_checkable
@@ -72,6 +80,28 @@ def _imread(path: Path) -> np.ndarray | None:
     if img is None:
         log.warning("could not read image %s", path)
     return img
+
+
+class RateMeter:
+    """Events per second over the last `window` seconds (at least two events needed)."""
+
+    def __init__(self, window: float = FPS_WINDOW_S, clock: Callable[[], float] = time.monotonic):
+        self.window = window
+        self.clock = clock
+        self._times: deque[float] = deque()
+
+    def tick(self) -> None:
+        now = self.clock()
+        self._times.append(now)
+        while self._times and now - self._times[0] > self.window:
+            self._times.popleft()
+
+    @property
+    def rate(self) -> float:
+        t = self._times
+        if len(t) < 2 or self.clock() - t[-1] > self.window:
+            return 0.0
+        return (len(t) - 1) / (t[-1] - t[0]) if t[-1] > t[0] else 0.0
 
 
 class FileSource:
@@ -274,23 +304,52 @@ class SnapshotSource:
         self._client.close()
 
 
+_OPTIONS_VAR = "OPENCV_FFMPEG_CAPTURE_OPTIONS"
+_OPERATOR_OPTIONS = os.environ.get(_OPTIONS_VAR)  # set before start-up: the operator's own
+_options_lock = threading.Lock()
+
+
+def _capture_with_options(options: str | None, *args: Any) -> Any:
+    """`cv2.VideoCapture(*args)` with the FFmpeg options env var set (None = unset) only for
+    this open: OpenCV reads it at every open, and the RTSP options break opening files."""
+    with _options_lock:
+        old = os.environ.get(_OPTIONS_VAR)
+        if options is None:
+            os.environ.pop(_OPTIONS_VAR, None)
+        else:
+            os.environ[_OPTIONS_VAR] = options
+        try:
+            return cv2.VideoCapture(*args)
+        finally:
+            if old is None:
+                os.environ.pop(_OPTIONS_VAR, None)
+            else:
+                os.environ[_OPTIONS_VAR] = old
+
+
 def _open_capture(url: str) -> Any:
-    # OpenCV reads the options at every open; an operator's own value wins
-    os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", RTSP_CAPTURE_OPTIONS)
     params = [
         cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
         RTSP_TIMEOUT_MS,
         cv2.CAP_PROP_READ_TIMEOUT_MSEC,
         RTSP_TIMEOUT_MS,
     ]
-    return cv2.VideoCapture(url, cv2.CAP_FFMPEG, params)
+    options = _OPERATOR_OPTIONS or RTSP_CAPTURE_OPTIONS  # an operator's own value wins
+    return _capture_with_options(options, url, cv2.CAP_FFMPEG, params)
+
+
+def _open_video(path: str) -> Any:
+    return _capture_with_options(None, path, cv2.CAP_FFMPEG)
 
 
 class RtspSource:
-    """`rtsp:` — a reader thread keeps only the latest decoded frame (a lock + one slot).
+    """`rtsp:` — a reader thread keeps only the newest decoded frame (a lock + one slot).
 
-    The thread starts on the first `read()`. When opening or reading fails, the capture is
-    released and reopened after 1, 2, 4 … 60 s; each attempt is logged.
+    The thread reads as fast as the stream delivers, so frames never queue up behind a slow
+    caller: a frame the caller didn't read before the next one arrived is overwritten and
+    counted in `dropped`. `fps` is the decode rate over the last 5 s. The thread starts on the
+    first `read()`. When opening or reading fails, the capture is released and reopened after
+    1, 2, 4 … 60 s; each attempt is logged.
     """
 
     replay = False
@@ -311,10 +370,14 @@ class RtspSource:
         self.backoff = backoff or Backoff(clock=clock)
         self.connected = False
         self.reconnects = 0  # captures reopened after a failure
-        self.frames = 0  # frames decoded by the reader thread
+        self.frames = 0  # frames decoded by the reader thread (= the newest frame's seq)
+        self.dropped = 0  # frames overwritten before any read() returned them
+        self._meter = RateMeter(clock=clock)
         self._open = open_capture
         self._lock = threading.Lock()
-        self._latest: tuple[np.ndarray, datetime, float] | None = None  # image, ts, clock time
+        # image, ts, clock time, seq
+        self._latest: tuple[np.ndarray, datetime, float, int] | None = None
+        self._returned = 0  # seq of the newest frame read() has returned
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -325,9 +388,15 @@ class RtspSource:
             self._thread.start()
         with self._lock:
             latest = self._latest
-        if latest is None or self.clock() - latest[2] > self.max_age:
-            return None
-        return Frame(latest[0].copy(), latest[1])
+            if latest is None or self.clock() - latest[2] > self.max_age:
+                return None
+            self._returned = latest[3]
+        return Frame(latest[0].copy(), latest[1], seq=latest[3])
+
+    @property
+    def fps(self) -> float:
+        """Frames decoded per second over the last 5 s (0 while nothing arrives)."""
+        return self._meter.rate
 
     def close(self) -> None:
         self._stop.set()
@@ -356,8 +425,11 @@ class RtspSource:
                     self._fail()
                     continue
                 with self._lock:
-                    self._latest = (img, _now(), self.clock())
-                self.frames += 1
+                    if self._latest is not None and self._latest[3] > self._returned:
+                        self.dropped += 1
+                    self.frames += 1
+                    self._latest = (img, _now(), self.clock(), self.frames)
+                self._meter.tick()
                 if self.backoff.failures:
                     log.info("rtsp: camera back after %d failed attempt(s)", self.backoff.failures)
                     self.backoff.succeeded()
@@ -394,6 +466,125 @@ class RtspSource:
         log.warning("rtsp: attempt %d failed, next try in %g s", self.backoff.failures, delay)
 
 
+class VideoFileSource:
+    """`video:` — a recording, at its native fps (`realtime`) or as fast as possible.
+
+    Realtime playback behaves like a live camera: the clock starts at the first `read()`,
+    `read()` sleeps until the next frame is due, and when the caller falls behind, the frames
+    it missed are skipped (`grab()` without converting them) and counted in `dropped`. A
+    frame's `ts` is the first read's wall time + its position / native fps, so tracking and
+    counting see the video's own timing even with `realtime=false`. At the end, `loop=true`
+    starts over (timestamps keep increasing); otherwise `read()` returns `None` and
+    `exhausted` becomes true. A missing or unreadable file is a failed read.
+    """
+
+    replay = True
+
+    def __init__(
+        self,
+        path: Path,
+        realtime: bool = True,
+        loop: bool = False,
+        open_capture: Callable[[str], Any] = _open_video,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        self.path = path
+        self.realtime = realtime
+        self.loop = loop
+        self.clock = clock
+        self.sleep = sleep
+        self.exhausted = False
+        self.native_fps: float | None = None  # known once the file is open
+        self.frames = 0  # frames returned (= the latest frame's seq)
+        self.dropped = 0  # frames skipped because the caller was late (realtime only)
+        self.passes = 0
+        self._open = open_capture
+        self._cap: Any = None
+        self._pos = 0  # index of the next frame on the timeline (across loops)
+        self._start: tuple[float, datetime] | None = None  # clock and wall time of frame 0
+        self._meter = RateMeter(clock=clock)
+
+    @property
+    def fps(self) -> float:
+        """Frames returned per second over the last 5 s."""
+        return self._meter.rate
+
+    def _open_file(self) -> bool:
+        if not self.path.is_file():
+            log.warning("video file %s not found", self.path)
+            return False
+        cap = self._open(str(self.path))
+        if cap is None or not cap.isOpened():
+            log.warning("could not open video %s", self.path)
+            if cap is not None:
+                cap.release()
+            return False
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0)
+        if not 0 < fps <= 240:  # also NaN
+            log.warning(
+                "video %s: no usable fps (%r), assuming %g", self.path, fps, VIDEO_DEFAULT_FPS
+            )
+            fps = VIDEO_DEFAULT_FPS
+        self.native_fps = fps
+        self._cap = cap
+        self.passes += 1
+        return True
+
+    def _next(self, convert: bool) -> np.ndarray | bool | None:
+        """Read (or just grab) the next frame, looping if asked; None at the end."""
+        for _ in range(2):
+            if convert:
+                ok, img = self._cap.read()
+                if ok and img is not None:
+                    return img
+            elif self._cap.grab():
+                return True
+            if not self.loop:
+                return None
+            self._cap.release()  # start the next pass from the top
+            self._cap = None
+            if not self._open_file():
+                return None
+        return None  # an empty file, even after reopening
+
+    def read(self) -> Frame | None:
+        if self.exhausted:
+            return None
+        if self._cap is None and not self._open_file():
+            return None
+        fps = self.native_fps or VIDEO_DEFAULT_FPS
+        if self._start is None:
+            self._start = (self.clock(), _now())
+        if self.realtime:
+            due = self._start[0] + self._pos / fps
+            wait = due - self.clock()
+            if wait > 0:
+                self.sleep(wait)
+            else:  # late: skip what the caller missed, as a live camera would
+                behind = int((self.clock() - self._start[0]) * fps) - self._pos
+                for _ in range(max(0, behind)):
+                    if self._next(convert=False) is None:
+                        break
+                    self._pos += 1
+                    self.dropped += 1
+        img = self._next(convert=True)
+        if img is None:
+            self.exhausted = True
+            log.info("video %s: end after %d frame(s)", self.path.name, self.frames)
+            return None
+        ts = self._start[1] + timedelta(seconds=self._pos / fps)
+        self._pos += 1
+        self.frames += 1
+        self._meter.tick()
+        return Frame(img, ts, seq=self._pos)
+
+    def close(self) -> None:
+        if self._cap is not None:
+            self._cap.release()
+            self._cap = None
+
+
 def _parse_bool(value: str) -> bool:
     v = value.strip().lower()
     if v in ("1", "true", "yes", "on"):
@@ -408,6 +599,14 @@ def _resolve(path: str, root: Path | None) -> Path:
     return p if p.is_absolute() or root is None else root / p
 
 
+def _options(uri: str, query: str, allowed: set[str]) -> dict[str, str]:
+    params = {k: v[-1] for k, v in parse_qs(query, keep_blank_values=True).items()}
+    unknown = set(params) - allowed
+    if unknown:
+        raise ValueError(f"source {uri!r}: unknown option(s) {', '.join(sorted(unknown))}")
+    return params
+
+
 def make_source(uri: str, root: Path | None = None) -> FrameSource:
     """Build the source for a `scheme:rest` URI. Relative paths resolve against `root`."""
     scheme, sep, rest = uri.partition(":")
@@ -417,10 +616,7 @@ def make_source(uri: str, root: Path | None = None) -> FrameSource:
         return FileSource(_resolve(rest, root))
     if scheme == "folder":
         path, _, query = rest.partition("?")
-        params = {k: v[-1] for k, v in parse_qs(query, keep_blank_values=True).items()}
-        unknown = set(params) - {"interval", "loop"}
-        if unknown:
-            raise ValueError(f"source {uri!r}: unknown option(s) {', '.join(sorted(unknown))}")
+        params = _options(uri, query, {"interval", "loop"})
         try:
             interval = float(params.get("interval", 5))
             loop = _parse_bool(params.get("loop", "true"))
@@ -433,9 +629,16 @@ def make_source(uri: str, root: Path | None = None) -> FrameSource:
         return SnapshotSource(rest)
     if scheme == "rtsp":
         return RtspSource(rest)
-    if scheme in LATER:
-        raise NotImplementedError(
-            f"'{scheme}:' sources arrive in {LATER[scheme]}; use 'file:' or 'folder:' for now"
-        )
+    if scheme == "video":
+        path, _, query = rest.partition("?")
+        params = _options(uri, query, {"realtime", "loop"})
+        try:
+            realtime = _parse_bool(params.get("realtime", "true"))
+            loop = _parse_bool(params.get("loop", "false"))
+        except ValueError as e:
+            raise ValueError(f"source {uri!r}: {e}") from None
+        if "://" in path:  # a URL would be opened by FFmpeg as a stream: use rtsp: for those
+            raise ValueError("video source: expected a file path (use 'rtsp:' for streams)")
+        return VideoFileSource(_resolve(path, root), realtime=realtime, loop=loop)
     # don't echo the URI: it may hold camera credentials
     raise ValueError(f"unknown source scheme {scheme!r} (file, folder, snapshot, rtsp, video)")

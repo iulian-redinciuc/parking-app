@@ -31,7 +31,19 @@
 2. `VideoFileSource` (`video:` scheme) plays at native fps, or as fast as possible with `realtime=false`, for evaluation.
 3. `parking record --camera cam-ramp --minutes 60 --out data/recordings/`: save the sub-stream to MP4 with **ffmpeg stream copy** (`ffmpeg -rtsp_transport tcp -i URL -c copy -t 3600 out.mp4`), with no re-encoding.
 
-**Done when:** a 1-hour recording plays back, and the source reports a steady fps.
+As built (details in [config.md "Low latency and recordings"](../design/config.md#source-uri-formats) and [architecture.md §6](../design/architecture.md)): `rtsp:` counts overwritten frames in `dropped` and adds FFmpeg's `nobuffer`/`low_delay`; frames carry a `seq`; sources report `fps`. `parking record` writes a fragmented MP4 (only the video stream) and checks it with `ffprobe`; `parking stream-check` measures a source's frame rate. Both need FFmpeg, so on a host without it run them in the vision container, e.g. on the vision host:
+
+```bash
+cd deploy
+docker compose run --rm --entrypoint parking vision-occupancy record --camera cam-ramp --minutes 60
+docker compose run --rm --entrypoint parking vision-occupancy stream-check --camera cam-ramp --seconds 300
+docker compose run --rm --entrypoint parking vision-occupancy stream-check \
+  --source video:data/recordings/cam-ramp-<date-time>.mp4 --seconds 3600 --window 60
+```
+
+Without Camera A, `backend/scripts/fake_rtsp.py` (run where FFmpeg is, e.g. the vision container) serves a 640×360 10 fps test pattern at `rtsp://127.0.0.1:8554/sub`; pass it with `--source rtsp:rtsp://127.0.0.1:8554/sub`.
+
+**Done when:** a 1-hour recording plays back, and the source reports a steady fps (on the real Camera A: `record --minutes 60` exits 0, and `stream-check` exits 0 both on the live camera and on the recording with `video:`).
 
 ## P5.3: Motion gate
 **Files:** `parking/vision/motion.py`, tests

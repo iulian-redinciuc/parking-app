@@ -74,7 +74,8 @@ backend/
 │   │   ├── flow.py              # TwoLineCounter (per-track crossing state machine)
 │   │   ├── tracking.py          # wrapper around ByteTrack (via ultralytics)
 │   │   ├── motion.py            # MotionGate (MOG2)
-│   │   ├── sources.py           # FrameSource protocol + file/folder/snapshot/rtsp sources
+│   │   ├── sources.py           # FrameSource protocol + file/folder/snapshot/rtsp/video sources
+│   │   ├── recording.py         # `parking record` (FFmpeg stream copy) + `stream-check` fps stats
 │   │   ├── health.py            # black / frozen / blurry frame checks
 │   │   ├── shift.py             # camera shift detection vs reference frame (ORB)
 │   │   ├── annotate.py          # draw slots, detections, lines, totals on a frame
@@ -176,7 +177,8 @@ frontend/
 | `parking worker flow --camera ID` | 5 | Run the flow worker |
 | `parking api [--config config/lot.yaml] [--host 127.0.0.1] [--port 8000]` | 2 | Run the API (uvicorn); start-up runs `db upgrade`, restores the state from the DB and starts the 1 s tick |
 | `parking db upgrade` | 2 | Apply Alembic migrations |
-| `parking record --camera ID --minutes 60` | 5 | Record a test clip |
+| `parking record --camera ID [--minutes 60] [--out data/recordings/] [--source rtsp:URL]` | 5 | Save the camera's RTSP stream to MP4 with FFmpeg stream copy (config.md "Low latency and recordings"), then print duration, codec, size, frames and fps from `ffprobe`; exit 1 if it was cut short (< 95% of the time). Needs `ffmpeg` (in the vision image); FFmpeg's messages are printed with the URL and password blanked (P5.2) |
+| `parking stream-check (--camera ID \| --source URI) [--seconds 60] [--window 10] [--json]` | 5 | Read a source and print the rate of new frames per window; **steady** (exit 0) = every window within ±20% of the median and no gap over 1 s. `video:…` checks a recording's playback (P5.2). Dev stand-in camera: `backend/scripts/fake_rtsp.py` (FFmpeg test pattern over RTSP/TCP) |
 | `parking evaluate-flow --video PATH --truth CSV --camera ID` | 5 | Flow accuracy on a clip |
 | `parking push vapid-keys` | 6 | Generate VAPID keys |
 | `parking admin hash-password` | 7 | Argon2 hash for `.env` |

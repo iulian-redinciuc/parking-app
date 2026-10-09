@@ -281,15 +281,28 @@ def test_rtsp_make_source_is_lazy(monkeypatch):
 
 def test_rtsp_open_capture_uses_tcp_and_timeouts(monkeypatch):
     calls = []
+
+    def capture(*a):
+        calls.append((*a, os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS")))
+        return "cap"
+
     monkeypatch.delenv("OPENCV_FFMPEG_CAPTURE_OPTIONS", raising=False)
-    monkeypatch.setattr(sources.cv2, "VideoCapture", lambda *a: calls.append(a) or "cap")
+    monkeypatch.setattr(sources.cv2, "VideoCapture", capture)
     assert sources._open_capture("rtsp://cam/sub") == "cap"
-    assert os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] == "rtsp_transport;tcp|timeout;5000000"
-    url, api, params = calls[0]
+    url, api, params, options = calls[0]
     assert (url, api) == ("rtsp://cam/sub", cv2.CAP_FFMPEG)
     assert params == [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000]
+    assert options == sources.RTSP_CAPTURE_OPTIONS
+    assert options.startswith("rtsp_transport;tcp|timeout;5000000|")
+    # only set for the open: the low-latency flags break opening video files
+    assert "OPENCV_FFMPEG_CAPTURE_OPTIONS" not in os.environ
+    sources._open_video("/x.mp4")
+    assert calls[-1][-1] is None and calls[-1][:2] == ("/x.mp4", cv2.CAP_FFMPEG)
+    # an operator's own value (set before start-up) wins, and is left in place
     monkeypatch.setenv("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;udp")
+    monkeypatch.setattr(sources, "_OPERATOR_OPTIONS", "rtsp_transport;udp")
     sources._open_capture("rtsp://cam/sub")
+    assert calls[-1][-1] == "rtsp_transport;udp"
     assert os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] == "rtsp_transport;udp"
 
 

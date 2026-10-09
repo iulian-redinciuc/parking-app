@@ -738,6 +738,118 @@ def grab(
     typer.echo(f"{w}x{h} frame from '{camera}' at {frame.ts.isoformat()} -> {target}")
 
 
+@app.command()
+def record(
+    camera: Annotated[str, typer.Option(help="Camera id in the config, e.g. cam-ramp.")],
+    minutes: Annotated[float, typer.Option(help="How long to record.")] = 60.0,
+    out: Annotated[
+        Path,
+        typer.Option(help="Folder (file name <camera>-<lot-local time>.mp4) or an .mp4 path."),
+    ] = Path("data/recordings"),
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    source: Annotated[
+        str | None, typer.Option(help="rtsp: URI to use instead of the camera's `source`.")
+    ] = None,
+) -> None:
+    """Save a camera's RTSP stream to MP4 with FFmpeg stream copy, no re-encoding (P5.2)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from parking.vision.recording import RecordError, ffmpeg_tool, record
+
+    if minutes <= 0:
+        raise typer.BadParameter("must be positive", param_hint="--minutes")
+    lot, cam, root = _camera(config, camera)
+    uri = source or cam.source
+    scheme, _, url = uri.partition(":")
+    if scheme != "rtsp" or not url:
+        _fail(f"record needs an 'rtsp:' source; '{camera}' uses '{scheme}:'")
+    out = _resolve(out, root)
+    if out.suffix.lower() != ".mp4":
+        stamp = datetime.now(ZoneInfo(lot.lot.timezone)).strftime("%Y-%m-%d-%H%M")
+        out = out / f"{camera}-{stamp}.mp4"
+    if out.exists():
+        _fail(f"{out} exists")
+    try:
+        ffmpeg_tool(), ffmpeg_tool("ffprobe")
+    except RecordError as e:
+        _fail(str(e))
+
+    seconds = minutes * 60
+    typer.echo(f"recording '{camera}' for {seconds:g} s -> {out} (Ctrl-C stops early)")
+    rec = record(url, seconds, out)
+    if rec.errors:
+        typer.echo(rec.errors, err=True)  # redacted: never holds the URL or password
+    info = rec.info
+    if info is None:
+        _fail(f"nothing recorded (ffmpeg exit code {rec.returncode})")
+    size = out.stat().st_size / 1e6
+    fps = f"{info.fps:.2f}" if info.fps else "?"
+    typer.echo(
+        f"{out}: {info.duration_s or 0:.1f} s, {info.codec} {info.width}x{info.height}, "
+        f"{info.frames} frames, {fps} fps, {size:.1f} MB"
+    )
+    if not rec.complete:
+        _fail(f"cut short: {info.duration_s or 0:.0f} of {seconds:g} s (the file is kept)")
+
+
+@app.command("stream-check")
+def stream_check(
+    camera: Annotated[str | None, typer.Option(help="Camera id in the config.")] = None,
+    source: Annotated[
+        str | None,
+        typer.Option(help="Source URI instead of the camera's, e.g. video:data/recordings/x.mp4."),
+    ] = None,
+    seconds: Annotated[float, typer.Option(help="How long to read, from the first frame.")] = 60.0,
+    window: Annotated[float, typer.Option(help="Seconds per fps window.")] = 10.0,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    as_json: Annotated[bool, typer.Option("--json", help="Print the stats as JSON.")] = False,
+) -> None:
+    """Read a source and report its frame rate per window; exit 1 unless it is steady (P5.2).
+
+    Steady = every window within ±20% of the median and no gap over 1 s between new frames.
+    """
+    from parking.vision.recording import measure_stream
+    from parking.vision.sources import make_source
+
+    if seconds <= 0 or window <= 0:
+        raise typer.BadParameter("must be positive", param_hint="--seconds/--window")
+    if camera is None and source is None:
+        raise typer.BadParameter("give --camera or --source")
+    root = Path.cwd()
+    if camera is not None:
+        _, cam, root = _camera(config, camera)
+        source = source or cam.source
+    else:
+        root = _find_config(config).resolve().parent.parent
+    try:
+        src = make_source(source, root)
+    except ValueError as e:
+        _fail(str(e))
+
+    def show(elapsed: float, fps: float) -> None:
+        if not as_json:
+            typer.echo(f"{elapsed:7.1f} s  {fps:6.2f} fps")
+
+    try:
+        stats = measure_stream(src, seconds, window=window, on_window=show)
+    finally:
+        src.close()
+    extra = {k: getattr(src, k) for k in ("native_fps", "dropped", "reconnects") if hasattr(src, k)}
+    if as_json:
+        typer.echo(json.dumps(stats.to_dict() | extra))
+    else:
+        rates = stats.windows or [0.0]
+        typer.echo(
+            f"{stats.frames} frames in {stats.seconds:.1f} s = {stats.fps:.2f} fps "
+            f"(windows {min(rates):.2f}–{max(rates):.2f}, longest gap {stats.max_gap_s:.2f} s"
+            + "".join(f", {k} {v:g}" for k, v in extra.items() if v is not None)
+            + f"): {'steady' if stats.steady else 'NOT steady'}"
+        )
+    if not stats.steady:
+        raise typer.Exit(1)
+
+
 @app.command("lines-check")
 def lines_check(
     camera: Annotated[str, typer.Option(help="Flow camera id in the config, e.g. cam-ramp.")],

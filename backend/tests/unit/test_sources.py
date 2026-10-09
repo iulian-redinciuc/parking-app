@@ -115,8 +115,8 @@ def test_unknown_scheme_does_not_echo_credentials():
     assert "secret" not in str(e.value)
 
 
-def test_video_not_implemented_yet():
-    with pytest.raises(NotImplementedError, match="'video:' sources arrive in Phase") as e:
+def test_video_rejects_urls_without_echoing_them():
+    with pytest.raises(ValueError, match="use 'rtsp:'") as e:
         make_source("video:rtsp://user:secret@cam/x")
     assert "secret" not in str(e.value)
 
