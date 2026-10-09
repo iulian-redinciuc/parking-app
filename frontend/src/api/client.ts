@@ -41,6 +41,7 @@ async function request<T>(
   path: string,
   isValid: (x: unknown) => x is T,
   { lang, signal, timeoutMs = TIMEOUT_MS, base = API_BASE }: RequestOptions = {},
+  send?: { method: 'POST' | 'PATCH' | 'DELETE'; body: unknown },
 ): Promise<T> {
   const controller = new AbortController()
   let timedOut = false
@@ -57,7 +58,11 @@ async function request<T>(
     let body: unknown
     try {
       res = await fetch(apiUrl(path, lang, base), {
-        headers: { Accept: 'application/json' },
+        method: send?.method ?? 'GET',
+        headers: send
+          ? { Accept: 'application/json', 'Content-Type': 'application/json' }
+          : { Accept: 'application/json' },
+        body: send ? JSON.stringify(send.body) : undefined,
         cache: 'no-store',
         signal: controller.signal,
       })
@@ -110,4 +115,24 @@ export function getStatus(options?: RequestOptions): Promise<LotStatus> {
 export function getLot(options?: RequestOptions): Promise<LotInfo> {
   if (IS_MOCK && !options?.base) return Promise.resolve(mockLotInfo())
   return request('/api/lot', isLotInfo, options)
+}
+
+/** A JSON `POST`/`PATCH`/`DELETE` to the API (the push routes, api.md §2); never mocked here. */
+export function sendJson<T>(
+  method: 'POST' | 'PATCH' | 'DELETE',
+  path: string,
+  body: unknown,
+  isValid: (x: unknown) => x is T,
+  options?: RequestOptions,
+): Promise<T> {
+  return request(path, isValid, options, { method, body })
+}
+
+/** A `GET` of any other JSON route, checked with `isValid`; never mocked here. */
+export function getRequest<T>(
+  path: string,
+  isValid: (x: unknown) => x is T,
+  options?: RequestOptions,
+): Promise<T> {
+  return request(path, isValid, options)
 }

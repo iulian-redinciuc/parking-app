@@ -4,6 +4,7 @@ import BottomNav from './components/BottomNav'
 import Header from './components/Header'
 import { useLiveStatus } from './hooks/useLiveStatus'
 import LiveScreen from './screens/LiveScreen'
+import NotificationsScreen from './screens/NotificationsScreen'
 import PlaceholderScreen from './screens/PlaceholderScreen'
 
 export default function App() {
@@ -16,12 +17,7 @@ export default function App() {
         <main className="mx-auto w-full max-w-xl flex-1 pr-[max(1rem,env(safe-area-inset-right))] pb-[calc(5rem+env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))]">
           <Routes>
             <Route index element={<LiveScreen />} />
-            <Route
-              path="alerts"
-              element={
-                <PlaceholderScreen title={t('screen.alerts')} note={t('screen.alerts_note')} />
-              }
-            />
+            <Route path="alerts" element={<NotificationsScreen />} />
             <Route
               path="stats"
               element={

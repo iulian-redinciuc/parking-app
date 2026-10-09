@@ -20,6 +20,7 @@
   3. `POST /api/push/subscriptions` with the subscription JSON, prefs, `Intl.DateTimeFormat().resolvedOptions().timeZone` and the UI language.
   4. Keep `endpoint` in `localStorage` (wrapped in try/catch) to reference this subscription later.
   5. `savePushRegistration({prefs, tz, lang})` (`lib/swPush.ts`) after every successful POST/PATCH, `clearPushRegistration()` on unsubscribe: the service worker reads it on `pushsubscriptionchange` (frontend.md §5).
+- As built (P6.4): `subscribe`, `updatePrefs`, `unsubscribe`, `isSubscribed`, `sendTest` in `lib/push.ts`; the screen's states and settings are in [frontend.md §2.2](frontend.md#22-alerts-alerts-phase-6).
 - Send (`push/sender.py`): `pywebpush.webpush(subscription_info, json.dumps(payload), vapid_private_key, vapid_claims={"sub": VAPID_SUBJECT}, ttl=600)`.
   - TTL 600 s: a "12 free" message is worthless an hour later.
   - Urgency header `high` for on-my-way and almost-full; `normal` for schedules.
