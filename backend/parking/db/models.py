@@ -1,4 +1,4 @@
-"""Tables for Phases 2 and 6 (data-model.md §1). Admin tables arrive with Phase 7.
+"""Tables for Phases 2, 6 and 7 (data-model.md §1).
 
 Timestamps are tz-aware UTC, stored as fixed-width ISO 8601 text so they sort as strings.
 """
@@ -138,3 +138,17 @@ class NotificationLog(SQLModel, table=True):
     payload: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
     status: str  # sent | failed | skipped_quiet
     error: str | None = None
+
+
+class AdminSession(SQLModel, table=True):
+    """An admin login (api.md §4). Only the sha256 of the token is stored."""
+
+    __tablename__ = "admin_session"
+
+    id: int | None = Field(default=None, primary_key=True)
+    token_hash: str = Field(unique=True)  # sha256 hex
+    created_at: datetime = _ts()
+    expires_at: datetime = _ts(index=True)
+    revoked_at: datetime | None = _ts(default=None)
+    ip: str | None = None
+    user_agent: str | None = None

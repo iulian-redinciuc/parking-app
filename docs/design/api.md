@@ -142,12 +142,15 @@ data: {…}
 - the static `ADMIN_TOKEN` from `.env` (scripts, and Phases 5–6 before login exists), or
 - a session token from `POST /api/admin/login` (random 32 bytes, stored hashed in `admin_session`, valid 7 days).
 
+Anything else (missing, wrong, expired, revoked) is `401 unauthorized` with `WWW-Authenticate: Bearer`. Without `ADMIN_PASSWORD_HASH` the login answers `503`. All login attempts (right or wrong) count toward the 5 / 15 min. The frontend keeps the token in `sessionStorage`; any 401 on an admin call forgets it and shows the login again (`parking/api/routes/admin.py` `require_admin`, `frontend/src/api/client.ts`, P7.1).
+
 Why not cookies: the frontend and the API can be on different sites (e.g. the GitHub Pages preview and a separate API host). Browsers, Safari especially, block third-party cookies, and cookies would also need CSRF protection. A bearer token kept in memory or `sessionStorage` avoids both.
 
 | Method | Path | Phase | Description |
 |--------|------|-------|-------------|
 | POST | `/api/admin/login` | 7 | `{"password":"…"}` → `{"token":"…","expires_at":"…"}`. 5 attempts / 15 min / IP |
-| POST | `/api/admin/logout` | 7 | Revokes the session token |
+| GET | `/api/admin/session` | 7 | Checks the token: `{"actor":"session:<id>"\|"admin-token","expires_at":"…"\|null}` (the admin screen calls it on open) |
+| POST | `/api/admin/logout` | 7 | Revokes the calling session token → `204` (a no-op for `ADMIN_TOKEN`) |
 | GET | `/api/admin/cameras` | 7 | `[{"id","role","state":"ok|degraded|down","issue","fps","last_frame_age_s","inference_ms_avg"}]` |
 | GET | `/api/admin/cameras/{id}/snapshot?annotated=true` | 7 | `image/jpeg` (proxied from the worker's `/control/snapshot`, 5 s timeout → 503) |
 | GET | `/api/admin/cameras/{id}/slots` | 7 | Slot file JSON |

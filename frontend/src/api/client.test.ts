@@ -3,7 +3,19 @@ import errorBadRequest from './__fixtures__/error-bad-request.json'
 import errorUnavailable from './__fixtures__/error-unavailable.json'
 import lotInfo from './__fixtures__/lot-info.json'
 import lotStatus from './__fixtures__/lot-status.json'
-import { ApiRequestError, apiUrl, getLot, getStatus, IS_MOCK } from './client'
+import {
+  adminLogin,
+  adminLogout,
+  ApiRequestError,
+  apiUrl,
+  getAdminSession,
+  getAdminToken,
+  getLot,
+  getStatus,
+  IS_MOCK,
+  onAdminTokenChange,
+  setAdminToken,
+} from './client'
 import type { ApiError } from './types'
 
 const BASE = 'http://api.test'
@@ -132,5 +144,66 @@ describe('API client', () => {
     const result = getStatus({ base: BASE, signal: controller.signal })
     controller.abort()
     await expect(result).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})
+
+describe('admin client', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setAdminToken(null)
+  })
+
+  it('logs in, stores the token in sessionStorage and sends it as a bearer token', async () => {
+    vi.stubGlobal('fetch', reply(200, { token: 'tok-1', expires_at: '2026-10-16T12:00:00.000Z' }))
+    await adminLogin('pw', { base: BASE })
+    expect(getAdminToken()).toBe('tok-1')
+    expect(sessionStorage.getItem('parking.adminToken')).toBe('tok-1')
+
+    const fetch = reply(200, { actor: 'session:1', expires_at: '2026-10-16T12:00:00.000Z' })
+    vi.stubGlobal('fetch', fetch)
+    expect((await getAdminSession({ base: BASE })).actor).toBe('session:1')
+    const init = (fetch.mock.calls[0] as unknown[])[1] as RequestInit
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer tok-1' })
+  })
+
+  it('a wrong password is a 401 and stores nothing', async () => {
+    vi.stubGlobal('fetch', reply(401, { error: { code: 'unauthorized', message: 'wrong' } }))
+    expect((await failure(adminLogin('bad', { base: BASE }))).status).toBe(401)
+    expect(getAdminToken()).toBeNull()
+  })
+
+  it('a 401 on an admin call forgets the token and tells listeners', async () => {
+    setAdminToken('tok-old')
+    const listener = vi.fn()
+    const off = onAdminTokenChange(listener)
+    vi.stubGlobal('fetch', reply(401, { error: { code: 'unauthorized', message: 'expired' } }))
+    expect((await failure(getAdminSession({ base: BASE }))).code).toBe('unauthorized')
+    expect(getAdminToken()).toBeNull()
+    expect(listener).toHaveBeenCalled()
+    off()
+  })
+
+  it('other errors keep the token', async () => {
+    setAdminToken('tok-2')
+    vi.stubGlobal('fetch', reply(503, { error: { code: 'unavailable', message: 'down' } }))
+    await failure(getAdminSession({ base: BASE }))
+    expect(getAdminToken()).toBe('tok-2')
+  })
+
+  it('logout revokes on the server and forgets the token even if that fails', async () => {
+    setAdminToken('tok-3')
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetch)
+    await adminLogout({ base: BASE })
+    expect(fetch).toHaveBeenCalledWith('http://api.test/api/admin/logout', expect.anything())
+    expect(getAdminToken()).toBeNull()
+
+    setAdminToken('tok-4')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Promise.reject(new TypeError('offline'))),
+    )
+    await failure(adminLogout({ base: BASE }))
+    expect(getAdminToken()).toBeNull()
   })
 })

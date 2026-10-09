@@ -89,6 +89,8 @@
 ### `admin_session`
 | id | token_hash (sha256) | created_at | expires_at | revoked_at | ip | user_agent |
 
+Migration `0004` (P7.1). `token_hash` is unique, `expires_at` indexed for the prune; the token itself is never stored. `id` is the audit actor `session:<id>`.
+
 ### `camera_health` (latest per camera; history goes to logs only)
 | camera_id PK | ts | state | issue | fps | last_frame_age_s | inference_ms_avg |
 

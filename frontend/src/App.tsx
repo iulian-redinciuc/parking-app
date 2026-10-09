@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HashRouter, Navigate, Route, Routes } from 'react-router'
 import BottomNav from './components/BottomNav'
@@ -7,6 +8,8 @@ import { useLiveStatus } from './hooks/useLiveStatus'
 import LiveScreen from './screens/LiveScreen'
 import NotificationsScreen from './screens/NotificationsScreen'
 import PlaceholderScreen from './screens/PlaceholderScreen'
+
+const AdminScreen = lazy(() => import('./screens/admin/AdminScreen'))
 
 export default function App() {
   const { connection } = useLiveStatus()
@@ -35,7 +38,9 @@ export default function App() {
             <Route
               path="admin/*"
               element={
-                <PlaceholderScreen title={t('screen.admin')} note={t('screen.admin_note')} />
+                <Suspense fallback={null}>
+                  <AdminScreen />
+                </Suspense>
               }
             />
             <Route path="*" element={<Navigate to="/" replace />} />

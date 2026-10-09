@@ -25,6 +25,7 @@ TABLES = {
     "correction",
     "push_subscription",
     "notification_log",
+    "admin_session",
 }
 
 

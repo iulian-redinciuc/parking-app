@@ -219,7 +219,7 @@ video_time_s,direction,note
 | `PUBLIC_APP_URL` | dev: `https://iulian-redinciuc.github.io/parking-app/`; prod: the production frontend URL | API (notification links) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | from `parking push vapid-keys` | API |
 | `VAPID_SUBJECT` | `mailto:you@example.com` | API |
-| `ADMIN_PASSWORD_HASH` | from `parking admin hash-password` | API |
+| `ADMIN_PASSWORD_HASH` | from `parking admin hash-password` (prints the line in single quotes so Compose and dotenv keep the `$`s) | API |
 | `ADMIN_TOKEN` | long random string | API (scripts / before Phase 7 login exists) |
 | `DEBUG_CAPTURE` | `false` | workers |
 | `DEBUG_RETENTION_HOURS` | `24` | workers |

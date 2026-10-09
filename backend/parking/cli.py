@@ -762,3 +762,19 @@ def push_vapid_keys() -> None:
         "them breaks every push subscription.",
         err=True,
     )
+
+
+ADMIN_PASSWORD_MIN = 10
+
+
+@admin_app.command("hash-password")
+def admin_hash_password() -> None:
+    """Ask for the admin password twice and print its argon2 hash as a `.env` line."""
+    from parking.api.routes.admin import hash_password
+
+    password = typer.prompt("Admin password", hide_input=True, confirmation_prompt=True)
+    if len(password) < ADMIN_PASSWORD_MIN:
+        _fail(f"use at least {ADMIN_PASSWORD_MIN} characters")
+    # single quotes: Compose and python-dotenv then keep the `$`s of the hash as they are
+    typer.echo(f"ADMIN_PASSWORD_HASH='{hash_password(password)}'")
+    typer.echo("Put it in deploy/.env (never commit it) and restart the API.", err=True)

@@ -21,9 +21,7 @@
     "stats": "Stats",
     "stats_note": "Charts of typical free spaces are coming soon.",
     "privacy": "Privacy",
-    "privacy_note": "What we process and store will be described here.",
-    "admin": "Admin",
-    "admin_note": "Camera and zone administration is coming soon."
+    "privacy_note": "What we process and store will be described here."
   },
   "count": {
     "free_one": "free space",
@@ -133,6 +131,26 @@
       "unavailable": "Notifications aren't set up on the server yet.",
       "rate_limited": "Too many tries. Please wait a while and try again.",
       "gone": "This device isn't registered for notifications any more. Enable them again.",
+      "failed": "That didn't work. Check your connection and try again."
+    }
+  },
+  "admin": {
+    "title": "Admin",
+    "login_intro": "Sign in to manage cameras and counts.",
+    "password": "Password",
+    "sign_in": "Sign in",
+    "signing_in": "Signing in…",
+    "mock_hint": "Demo build without a server: the password is \"{{password}}\".",
+    "checking": "Checking your sign-in…",
+    "signed_in": "Signed in",
+    "signed_in_until": "Signed in until {{time}}.",
+    "signed_in_token": "Signed in with the admin token.",
+    "coming_soon": "Camera health, slot editing and count corrections are coming soon.",
+    "log_out": "Log out",
+    "error": {
+      "unauthorized": "Wrong password.",
+      "rate_limited": "Too many attempts. Try again in {{minutes}} min.",
+      "unavailable": "Admin sign-in isn't set up on this server.",
       "failed": "That didn't work. Check your connection and try again."
     }
   }

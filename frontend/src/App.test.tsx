@@ -44,9 +44,9 @@ describe('App shell', () => {
     ['#/privacy', 'Privacy'],
     ['#/admin', 'Admin'],
     ['#/admin/cameras/cam-ground', 'Admin'],
-  ])('routes %s without a tab selected', (hash, heading) => {
+  ])('routes %s without a tab selected', async (hash, heading) => {
     renderAt(hash)
-    expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument()
     for (const tab of ['Live', 'Alerts', 'Stats']) {
       expect(screen.getByRole('link', { name: tab })).not.toHaveAttribute('aria-current')
     }

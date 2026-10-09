@@ -32,7 +32,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from parking import __version__
 from parking.api.deps import ApiError, RateLimiter, Runtime
 from parking.api.ingest import Ingestor
-from parking.api.routes import internal, public, push
+from parking.api.routes import admin, internal, public, push
 from parking.api.sse import Broadcaster
 from parking.config import LotConfig, Settings, SlotFile, cli_env, load_config, load_slots
 from parking.core.clock import Clock, SystemClock
@@ -199,6 +199,7 @@ def create_app(
     app.include_router(public.router)
     app.include_router(push.router)
     app.include_router(internal.router)
+    app.include_router(admin.router)
     return app
 
 
