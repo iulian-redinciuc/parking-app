@@ -216,6 +216,8 @@ Rules this enforces:
 - **One event per track.** If the tracker loses a car and re-finds it with a new ID mid-crossing, it might be missed: the evaluation clips measure how often.
 - Segments only count where the anchor is between the line's endpoints. A pedestrian path beside the lane can be excluded with the ROI.
 
+As built (P5.5): a side change counts as a crossing only if the anchor's move from its last off-line point crosses the line **between its endpoints** (passing beyond an end just updates the side); an anchor exactly on a line keeps the last side. Lines are in the line file's `image_size` pixels, scaled to `update(tracks, ts, frame_size=(w, h))` (default: the line file's size). `FlowEvent(direction, track_id, ts, conf, cls)` takes `conf`/`cls` from the frame that completed the count; the worker (P5.6) adds `event_id`/`camera_id`. Tracks unseen for `TRACK_TTL_S` = 5 s are dropped; detections without a `track_id` are ignored.
+
 ### 7.4 Flow counter (`parking/core/flow_counter.py`, in the API)
 ```
 occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
