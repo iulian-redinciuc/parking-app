@@ -20,3 +20,14 @@ export function formatUpdatedAgo(at: number, now: number, locale = i18n.language
   }
   return '' // unreachable: days never roll over
 }
+
+/** "12 s", "3 min", "2 h" in the UI language. */
+export function formatAge(seconds: number, locale: string): string {
+  const [value, unit] =
+    seconds < 60
+      ? [Math.round(seconds), 'second']
+      : seconds < 3600
+        ? [Math.round(seconds / 60), 'minute']
+        : [Math.round(seconds / 3600), 'hour']
+  return new Intl.NumberFormat(locale, { style: 'unit', unit, unitDisplay: 'short' }).format(value)
+}

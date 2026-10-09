@@ -19,10 +19,10 @@
 **Done when:** you can log in on your phone and reach `#/admin`.
 
 ## P7.2: Camera health page and snapshots
-**Files:** API `GET /api/admin/cameras`, `GET …/snapshot`; worker `snapshot` command (from P2.3); `frontend/src/screens/admin/Cameras.tsx`, `CameraDetail.tsx`
+**Files:** API `GET /api/admin/cameras`, `GET …/snapshot`; worker `/control/snapshot` (from P2.3); `frontend/src/screens/admin/Cameras.tsx`, `CameraDetail.tsx`
 
 **Steps**
-1. Snapshot round trip: the API publishes `cmd: snapshot` with a `request_id`, then waits up to 5 s for `snapshot/<request_id>` (an `asyncio.Future` keyed by id), and returns `image/jpeg` with `Cache-Control: no-store`.
+1. Snapshot round trip: the API calls the worker's `GET <control_url>/control/snapshot?annotated=true` with `WORKER_TOKEN` ([api.md §5.2](../design/api.md#52-api--workers-control); there is no message broker), waits up to 5 s (→ `503`), and returns `image/jpeg` with `Cache-Control: no-store`.
 2. The frontend fetches it with the auth header and displays it via a blob URL (an `<img src>` can't send headers).
 3. The camera list shows state, issue, fps, last frame age and inference ms, auto-refreshing every 10 s.
 

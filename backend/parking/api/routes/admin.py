@@ -6,6 +6,9 @@ A request is an admin's when `Authorization: Bearer <token>` carries either the 
 tokens are 32 random bytes; the DB keeps only their sha256, so a leaked DB can't log anyone
 in. The password is checked against `ADMIN_PASSWORD_HASH` (argon2, from
 `parking admin hash-password`); login attempts are limited to 5 / 15 min per IP.
+
+Camera health (P7.2) comes from the latest worker health messages; a snapshot is fetched from
+the worker's `/control/snapshot` (api.md §5.2, `cameras[].control_url`, `WORKER_TOKEN`).
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Annotated
 
 import anyio
+import httpx
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from fastapi import APIRouter, Depends, Request, Response
@@ -37,6 +41,8 @@ router = APIRouter(prefix="/api/admin")
 SESSION_TTL = timedelta(days=7)
 LOGIN_LIMIT = "5/15 minutes"
 TOKEN_BYTES = 32
+SNAPSHOT_TIMEOUT_S = 5.0
+SNAPSHOT_MAX_BYTES = 20_000_000  # a 4K JPEG is a few MB
 login_limit = rate_limit(LOGIN_LIMIT, "admin-login")
 
 
@@ -172,3 +178,78 @@ async def logout(admin: AdminDep, rt: RuntimeDep) -> Response:
         await anyio.to_thread.run_sync(revoke)
         log.info("admin logout: session %s", admin.session_id)
     return Response(status_code=204)
+
+
+# --- cameras (P7.2) ---
+
+
+@router.get("/cameras", dependencies=[Depends(public_limit)])
+async def cameras(_: AdminDep, rt: RuntimeDep) -> list[dict]:
+    """Every lot.yaml camera with its latest health; `unknown` until a worker has reported.
+
+    `last_frame_age_s` grows with the time since that health message, so a silent worker's
+    frame keeps ageing; `last_health_age_s` is the time since the message itself."""
+    now = rt.store.clock.now()
+    out = []
+    for camera in rt.config.cameras:
+        msg = rt.store.health.get(camera.id)
+        seen = rt.ingestor.health_seen(camera.id)
+        since = (now - seen).total_seconds() if seen else None
+        frame_age = msg.last_frame_age_s if msg else None
+        if frame_age is not None and since is not None:
+            frame_age += since
+        out.append(
+            {
+                "id": camera.id,
+                "role": camera.role,
+                "zones": camera.zones,
+                "state": msg.state if msg else "unknown",
+                "issue": msg.issue if msg else None,
+                "fps": msg.fps if msg else None,
+                "last_frame_age_s": _round(frame_age),
+                "inference_ms_avg": _round(msg.inference_ms_avg if msg else None),
+                "unhealthy_ratio": msg.unhealthy_ratio if msg else None,
+                "last_health_age_s": _round(since),
+                "snapshot": camera.control_url is not None,
+            }
+        )
+    return out
+
+
+def _round(value: float | None) -> float | None:
+    return None if value is None else round(value, 1)
+
+
+@router.get("/cameras/{camera_id}/snapshot", dependencies=[Depends(public_limit)])
+async def snapshot(camera_id: str, _: AdminDep, rt: RuntimeDep, annotated: bool = True) -> Response:
+    """The worker's current frame as JPEG (annotated with its last analysis by default).
+
+    Unknown camera 404; no `control_url` / `WORKER_TOKEN`, a worker that doesn't answer in
+    5 s or answers with an error -> 503. Never cached (`Cache-Control: no-store`)."""
+    camera = next((c for c in rt.config.cameras if c.id == camera_id), None)
+    if camera is None:
+        raise ApiError(404, "not_found", f"unknown camera '{camera_id}'")
+    if not camera.control_url:
+        raise ApiError(503, "unavailable", f"camera '{camera_id}' has no control_url in lot.yaml")
+    if rt.settings.worker_token is None:
+        raise ApiError(503, "unavailable", "WORKER_TOKEN is not set on this server")
+    url = camera.control_url.rstrip("/") + "/control/snapshot"
+    headers = {"Authorization": f"Bearer {rt.settings.worker_token.get_secret_value()}"}
+    params = {"annotated": "true" if annotated else "false"}
+    try:
+        async with httpx.AsyncClient(timeout=SNAPSHOT_TIMEOUT_S) as client:
+            r = await client.get(url, headers=headers, params=params)
+    except httpx.HTTPError as e:
+        log.warning("camera %s: snapshot failed: %s", camera_id, type(e).__name__)
+        raise ApiError(503, "unavailable", f"the worker for '{camera_id}' didn't answer") from e
+    if r.status_code != 200 or not r.content.startswith(b"\xff\xd8"):
+        log.warning("camera %s: snapshot answered HTTP %s", camera_id, r.status_code)
+        message = (
+            "the worker has no frame yet"
+            if r.status_code == 503
+            else f"the worker for '{camera_id}' answered HTTP {r.status_code}"
+        )
+        raise ApiError(503, "unavailable", message)
+    if len(r.content) > SNAPSHOT_MAX_BYTES:
+        raise ApiError(503, "unavailable", "the snapshot is too large")
+    return Response(r.content, media_type="image/jpeg", headers={"Cache-Control": "no-store"})

@@ -268,3 +268,158 @@ export async function adminLogout(options?: RequestOptions): Promise<void> {
     setAdminToken(null)
   }
 }
+
+// --- admin cameras (P7.2) ---
+
+export type CameraState = 'ok' | 'degraded' | 'down' | 'unknown'
+
+/** One row of `GET /api/admin/cameras` (the latest worker health message). */
+export interface AdminCamera {
+  id: string
+  role: 'occupancy' | 'flow'
+  zones: string[]
+  state: CameraState
+  issue: string | null
+  fps: number | null
+  last_frame_age_s: number | null
+  inference_ms_avg: number | null
+  unhealthy_ratio: number | null
+  last_health_age_s: number | null
+  /** The camera has a `control_url`, so the API can fetch a snapshot. */
+  snapshot: boolean
+}
+
+const STATES: readonly string[] = ['ok', 'degraded', 'down', 'unknown']
+const numOrNull = (x: unknown) => x === null || typeof x === 'number'
+const isCamera = (x: unknown): x is AdminCamera =>
+  isObject(x) &&
+  typeof x.id === 'string' &&
+  (x.role === 'occupancy' || x.role === 'flow') &&
+  Array.isArray(x.zones) &&
+  STATES.includes(x.state as string) &&
+  (x.issue === null || typeof x.issue === 'string') &&
+  numOrNull(x.fps) &&
+  numOrNull(x.last_frame_age_s) &&
+  numOrNull(x.inference_ms_avg) &&
+  numOrNull(x.unhealthy_ratio) &&
+  numOrNull(x.last_health_age_s) &&
+  typeof x.snapshot === 'boolean'
+const isCameraList = (x: unknown): x is AdminCamera[] => Array.isArray(x) && x.every(isCamera)
+
+function mockCameras(): AdminCamera[] {
+  return [
+    {
+      id: 'cam-ground',
+      role: 'occupancy',
+      zones: ['ground'],
+      state: 'ok',
+      issue: null,
+      fps: 0.2,
+      last_frame_age_s: 2.4,
+      inference_ms_avg: 151,
+      unhealthy_ratio: 0,
+      last_health_age_s: 2.4,
+      snapshot: true,
+    },
+    {
+      id: 'cam-ramp',
+      role: 'flow',
+      zones: ['underground'],
+      state: 'unknown',
+      issue: null,
+      fps: null,
+      last_frame_age_s: null,
+      inference_ms_avg: null,
+      unhealthy_ratio: null,
+      last_health_age_s: null,
+      snapshot: false,
+    },
+  ]
+}
+
+function mockAdminOnly(): void {
+  if (getAdminToken() !== MOCK_TOKEN) {
+    setAdminToken(null)
+    throw new ApiRequestError({ code: 'unauthorized', message: 'not logged in', status: 401 })
+  }
+}
+
+/** `GET /api/admin/cameras`: every camera with its latest health. */
+export async function getAdminCameras(options?: RequestOptions): Promise<AdminCamera[]> {
+  if (IS_MOCK && !options?.base) {
+    mockAdminOnly()
+    return mockCameras()
+  }
+  return adminRequest('/api/admin/cameras', isCameraList, options)
+}
+
+/** A placeholder picture for the mock build, which has no workers. */
+function mockSnapshot(cameraId: string): Blob {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">' +
+    '<rect width="100%" height="100%" fill="#334155"/>' +
+    '<text x="50%" y="50%" fill="#e2e8f0" font-family="sans-serif" font-size="28" ' +
+    `text-anchor="middle">${cameraId}: demo snapshot</text></svg>`
+  return new Blob([svg], { type: 'image/svg+xml' })
+}
+
+/** `GET /api/admin/cameras/{id}/snapshot`: the worker's current frame as a JPEG blob (an
+ * `<img src>` can't send the bearer header, so the caller shows it via a blob URL). The API
+ * waits up to 5 s for the worker; `unavailable` (503) when it can't get one. */
+export async function getCameraSnapshot(
+  cameraId: string,
+  { annotated = true, ...options }: RequestOptions & { annotated?: boolean } = {},
+): Promise<Blob> {
+  if (IS_MOCK && !options.base) {
+    mockAdminOnly()
+    if (cameraId !== 'cam-ground') {
+      throw new ApiRequestError({ code: 'unavailable', message: 'no snapshot', status: 503 })
+    }
+    return mockSnapshot(cameraId)
+  }
+  const token = getAdminToken()
+  if (!token) {
+    throw new ApiRequestError({ code: 'unauthorized', message: 'not logged in', status: 401 })
+  }
+  const { signal, timeoutMs = TIMEOUT_MS, base = API_BASE } = options
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  const onAbort = () => controller.abort()
+  if (signal?.aborted) controller.abort()
+  signal?.addEventListener('abort', onAbort)
+  try {
+    let res: Response
+    try {
+      const path = `/api/admin/cameras/${encodeURIComponent(cameraId)}/snapshot`
+      res = await fetch(`${base}${path}?annotated=${annotated}`, {
+        headers: { Accept: 'image/jpeg', Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      if (res.ok) return await res.blob()
+    } catch (err) {
+      if (timedOut) {
+        throw new ApiRequestError({
+          code: 'timeout',
+          message: `no answer in ${timeoutMs / 1000} s`,
+        })
+      }
+      if (signal?.aborted) throw err
+      throw new ApiRequestError({ code: 'network', message: String(err) })
+    }
+    const body: unknown = await res.json().catch(() => undefined)
+    if (res.status === 401 && getAdminToken() === token) setAdminToken(null)
+    throw new ApiRequestError(
+      isApiErrorBody(body)
+        ? { ...body.error, status: res.status, retryAfter: retryAfter(res) }
+        : { code: 'bad_response', message: `HTTP ${res.status}`, status: res.status },
+    )
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
+  }
+}

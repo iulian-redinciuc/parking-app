@@ -151,14 +151,19 @@ Why not cookies: the frontend and the API can be on different sites (e.g. the Gi
 | POST | `/api/admin/login` | 7 | `{"password":"…"}` → `{"token":"…","expires_at":"…"}`. 5 attempts / 15 min / IP |
 | GET | `/api/admin/session` | 7 | Checks the token: `{"actor":"session:<id>"\|"admin-token","expires_at":"…"\|null}` (the admin screen calls it on open) |
 | POST | `/api/admin/logout` | 7 | Revokes the calling session token → `204` (a no-op for `ADMIN_TOKEN`) |
-| GET | `/api/admin/cameras` | 7 | `[{"id","role","state":"ok|degraded|down","issue","fps","last_frame_age_s","inference_ms_avg"}]` |
-| GET | `/api/admin/cameras/{id}/snapshot?annotated=true` | 7 | `image/jpeg` (proxied from the worker's `/control/snapshot`, 5 s timeout → 503) |
+| GET | `/api/admin/cameras` | 7 | `[{"id","role","zones","state":"ok|degraded|down|unknown","issue","fps","last_frame_age_s","inference_ms_avg","unhealthy_ratio","last_health_age_s","snapshot"}]`, in lot.yaml order (see below) |
+| GET | `/api/admin/cameras/{id}/snapshot?annotated=true` | 7 | `image/jpeg` with `Cache-Control: no-store` (proxied from the worker's `/control/snapshot`, 5 s timeout → 503) |
 | GET | `/api/admin/cameras/{id}/slots` | 7 | Slot file JSON |
 | PUT | `/api/admin/cameras/{id}/slots` | 7 | Validates, writes `config/slots/<id>.json`, keeps a `.bak`, calls the worker's `/control/reload` |
 | GET / PUT | `/api/admin/cameras/{id}/lines` | 7 | Same, for line files |
 | POST | `/api/admin/cameras/{id}/reference-frame` | 7 | Saves the current frame as the shift-detection reference |
 | POST | `/api/admin/zones/{id}/correct` | 5 | `{"occupied": 37, "note": "manual count"}` → new zone status. `flow` zones only (409 otherwise) |
 | GET | `/api/admin/corrections?limit=50` | 7 | Audit log |
+
+**Cameras and snapshots** (`parking/api/routes/admin.py`, P7.2):
+- The list comes from each camera's latest health message: `state` is `unknown` (other fields `null`) until a worker has reported. `last_frame_age_s` is the worker's value **plus** the seconds since that message arrived, so a silent worker's frame keeps ageing; `last_health_age_s` is the time since the message itself. `snapshot` is `true` when the camera has a `control_url`. Numbers are rounded to 0.1.
+- The snapshot is a plain HTTP GET to `<control_url>/control/snapshot` with `WORKER_TOKEN` (§5.2): `annotated` defaults to `true`. Unknown camera `404`; no `control_url`, no `WORKER_TOKEN`, no answer in 5 s, any non-200 (e.g. the worker's own `503` before its first frame) or a body that isn't a JPEG → `503 unavailable` with a message saying which. The full frame is passed through unscaled (at most 20 MB).
+- The frontend fetches it with the bearer header and shows it through a blob URL (an `<img src>` can't send headers), revoking the previous URL on each new picture.
 
 ---
 

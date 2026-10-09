@@ -145,13 +145,50 @@
     "signed_in": "Signed in",
     "signed_in_until": "Signed in until {{time}}.",
     "signed_in_token": "Signed in with the admin token.",
-    "coming_soon": "Camera health, slot editing and count corrections are coming soon.",
+    "coming_soon": "Slot editing and count corrections are coming soon.",
     "log_out": "Log out",
     "error": {
       "unauthorized": "Wrong password.",
       "rate_limited": "Too many attempts. Try again in {{minutes}} min.",
       "unavailable": "Admin sign-in isn't set up on this server.",
       "failed": "That didn't work. Check your connection and try again."
+    },
+    "cameras": {
+      "title": "Cameras",
+      "loading": "Loading cameras…",
+      "none": "No cameras in lot.yaml.",
+      "failed": "Couldn't load the cameras. Retrying every 10 s.",
+      "role": {
+        "occupancy": "occupancy",
+        "flow": "entry/exit"
+      },
+      "state": {
+        "ok": "OK",
+        "degraded": "Degraded",
+        "down": "Down",
+        "unknown": "No reports yet"
+      },
+      "issue": {
+        "black": "black image",
+        "frozen": "frozen image",
+        "blurry": "blurry image",
+        "shifted": "camera moved",
+        "connect_failed": "can't connect"
+      },
+      "fps": "{{value}} fps",
+      "frame_age": "last frame {{age}} ago",
+      "inference": "{{ms}} ms per frame"
+    },
+    "camera": {
+      "back": "← All cameras",
+      "not_found": "This camera isn't in lot.yaml.",
+      "loading": "Loading snapshot…",
+      "refresh": "New snapshot",
+      "annotated": "Show slots and detections",
+      "snapshot": "Current picture from {{id}}",
+      "snapshot_annotated": "Current picture from {{id}} with slots and detections",
+      "unavailable": "No snapshot right now: the worker isn't reachable or has no frame yet.",
+      "failed": "Couldn't load the snapshot. Check your connection and try again."
     }
   }
 }

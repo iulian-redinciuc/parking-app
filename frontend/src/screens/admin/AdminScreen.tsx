@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Route, Routes } from 'react-router'
 import {
   adminLogout,
   ApiRequestError,
@@ -8,9 +9,12 @@ import {
   onAdminTokenChange,
   type AdminSession,
 } from '../../api/client'
+import CameraDetail from './CameraDetail'
+import Cameras from './Cameras'
 import Login from './Login'
 
-// `#/admin` (frontend.md §2.4), a lazy chunk: the login without a token, else the admin home.
+// `#/admin` (frontend.md §2.4), a lazy chunk: the login without a token, else the admin home
+// (session + camera list) and `#/admin/cameras/<id>` (camera detail with a snapshot).
 // A 401 from any admin call forgets the token (client.ts), which brings the login back.
 
 function useAdminToken(): string | null {
@@ -57,6 +61,7 @@ function AdminHome({ token }: { token: string }) {
           <p className="text-muted">{failed ? t('admin.error.failed') : t('admin.checking')}</p>
         )}
       </div>
+      <Cameras />
       <p className="text-muted">{t('admin.coming_soon')}</p>
       <button
         type="button"
@@ -71,5 +76,11 @@ function AdminHome({ token }: { token: string }) {
 
 export default function AdminScreen() {
   const token = useAdminToken()
-  return token ? <AdminHome token={token} /> : <Login />
+  if (!token) return <Login />
+  return (
+    <Routes>
+      <Route path="cameras/:id" element={<CameraDetail />} />
+      <Route path="*" element={<AdminHome token={token} />} />
+    </Routes>
+  )
 }

@@ -77,6 +77,10 @@ class Ingestor:
         # camera id -> store-clock time its last health message arrived
         self._health_seen: dict[str, datetime] = {}
 
+    def health_seen(self, camera_id: str) -> datetime | None:
+        """Store-clock time the camera's last health message arrived (None = never)."""
+        return self._health_seen.get(camera_id)
+
     # --- start-up ---
 
     async def restore(self) -> None:

@@ -75,7 +75,7 @@ As built (P6.4, `src/screens/NotificationsScreen.tsx`, `src/lib/push.ts`): the s
 - "Usually ~N free at HH:MM" card.
 
 ### 2.4 Admin (`#/admin`): Phase 7, lazy chunk
-Login → camera list (state, fps, last frame age) → camera detail (annotated snapshot, *Edit slots/lines* (editor), *Save reference frame*) → zone corrections (number input + note) → corrections log.
+Login → camera list (state, issue, fps, last frame age, inference ms; refreshed every 10 s) → camera detail (`#/admin/cameras/<id>`: annotated snapshot with a plain-picture switch, *Edit slots/lines* (editor), *Save reference frame*) → zone corrections (number input + note) → corrections log.
 
 ### 2.5 Privacy (`#/privacy`): Phase 8
 Static text: what is processed, what's stored, location never leaves the phone.

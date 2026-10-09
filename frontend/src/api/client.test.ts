@@ -8,8 +8,10 @@ import {
   adminLogout,
   ApiRequestError,
   apiUrl,
+  getAdminCameras,
   getAdminSession,
   getAdminToken,
+  getCameraSnapshot,
   getLot,
   getStatus,
   IS_MOCK,
@@ -205,5 +207,76 @@ describe('admin client', () => {
     )
     await failure(adminLogout({ base: BASE }))
     expect(getAdminToken()).toBeNull()
+  })
+})
+
+describe('admin cameras client', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setAdminToken(null)
+  })
+
+  const camera = {
+    id: 'cam-ground',
+    role: 'occupancy',
+    zones: ['ground'],
+    state: 'ok',
+    issue: null,
+    fps: 0.2,
+    last_frame_age_s: 3.1,
+    inference_ms_avg: 151,
+    unhealthy_ratio: 0,
+    last_health_age_s: 1,
+    snapshot: true,
+  }
+
+  it('lists cameras with the bearer token and checks the shape', async () => {
+    setAdminToken('tok')
+    const fetch = reply(200, [camera])
+    vi.stubGlobal('fetch', fetch)
+    expect(await getAdminCameras({ base: BASE })).toEqual([camera])
+    const init = (fetch.mock.calls[0] as unknown[])[1] as RequestInit
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer tok' })
+
+    vi.stubGlobal('fetch', reply(200, [{ ...camera, state: 'great' }]))
+    expect((await failure(getAdminCameras({ base: BASE }))).code).toBe('bad_response')
+  })
+
+  it('fetches the snapshot as a blob with the bearer header, never cached', async () => {
+    setAdminToken('tok')
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9])
+    const fetch = vi.fn(
+      async () => new Response(jpeg, { status: 200, headers: { 'Content-Type': 'image/jpeg' } }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const blob = await getCameraSnapshot('cam-ground', { base: BASE, annotated: false })
+    expect(blob.type).toBe('image/jpeg')
+    expect(blob.size).toBe(4)
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('http://api.test/api/admin/cameras/cam-ground/snapshot?annotated=false')
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer tok' })
+    expect(init.cache).toBe('no-store')
+  })
+
+  it('a 503 snapshot is `unavailable` and keeps the token; a 401 forgets it', async () => {
+    setAdminToken('tok')
+    vi.stubGlobal('fetch', reply(503, { error: { code: 'unavailable', message: 'no frame' } }))
+    const error = await failure(getCameraSnapshot('cam-ground', { base: BASE }))
+    expect(error).toMatchObject({ code: 'unavailable', status: 503 })
+    expect(getAdminToken()).toBe('tok')
+
+    vi.stubGlobal('fetch', reply(401, { error: { code: 'unauthorized', message: 'expired' } }))
+    expect((await failure(getCameraSnapshot('cam-ground', { base: BASE }))).status).toBe(401)
+    expect(getAdminToken()).toBeNull()
+    expect((await failure(getCameraSnapshot('cam-ground', { base: BASE }))).status).toBe(401)
+  })
+
+  it('a network failure is `network`', async () => {
+    setAdminToken('tok')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Promise.reject(new TypeError('offline'))),
+    )
+    expect((await failure(getCameraSnapshot('cam-ground', { base: BASE }))).code).toBe('network')
   })
 })
