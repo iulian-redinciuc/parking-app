@@ -1,6 +1,6 @@
 """P7.4: `POST /api/admin/zones/{id}/correct` (flow zones only, a `correction` + `zone_state`
 row, the new status published) and the `GET /api/admin/corrections` audit log; P5.7: the
-scheduled flow-zone reset (`zones[].reset`)."""
+scheduled flow-zone reset (`zones[].reset`); P5.8: the flow zone's confidence end to end."""
 
 import json
 from datetime import UTC, datetime
@@ -251,3 +251,42 @@ def test_scheduled_reset_job_follows_the_cron_in_lot_time(lot, clock):
 
         when = client.portal.call(next_run)
     assert (when.weekday(), when.hour, when.minute) == (0, 3, 30)
+
+
+def test_flow_confidence_drops_below_estimate_and_a_correction_restores_it(lot, clock):
+    """P5.8 Done-when: after enough events without a correction the underground zone is an
+    estimate (< 0.8, the app shows "≈"), a correction brings it back to 1.0; time alone also
+    lowers it, published by the tick."""
+    with make_client(lot, clock) as client:
+        rt = client.app.state.runtime
+
+        def underground(status):
+            return next(z for z in status["zones"] if z["id"] == "underground")
+
+        def published():
+            latest = rt.broadcaster.latest.status
+            return next(z for z in latest.zones if z.id == "underground").confidence
+
+        events = [flow(f"e{i}", "in" if i % 3 else "out") for i in range(20)]
+        client.post("/internal/flow-events", json={"events": events}, headers=auth(WORKER))
+        assert underground(client.get("/api/status").json())["confidence"] == 0.8
+        clock.advance(60)
+        client.post("/internal/flow-events", json={"events": [flow("e20")]}, headers=auth(WORKER))
+        zone = underground(client.get("/api/status").json())
+        assert zone["confidence"] == 0.79  # 1 − 0.01 × 21 − 0.02 × 1/60 h
+        assert published() == 0.79
+        assert client.get("/api/status").json()["total"]["confidence"] == 0.79
+
+        r = client.post(
+            "/api/admin/zones/underground/correct", json={"occupied": 9}, headers=auth()
+        )
+        assert r.json()["confidence"] == 1.0
+        assert published() == 1.0
+        assert underground(client.get("/api/status").json())["confidence"] == 1.0
+
+        # no events: 0.02 per hour, pushed by the 1 s tick
+        count = rt.broadcaster.published
+        clock.advance(hours=10.5)
+        client.portal.call(rt.ingestor.tick)
+        assert rt.broadcaster.published > count
+        assert published() == 0.79
