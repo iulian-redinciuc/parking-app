@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 // E2E tests run against the production build with mock data (VITE_API_BASE=mock).
 // PW_CHROMIUM_PATH runs the Chromium projects on a system browser (e.g. /usr/bin/chromium on the
-// dev Pi, where Playwright's own browsers aren't installed).
+// dev Pi, where Playwright's own browsers aren't installed); a system Chromium runs new headless.
 const chromiumPath = process.env.PW_CHROMIUM_PATH
 
 export default defineConfig({
@@ -17,7 +17,10 @@ export default defineConfig({
       name: 'Pixel 7',
       use: {
         ...devices['Pixel 7'],
-        ...(chromiumPath && { launchOptions: { executablePath: chromiumPath } }),
+        // Full Chromium in new headless mode, not the headless shell, which shows no notifications.
+        ...(chromiumPath
+          ? { launchOptions: { executablePath: chromiumPath } }
+          : { channel: 'chromium' }),
       },
     },
   ],
