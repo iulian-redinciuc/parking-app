@@ -36,7 +36,7 @@ Because production is undecided, the design is **portable**:
 - Docker images are built for both **x86-64** (normal PCs, servers, cloud) and **ARM64** (Pi-class boards), so the same release runs anywhere with Docker.
 - The **AI runtime is chosen per machine** (NCNN on ARM CPUs like the dev Pi; OpenVINO on Intel CPUs; CUDA/TensorRT on NVIDIA; Hailo on a Pi with an AI HAT+). It's a config setting, not a code change.
 - **Speed numbers measured on the dev Pi are a worst case.** They are measured again on the production hardware.
-- **Production layouts** to choose from ([deployment.md §3](docs/design/deployment.md#3-production-topologies-to-be-chosen)): one Raspberry Pi at the lot doing everything; **recommended** a Raspberry Pi at the lot for the cameras plus a cloud server for the API; or everything in the cloud.
+- **Production layouts** to choose from ([deployment.md §3](docs/design/deployment.md#3-production-topologies-to-be-chosen)): one Raspberry Pi at the lot doing everything; **recommended** a Raspberry Pi at the lot for the cameras plus a cloud server for the API; or everything in the cloud. **Chosen in P4.1: the Pi at the lot + a cloud server (T2)**, hardware in [hardware.md §4.5](docs/design/hardware.md#45-chosen-in-p41-to-order).
 
 ## 3. Architecture
 

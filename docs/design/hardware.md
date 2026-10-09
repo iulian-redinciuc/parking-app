@@ -72,6 +72,21 @@ Pick by measuring: record clips from the real cameras (P5.2), then run `parking 
 - A 4G/5G router with a data SIM if there's no wired internet. T2 needs only a few MB per day plus admin snapshots; **T1** also serves all public app traffic from the lot.
 - Optional: a UPS for the vision host, switch and router.
 
+### 4.5 Chosen in P4.1 (to order)
+Topology **T2** ([deployment.md §3](deployment.md#3-production-topologies-to-be-chosen)): a Raspberry Pi 5 at the lot runs the vision workers; the API runs on a small cloud VM (ordered in P8.2, not now). Any equivalent model with the same must-haves (§2) is fine.
+
+| Item | Choice | Why |
+|------|--------|-----|
+| Camera B (occupancy) | **Reolink RLC-811A**: 8 MP (3840×2160), PoE, motorized 5× varifocal 2.7–13.5 mm, RTSP + ONVIF + HTTP snapshot, IR + spotlight, WDR, IP66. Alternative: Hikvision DS-2CD2646G2-IZS (4 MP, 2.8–12 mm motorized, IK10) | The final position isn't surveyed, so a **motorized varifocal** frames both rows from wherever it ends up (the fixed 2.8 mm/4 mm choice of §2 can't be corrected after mounting). 8 MP keeps the farthest car well above 60 px; the worker can still ask for 2560×1440 (P4.2). An HTTP snapshot URL is what the occupancy worker uses (P4.3) |
+| Camera B mount | Where the sample photo was taken (open question #4): **≥ 5 m high** on the building wall/window, looking down at **≥ 45°** (near top-down is fine), covering both rows of ground spaces. Wall or pole bracket, no swaying | Phase 1 showed that a steep, near top-down view has no occlusion and the appearance scorer reached 34/34 on it; the YOLO detector needs an angled view, so it's the fallback, not the target |
+| Vision host | **Raspberry Pi 5 8 GB** + official Active Cooler + official 27 W USB-C PSU + **M.2 HAT+ with a 256 GB NVMe SSD** (boot from it) + a case that fits both. No AI HAT+ yet | Same CPU type as the dev Pi (no surprises, NCNN numbers from P1.10 apply: occupancy 158 ms, `yolo11n` @ 640 83 ms). The SSD avoids SD-card wear from logs and the flow outbox. The AI HAT+ is decided in P5.10 only if the flow camera needs it |
+| PoE switch | **TP-Link TL-SG1005P** (5 ports, 4 × PoE 802.3af/at, 65 W) or any switch with ≥ 4 PoE ports and ≥ 30 W budget | Camera B + Camera A (Phase 5) + uplink + the Pi |
+| Cabling | Outdoor-rated Cat6 for each camera run, RJ45 waterproof glands | §6 |
+| Internet at the lot | The existing wired line if there is one; otherwise a 4G router with a data SIM | T2 sends only a few MB per day |
+| Optional | A small UPS for the Pi, switch and router | §4.4 |
+
+Camera A (flow, Phase 5) can be ordered at the same time to save a trip: a 4 MP PoE fixed-lens camera from the same brand (e.g. Reolink RLC-510A, 4 mm), placed per §2 in P5.1.
+
 ## 6. Mounting checklist
 - [ ] Camera positions agree with the layout option (A/B/C) chosen in PLAN.md.
 - [ ] Occupancy view covers every ground space, with no space hidden behind a pillar or tree.
