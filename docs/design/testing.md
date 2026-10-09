@@ -45,7 +45,7 @@ Use `core/clock.py` (`Clock` protocol with `now()` returning aware UTC; `SystemC
 | Set | Contents | Built in |
 |-----|----------|----------|
 | `data/samples/` + `data/labels/cam-ground.json` | Your Phase 1 sample images | P1.8 |
-| `data/validation/cam-ground/` + labels | ~200 frames from the live camera across conditions | P4.8 |
+| `data/validation/cam-ground/` + labels | ~200 frames from the live camera across conditions (`parking validation pick` / `check`) | P4.8 |
 | `data/recordings/` + `data/labels/<clip>.csv` | 3 × 1-hour ramp clips with hand tallies | P5.9 |
 
 Every evaluation run writes `out/eval/<set>-<YYYYMMDD-HHMM>.json`. Copy the headline numbers into PROGRESS.md → Metrics.

@@ -103,12 +103,12 @@ Put the suggested values in `cameras[].health` in `lot.yaml` (check the night an
 
 ## P4.8: Build the validation set
 **Steps**
-1. Turn on debug capture for ~1–2 weeks (or write a small `parking grab --every 15m --days 7` command).
-2. Pick ~200 frames spread over: morning/noon/evening/night, dry/rain, empty/busy/full, plus any hard cases (low sun glare, snow).
-3. Move them to `data/validation/cam-ground/` (outside the retention-pruned folder). Label them with the slot editor's label mode → `data/labels/cam-ground-validation.json`, tagging conditions.
+1. Turn on debug capture for ~1–2 weeks on the vision host: `DEBUG_CAPTURE=true`, `DEBUG_RETENTION_HOURS=336` (so nothing expires before the pick; back to 24 afterwards) in `deploy/.env`.
+2. Pick ~200 frames spread over: morning/noon/evening/night, dry/rain, empty/busy/full, plus any hard cases (low sun glare, snow). `parking validation pick --camera cam-ground [--count 200] [--dry-run]` does the spread: strata of lot-local time of day (night 21–06, morning 06–11, noon 11–15, evening 15–21) × occupancy from the capture's observation (empty ≤ 20 % taken, full ≥ 90 %), quotas shared evenly, evenly spaced in time inside each stratum. Add rainy/glare frames by hand if the pick missed them.
+3. The pick copies them to `data/validation/cam-ground/` (outside the retention-pruned folder) as `<date>_<HHMMSS>_<ms>.jpg`. Label them with the slot editor's label mode → `data/labels/cam-ground-validation.json`, tagging conditions (`morning|noon|evening|night`, `dry|rain`, `empty|busy|full`, plus `glare`, `snow`, … for hard cases). `parking validation check --camera cam-ground` prints the per-tag counts and exits 1 until the target below is met.
 4. Blur faces/plates if you keep these longer than the retention policy allows (OpenCV Gaussian blur on boxes detected as `person`, plus manual plates).
 
-**Done when:** ≥ 200 labelled frames covering every condition tag at least 15 times.
+**Done when:** ≥ 200 labelled frames covering every condition tag at least 15 times (`parking validation check --camera cam-ground` prints `ok`; hard-case tags are optional, see the decision log).
 
 ## P4.9: Evaluate and tune
 **Steps**

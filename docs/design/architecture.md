@@ -178,6 +178,8 @@ frontend/
 | `parking push vapid-keys` | 6 | Generate VAPID keys |
 | `parking admin hash-password` | 7 | Argon2 hash for `.env` |
 | `parking health-stats LOG... --camera ID [--since ISO] [--until ISO] [--json]` | 4 | Per lot-local hour p1/median of the logged frame-health metrics and suggested `health:` thresholds ([vision.md §5](vision.md#5-frame-health-parkingvisionhealthpy), P4.4) |
+| `parking validation pick --camera ID [--count 200] [--from DIR] [--out DIR] [--dry-run]` | 4 | Copy debug captures spread over time of day × occupancy level into `data/validation/<camera>/` (P4.8) |
+| `parking validation check --camera ID [--labels FILE] [--tags LIST] [--min-images 200] [--min-per-tag 15]` | 4 | Count labelled validation images and condition tags; exit 1 below the P4.8 target |
 | `parking db prune` / `parking db aggregate` | 7 | Retention + rollups (also scheduled) |
 | `parking backup --out DIR` | 8 | Consistent SQLite + config backup |
 

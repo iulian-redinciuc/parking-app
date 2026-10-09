@@ -21,12 +21,14 @@ worker_app = typer.Typer(help="Run the camera workers.", no_args_is_help=True)
 db_app = typer.Typer(help="Database migrations and maintenance.", no_args_is_help=True)
 push_app = typer.Typer(help="Web Push setup.", no_args_is_help=True)
 admin_app = typer.Typer(help="Admin helpers.", no_args_is_help=True)
+validation_app = typer.Typer(help="Build the validation set (P4.8).", no_args_is_help=True)
 
 app.add_typer(models_app, name="models")
 app.add_typer(worker_app, name="worker")
 app.add_typer(db_app, name="db")
 app.add_typer(push_app, name="push")
 app.add_typer(admin_app, name="admin")
+app.add_typer(validation_app, name="validation")
 
 
 def _version_callback(value: bool) -> None:
@@ -760,6 +762,99 @@ def health_stats(
         typer.echo(json.dumps(out, indent=2))
     else:
         typer.echo(report(hours, total, cam.health))
+
+
+@validation_app.command("pick")
+def validation_pick(
+    camera: Annotated[str, typer.Option(help="Occupancy camera id in the config.")],
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    count: Annotated[int, typer.Option(help="Frames to pick.")] = 200,
+    src: Annotated[
+        Path | None, typer.Option("--from", help="Capture folder (default data/debug/<camera>).")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option(help="Folder to copy to (default data/validation/<camera>).")
+    ] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Only print the picks.")] = False,
+) -> None:
+    """Copy debug captures spread over time of day x occupancy into the validation folder."""
+    import shutil
+    from collections import Counter
+
+    from parking.vision import validation as va
+
+    if count <= 0:
+        raise typer.BadParameter("must be positive", param_hint="--count")
+    _, _, root = _occupancy_camera(config, camera, "validation pick")
+    src_dir = _resolve(src, root) if src else root / "data" / "debug" / camera
+    out_dir = _resolve(out, root) if out else root / "data" / "validation" / camera
+    if not src_dir.is_dir():
+        _fail(f"{src_dir}: no captures (run the worker with DEBUG_CAPTURE=true)")
+    captures = va.scan(src_dir)
+    if not captures:
+        _fail(f"{src_dir}: no captures with an observation JSON")
+    chosen = va.pick(captures, count)
+    strata = Counter(c.stratum for c in chosen)
+    for (per, lev), n in sorted(strata.items()):
+        typer.echo(f"{per:8} {lev:8} {n:4}")
+    copied = skipped = 0
+    if not dry_run:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    for c in chosen:
+        target = out_dir / c.out_name
+        if target.exists():
+            skipped += 1
+        elif not dry_run:
+            shutil.copy2(c.path, target)
+            copied += 1
+    verb = "would copy" if dry_run else "copied"
+    typer.echo(
+        f"{len(chosen)} of {len(captures)} capture(s) picked, {verb} "
+        f"{len(chosen) - skipped if dry_run else copied}, {skipped} already there -> {out_dir}"
+    )
+    if not dry_run:
+        typer.echo("Label them in tools/slot-editor (label mode, tag the conditions).")
+
+
+@validation_app.command("check")
+def validation_check(
+    camera: Annotated[str, typer.Option(help="Occupancy camera id in the config.")],
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    labels: Annotated[
+        Path | None,
+        typer.Option(help="Labels file (default data/labels/<camera>-validation.json)."),
+    ] = None,
+    tags: Annotated[
+        str | None,
+        typer.Option(
+            help="Comma list of tags that must each reach --min-per-tag "
+            "(default morning,noon,evening,night,dry,rain,empty,busy,full)."
+        ),
+    ] = None,
+    min_images: Annotated[int, typer.Option(help="Labelled images needed.")] = 200,
+    min_per_tag: Annotated[int, typer.Option(help="Images needed per required tag.")] = 15,
+) -> None:
+    """Check the validation labels against P4.8's target (exit 1 if not reached)."""
+    from parking.config import ConfigError, load_labels
+    from parking.vision import validation as va
+
+    _, _, root = _occupancy_camera(config, camera, "validation check")
+    path = _resolve(labels or Path(f"data/labels/{camera}-validation.json"), root)
+    try:
+        label_file = load_labels(path)
+    except (ConfigError, ValueError) as e:
+        _fail(f"labels {path}: {e} (label the images with tools/slot-editor)")
+    if label_file.camera_id != camera:
+        _fail(f"labels {path} are for camera '{label_file.camera_id}', not '{camera}'")
+    required = _csv(tags) if tags is not None else va.REQUIRED_TAGS
+    cov = va.coverage(label_file, required, min_images, min_per_tag)
+    typer.echo(f"images   {cov.images:4} / {min_images}")
+    for tag, n in cov.tags.items():
+        mark = "  <- short" if tag in cov.missing else ""
+        typer.echo(f"{tag:8} {n:4}{mark}")
+    if not cov.ok:
+        _fail(f"not enough yet (need {min_images} images and {min_per_tag} per required tag)")
+    typer.echo("ok")
 
 
 @worker_app.command("occupancy")
