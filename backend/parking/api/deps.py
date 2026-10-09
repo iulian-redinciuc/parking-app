@@ -18,6 +18,7 @@ from limits.strategies import MovingWindowRateLimiter
 from sqlalchemy import Engine
 
 from parking.api.ingest import Ingestor
+from parking.api.jobs import MaintenanceJobs
 from parking.api.sse import Broadcaster
 from parking.config import LotConfig, Settings
 from parking.core.fusion import StateStore
@@ -60,6 +61,7 @@ class Runtime:
     almost_full: AlmostFullNotifier | None = None  # likewise
     scheduler: PushScheduler | None = None  # likewise
     root: Path = Path(".")  # the app root: `config/`, `data/`, `deploy/`
+    jobs: MaintenanceJobs | None = None  # rollups + retention (data-model.md §4)
 
     def path(self, path: Path) -> Path:
         """A relative config path (e.g. `slots_file`) under the app root, whatever the cwd."""

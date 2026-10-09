@@ -749,6 +749,100 @@ def db_upgrade(
     typer.echo(f"database at {revision}: {url}")
 
 
+DbUrl = Annotated[
+    str | None,
+    typer.Option(help="Database URL. Default: PARKING_DB_URL, else data/db/parking.sqlite."),
+]
+
+
+def _db_engine(config: Path, url: str | None):
+    """`(lot config, engine)` for the maintenance commands; the DB is upgraded first."""
+    from parking.config import ConfigError, cli_env, load_config
+    from parking.db.engine import default_url, make_engine, upgrade
+
+    config = _find_config(config)
+    root = config.resolve().parent.parent
+    try:
+        lot = load_config(config, cli_env(root))
+    except (ConfigError, ValueError) as e:
+        _fail(f"{config}: {e}")
+    url = url or default_url(root)
+    try:
+        upgrade(url)
+    except Exception as e:
+        _fail(f"upgrade failed: {e}")
+    return lot, make_engine(url)
+
+
+@db_app.command("aggregate")
+def db_aggregate(
+    backfill: Annotated[
+        bool,
+        typer.Option(
+            "--backfill",
+            help="Delete zone_minute/zone_hour and rebuild them from all of zone_state.",
+        ),
+    ] = False,
+    config: Annotated[Path, typer.Option(help="lot.yaml (for the zone ids).")] = DEFAULT_CONFIG,
+    url: DbUrl = None,
+) -> None:
+    """Build the zone_minute / zone_hour rollups now (the API also does it every minute)."""
+    from parking.api.jobs import MaintenanceJobs
+    from parking.core.clock import SystemClock
+    from parking.db import rollups
+    from parking.db.engine import session_scope
+
+    lot, engine = _db_engine(config, url)
+    now = SystemClock().now()
+    try:
+        if backfill:
+            with session_scope(engine) as session:
+                minutes, hours = rollups.backfill(session, [z.id for z in lot.zones], now)
+        else:
+            jobs = MaintenanceJobs(engine, lot, SystemClock())
+            minutes, hours = jobs.run_minutes(now), jobs.run_hours(now)
+    finally:
+        engine.dispose()
+    typer.echo(f"zone_minute: {minutes} row(s) written, zone_hour: {hours} row(s) written")
+
+
+@db_app.command("prune")
+def db_prune(
+    raw_days: Annotated[
+        float, typer.Option(min=0, help="Keep slot_state, zone_state, flow_event this long.")
+    ] = 90,
+    minute_days: Annotated[float, typer.Option(min=0, help="Keep zone_minute this long.")] = 30,
+    log_days: Annotated[float, typer.Option(min=0, help="Keep notification_log this long.")] = 30,
+    vacuum: Annotated[bool, typer.Option("--vacuum", help="Then VACUUM the file.")] = False,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    url: DbUrl = None,
+) -> None:
+    """Delete rows past the retention periods (the API also does it daily at 04:00)."""
+    from datetime import timedelta
+
+    from parking.api.jobs import MaintenanceJobs
+    from parking.api.jobs import vacuum as vacuum_db
+    from parking.core.clock import SystemClock
+    from parking.db.rollups import Retention
+
+    lot, engine = _db_engine(config, url)
+    retention = Retention(
+        raw=timedelta(days=raw_days),
+        minute=timedelta(days=minute_days),
+        log=timedelta(days=log_days),
+    )
+    try:
+        deleted = MaintenanceJobs(engine, lot, SystemClock(), retention).run_prune(
+            SystemClock().now()
+        )
+        if vacuum:
+            vacuum_db(engine)
+    finally:
+        engine.dispose()
+    for table, count in deleted.items():
+        typer.echo(f"{table}: {count} row(s) deleted")
+
+
 @push_app.command("vapid-keys")
 def push_vapid_keys() -> None:
     """Generate a VAPID key pair and print it as `.env` lines (notifications.md §2)."""

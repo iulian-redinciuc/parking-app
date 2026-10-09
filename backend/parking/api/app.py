@@ -4,7 +4,8 @@ Start-up: `db upgrade`, load lot.yaml and the slot files, restore the `StateStor
 DB (stale until fresh data, data-model.md §2) and start the 1 s `tick()` task. Every new
 status goes to the SSE `Broadcaster` (`/api/stream`) and, with push configured, to the
 on-my-way and almost-full rules (`OnMyWayNotifier`, `AlmostFullNotifier`, notifications.md
-§4-5); the minutely reminder job (`PushScheduler`, APScheduler) runs alongside.
+§4-5); the minutely reminder job (`PushScheduler`, APScheduler) runs alongside, and so do the
+rollup and retention jobs (`MaintenanceJobs`, data-model.md §4).
 
 Around the routes (api.md §7): CORS for `CORS_ORIGINS` only, gzip for responses over 1 KB
 (Starlette never compresses `text/event-stream`), every error as `{"error": {code, message}}`
@@ -32,6 +33,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from parking import __version__
 from parking.api.deps import ApiError, RateLimiter, Runtime
 from parking.api.ingest import Ingestor
+from parking.api.jobs import MaintenanceJobs
 from parking.api.routes import admin, internal, public, push
 from parking.api.sse import Broadcaster
 from parking.config import LotConfig, Settings, SlotFile, cli_env, load_config, load_slots
@@ -108,8 +110,8 @@ def create_app(
     webpush: Callable[..., Any] | None = None,
 ) -> FastAPI:
     """The API. `config_path` is lot.yaml; its folder's parent is the app root (`config/`,
-    `data/`, `deploy/.env`). `tick=False` leaves the tick task and the reminder job off (tests
-    call `tick()` / `run_due()`);
+    `data/`, `deploy/.env`). `tick=False` leaves the tick task, the reminder job and the
+    rollup/retention jobs off (tests call `tick()` / `run_due()` / `run_minutes()`);
     `webpush` replaces pywebpush's sender (tests)."""
     config_path = find_config(config_path)
     root = config_path.resolve().parent.parent
@@ -142,6 +144,7 @@ def create_app(
                 almost_full.status_changed(old, new)
 
         ingestor = Ingestor(store, engine, broadcaster.publish, hook)
+        jobs = MaintenanceJobs(engine, config, clk)
         app.state.runtime = Runtime(
             settings,
             config,
@@ -154,6 +157,7 @@ def create_app(
             almost_full,
             scheduler,
             root,
+            jobs,
         )
         if settings.worker_token is None:
             log.warning("WORKER_TOKEN is not set: every /internal/* request gets 401")
@@ -161,6 +165,8 @@ def create_app(
         task = asyncio.create_task(_tick_loop(ingestor)) if tick else None
         if scheduler is not None and tick:
             scheduler.start()
+        if tick:
+            jobs.start()
         log.info("API ready: lot %s, %d zone(s), db %s", config.lot.id, len(config.zones), url)
         try:
             yield
@@ -171,6 +177,7 @@ def create_app(
                     await task
             if scheduler is not None:
                 scheduler.shutdown()
+            jobs.shutdown()
             if notifier is not None:
                 pending = asyncio.gather(notifier.drain(), almost_full.drain())
                 with contextlib.suppress(TimeoutError):

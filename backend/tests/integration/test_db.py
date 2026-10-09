@@ -26,6 +26,8 @@ TABLES = {
     "push_subscription",
     "notification_log",
     "admin_session",
+    "zone_minute",
+    "zone_hour",
 }
 
 

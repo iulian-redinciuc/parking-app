@@ -85,6 +85,26 @@ class Correction(SQLModel, table=True):
     note: str = ""
 
 
+class _Rollup(SQLModel):
+    """One bucket of a zone's free/occupied counts (`total` is a pseudo-zone)."""
+
+    zone_id: str = Field(primary_key=True)
+    bucket_ts: datetime = _ts(primary_key=True)  # start of the minute/hour (UTC)
+    free_avg: float  # time-weighted
+    free_min: int
+    free_max: int
+    occupied_avg: float
+    samples: int  # minute: count values seen in it; hour: minutes rolled up
+
+
+class ZoneMinute(_Rollup, table=True):
+    __tablename__ = "zone_minute"
+
+
+class ZoneHour(_Rollup, table=True):
+    __tablename__ = "zone_hour"
+
+
 class CameraHealth(SQLModel, table=True):
     """Latest health per camera; history goes to logs only."""
 
