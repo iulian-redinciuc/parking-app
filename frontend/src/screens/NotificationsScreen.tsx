@@ -4,6 +4,7 @@ import { getLot } from '../api/client'
 import { IS_MOCK } from '../api/base'
 import type { LotInfo } from '../api/types'
 import InstallHint from '../components/InstallHint'
+import { requestLocation } from '../lib/geo'
 import {
   isSubscribed,
   loadPrefs,
@@ -12,6 +13,7 @@ import {
   permission,
   PushError,
   pushSupport,
+  saveLocalPrefs,
   sendTest,
   subscribe,
   unsubscribe,
@@ -123,6 +125,7 @@ export default function NotificationsScreen() {
           {message}
         </p>
       )}
+      {view !== 'checking' && view !== 'subscribed' && <LocalNearSettings />}
       {view === 'subscribed' && <PushSettings onGone={() => setView('default')} />}
       {view === 'subscribed' && (
         <button
@@ -214,10 +217,6 @@ function PushSettings({ onGone }: { onGone: () => void }) {
     }
   }
 
-  const radius = Math.min(
-    RADIUS.max,
-    Math.max(RADIUS.min, prefs.radius_m ?? lot?.notify_radius_m ?? 500),
-  )
   const zones = lot?.zones ?? []
   const zoneOn = (id: string) => prefs.zones === null || prefs.zones.includes(id)
   const toggleZone = (id: string) => {
@@ -236,26 +235,7 @@ function PushSettings({ onGone }: { onGone: () => void }) {
 
       <fieldset className="flex flex-col gap-3 rounded-xl bg-surface p-4">
         <legend className="sr-only">{t('alerts.near_legend')}</legend>
-        <Toggle
-          label={t('alerts.near')}
-          hint={t('alerts.near_hint')}
-          checked={prefs.proximity}
-          onChange={(proximity) => change({ proximity })}
-        />
-        {prefs.proximity && (
-          <label className="flex flex-col gap-1 text-sm">
-            <span>{t('alerts.radius', { meters: radius })}</span>
-            <input
-              type="range"
-              min={RADIUS.min}
-              max={RADIUS.max}
-              step={RADIUS.step}
-              value={radius}
-              onChange={(e) => change({ radius_m: Number(e.target.value) })}
-              className="min-h-11 accent-accent"
-            />
-          </label>
-        )}
+        <NearSettings prefs={prefs} lot={lot} onChange={change} />
         <Toggle
           label={t('alerts.almost_full')}
           hint={t('alerts.almost_full_hint')}
@@ -335,6 +315,91 @@ function PushSettings({ onGone }: { onGone: () => void }) {
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * *Tell me when I'm near* + radius (Tier 1, notifications.md §3). Switching it on asks for the
+ * location here, from the tap, never later in the background.
+ */
+function NearSettings({
+  prefs,
+  lot,
+  onChange,
+}: {
+  prefs: Prefs
+  lot: LotInfo | null
+  onChange: (patch: Partial<Prefs>) => void
+}) {
+  const { t } = useTranslation()
+  const [denied, setDenied] = useState(false)
+  const toggle = async (on: boolean) => {
+    setDenied(false)
+    if (on && !(await requestLocation())) {
+      setDenied(true)
+      return
+    }
+    onChange({ proximity: on })
+  }
+  const radius = Math.min(
+    RADIUS.max,
+    Math.max(RADIUS.min, prefs.radius_m ?? lot?.notify_radius_m ?? 500),
+  )
+  return (
+    <>
+      <Toggle
+        label={t('alerts.near')}
+        hint={t('alerts.near_hint')}
+        checked={prefs.proximity}
+        onChange={(on) => void toggle(on)}
+      />
+      {denied && <p className="text-sm text-bad">{t('alerts.near_denied')}</p>}
+      {prefs.proximity && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span>{t('alerts.radius', { meters: radius })}</span>
+          <input
+            type="range"
+            min={RADIUS.min}
+            max={RADIUS.max}
+            step={RADIUS.step}
+            value={radius}
+            onChange={(e) => onChange({ radius_m: Number(e.target.value) })}
+            className="min-h-11 accent-accent"
+          />
+        </label>
+      )}
+    </>
+  )
+}
+
+/**
+ * Without push on this device (not enabled, blocked, unsupported, iPhone Safari outside the app),
+ * Tier 1 still works in the open app: the switch is kept on this device only and sent to the
+ * server with the rest of the prefs when push is enabled.
+ */
+function LocalNearSettings() {
+  const { t } = useTranslation()
+  const [prefs, setPrefs] = useState<Prefs>(loadPrefs)
+  const [lot, setLot] = useState<LotInfo | null>(null)
+  useEffect(() => {
+    let live = true
+    getLot()
+      .then((info) => live && setLot(info))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+  const change = (patch: Partial<Prefs>) => {
+    const next = { ...loadPrefs(), ...patch }
+    setPrefs(next)
+    saveLocalPrefs(next)
+  }
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-xl bg-surface p-4">
+      <legend className="sr-only">{t('alerts.near_legend')}</legend>
+      <NearSettings prefs={prefs} lot={lot} onChange={change} />
+    </fieldset>
   )
 }
 

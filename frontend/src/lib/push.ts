@@ -7,6 +7,7 @@ import { mockStatus } from '../api/mock'
 import { getRequest, sendJson } from '../api/client'
 import type { LotStatus } from '../api/types'
 import i18n, { t } from '../i18n'
+import { roundDistance } from './geo'
 import { isIosSafari, isStandalone } from './pwa'
 import {
   clearPushRegistration,
@@ -119,9 +120,18 @@ export function loadPrefs(): Prefs {
   return { ...DEFAULT_PREFS }
 }
 
+/** Fired on `window` when the saved prefs change (Tier 1 follows *Tell me when I'm near*). */
+export const PREFS_EVENT = 'parking:prefs'
+
 function remember(endpoint: string | null, prefs: Prefs | null) {
   setItem(ENDPOINT, endpoint)
   setItem(PREFS, prefs && JSON.stringify(prefs))
+  window.dispatchEvent(new Event(PREFS_EVENT))
+}
+
+/** Prefs changed while push is off (Tier 1 only); sent to the server when push is enabled. */
+export function saveLocalPrefs(prefs: Prefs) {
+  remember(storedEndpoint(), prefs)
 }
 
 // --- API (api.md §2) ---
@@ -249,7 +259,7 @@ export async function updatePrefs(prefs: Prefs, base = API_BASE): Promise<void> 
 /** "Turn off": forget the subscription on the server and in the browser. Never fails. */
 export async function unsubscribe(base = API_BASE): Promise<void> {
   const endpoint = storedEndpoint()
-  remember(null, null)
+  remember(null, loadPrefs()) // the prefs stay: Tier 1 keeps working without push
   if (base === 'mock') return
   await clearPushRegistration().catch(() => undefined)
   if (endpoint)
@@ -260,12 +270,39 @@ export async function unsubscribe(base = API_BASE): Promise<void> {
   await sub?.unsubscribe().catch(() => undefined)
 }
 
+/** The zones as in a push body (api.md §6): "Ground 12 · Underground ≈11". */
+export function zonesSummary(status: LotStatus): string {
+  return status.zones.map((z) => `${z.name} ${z.method === 'flow' ? '≈' : ''}${z.free}`).join(' · ')
+}
+
+/** "You're 400 m away · 23 free (Ground 12 · Underground ≈11)" (notifications.md §3). */
+export function proximityText(distanceM: number, status: LotStatus | null): string {
+  const { unit, value } = roundDistance(distanceM)
+  const away = t(`proximity.away_${unit}`, { value })
+  if (!status) return away
+  const free = t('proximity.free', { count: status.total.free, zones: zonesSummary(status) })
+  return `${away} · ${free}`
+}
+
 /** The test notification's text in mock mode, shaped like the server's (api.md §6). */
 export function mockTestBody(status: LotStatus): string {
-  const zones = status.zones
-    .map((z) => `${z.name} ${z.method === 'flow' ? '≈' : ''}${z.free}`)
-    .join(' · ')
-  return t('alerts.mock_test_body', { count: status.total.free, zones })
+  return t('alerts.mock_test_body', { count: status.total.free, zones: zonesSummary(status) })
+}
+
+/**
+ * A notification shown by this device itself (Tier 1), looking like a push (api.md §6, same
+ * tag). Does nothing without the notification permission or a service worker.
+ */
+export async function showLocalNotification(payload: {
+  title: string
+  body: string
+  kind: string
+}): Promise<void> {
+  if (permission() !== 'granted' || !('serviceWorker' in navigator)) return
+  const reg = await navigator.serviceWorker.getRegistration()
+  if (!reg) return
+  const { title, options } = notificationFromPush(JSON.stringify(payload), reg.scope)
+  await reg.showNotification(title, options)
 }
 
 /**

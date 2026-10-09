@@ -46,6 +46,8 @@
 5. Cooldown: no repeat for 2 h (timestamp in `localStorage`).
 6. Ignore readings with `accuracy` > 1000 m.
 
+As built (P6.5): `lib/geo.ts` (`haversineM` with the mean Earth radius 6 371 008.8 m, `proximityStep` = steps 4–6 as a pure function, `roundDistance`: 10 m steps below 1 km, then 0.1 km; `locationAllowed` / `requestLocation`; the cooldown in `localStorage` `parking.proximityAlertAt`), `hooks/useProximity.ts` (the watch; the last reading survives hiding the page, so driving in while it was hidden still counts as entering; a `PERMISSION_DENIED` error stops the watch, timeouts don't), `components/ProximityBanner.tsx` (top of every screen, dismissible; the local notification uses the push payload shape with `kind: "proximity"` and the `parking-status` tag). The switch lives on the Alerts screen and **asks for the location from that tap**; the watch starts only when `navigator.permissions` says `granted` (or, where it can't say, when that tap's request succeeded). Without push on the device (not enabled, blocked, unsupported, iPhone Safari outside the installed app) the screen still shows *Tell me when I'm near* + radius, kept on the device only (`saveLocalPrefs`) and sent with the other prefs once push is enabled; turning push off keeps them. The radius is `prefs.radius_m`, else the lot's `notify_radius_m`.
+
 ## 4. Tier 2: "I'm on my way" (server rules, `push/rules.py`)
 
 `POST /api/push/on-my-way {endpoint, minutes}` sets `on_my_way_until = now + minutes`, and sends one push immediately with the current status.

@@ -72,6 +72,13 @@
     "hint": "Tap Share, then Add to Home Screen, then open it from the icon.",
     "dismiss": "Hide this tip"
   },
+  "proximity": {
+    "title": "You're near the parking",
+    "away_m": "You're {{value}} m away",
+    "away_km": "You're {{value}} km away",
+    "free": "{{count}} free ({{zones}})",
+    "dismiss": "Hide"
+  },
   "alerts": {
     "intro": "Get told how many spaces are free. A web app can't follow your location in the background, so notifications come from reminders you set, or while the app is open.",
     "mock_note": "Preview with sample data: notifications are shown by this device only.",
@@ -89,6 +96,7 @@
     "near": "Tell me when I'm near",
     "near_hint": "Only while the app is open.",
     "radius": "Within {{meters}} m of the lot",
+    "near_denied": "Location is blocked. Allow it in this site's settings (or the installed app's settings) to use this.",
     "almost_full": "Warn when almost full",
     "almost_full_hint": "When a zone you follow is almost full or full.",
     "zones": "Zones",

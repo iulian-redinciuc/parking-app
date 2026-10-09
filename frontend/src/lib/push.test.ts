@@ -4,6 +4,7 @@ import {
   DEFAULT_PREFS,
   isSubscribed,
   loadPrefs,
+  saveLocalPrefs,
   MOCK_ENDPOINT,
   mockTestBody,
   pushSupport,
@@ -260,6 +261,13 @@ describe('after subscribing (with a server)', () => {
     expect(storedEndpoint()).toBeNull()
     expect(swPush.clearPushRegistration).toHaveBeenCalled()
     expect(await isSubscribed(API)).toBe(false)
+  })
+
+  it('keeps the prefs after unsubscribing (Tier 1 runs without push)', async () => {
+    stubFetch(api)
+    saveLocalPrefs({ ...DEFAULT_PREFS, proximity: true })
+    await unsubscribe(API)
+    expect(loadPrefs().proximity).toBe(true)
   })
 })
 

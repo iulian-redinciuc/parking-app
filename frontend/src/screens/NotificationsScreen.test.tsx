@@ -23,6 +23,9 @@ function stubPush(permission: NotificationPermission = 'default', answer = permi
   vi.stubGlobal('navigator', {
     ...navigator,
     serviceWorker: { getRegistration: async () => reg, ready: Promise.resolve(reg) },
+    geolocation: {
+      getCurrentPosition: vi.fn((ok: PositionCallback) => ok({} as GeolocationPosition)),
+    },
   })
   vi.stubGlobal('PushManager', class {})
   const Notification = Object.assign(function () {}, {
@@ -55,6 +58,25 @@ describe('NotificationsScreen', () => {
     render(<NotificationsScreen />)
     expect(await screen.findByTestId('install-hint')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Enable notifications' })).toBeNull()
+  })
+
+  it("keeps 'near' on this device without push (iPhone Safari outside the app)", async () => {
+    stubPush()
+    const getCurrentPosition = vi.fn((ok: PositionCallback) => ok({} as GeolocationPosition))
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      userAgent: IPHONE_SAFARI,
+      maxTouchPoints: 5,
+      geolocation: { getCurrentPosition },
+    })
+    render(<NotificationsScreen />)
+    const near = await screen.findByRole('switch', { name: /Tell me when I'm near/ })
+    await act(async () => fireEvent.click(near))
+    expect(getCurrentPosition).toHaveBeenCalledOnce()
+    expect(near).toBeChecked()
+    expect(push.loadPrefs().proximity).toBe(true)
+    expect(push.updatePrefs).not.toHaveBeenCalled()
+    expect(await screen.findByText('Within 500 m of the lot')).toBeInTheDocument()
   })
 
   it('explains how to unblock when permission was denied', async () => {
@@ -95,7 +117,10 @@ describe('NotificationsScreen', () => {
       try {
         fireEvent.click(almostFull)
         act(() => void vi.advanceTimersByTime(400))
-        fireEvent.click(screen.getByRole('switch', { name: /Tell me when I'm near/ }))
+        // 'near' asks for the location first, so its change lands a microtask later
+        await act(async () =>
+          fireEvent.click(screen.getByRole('switch', { name: /Tell me when I'm near/ })),
+        )
         act(() => void vi.advanceTimersByTime(400))
         expect(push.updatePrefs).not.toHaveBeenCalled()
         await act(async () => void vi.advanceTimersByTime(100))
@@ -129,6 +154,21 @@ describe('NotificationsScreen', () => {
       fireEvent.click(screen.getByRole('button', { name: /^Remove Mon/ }))
       await waitFor(() => expect(push.updatePrefs).toHaveBeenCalledTimes(2))
       expect(vi.mocked(push.updatePrefs).mock.calls[1][0].schedules).toEqual([])
+    })
+
+    it("asks for the location when 'near' is switched on, and stays off when refused", async () => {
+      stubPush('granted')
+      const getCurrentPosition = vi.fn(
+        (_ok: PositionCallback, fail?: PositionErrorCallback | null) =>
+          fail?.({ code: 1 } as GeolocationPositionError),
+      )
+      vi.stubGlobal('navigator', { ...navigator, geolocation: { getCurrentPosition } })
+      render(<NotificationsScreen />)
+      const near = await screen.findByRole('switch', { name: /Tell me when I'm near/ })
+      await act(async () => fireEvent.click(near))
+      expect(getCurrentPosition).toHaveBeenCalledOnce()
+      expect(await screen.findByText(/Location is blocked/)).toBeInTheDocument()
+      expect(near).not.toBeChecked()
     })
 
     it('sends a test notification', async () => {
