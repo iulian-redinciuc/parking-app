@@ -919,6 +919,104 @@ def motion_check(
         raise typer.Exit(1)
 
 
+@app.command("track-check")
+def track_check(
+    camera: Annotated[str, typer.Option(help="Flow camera id in the config, e.g. cam-ramp.")],
+    source: Annotated[
+        str | None,
+        typer.Option(help="Source URI instead of the camera's, e.g. video:data/recordings/x.mp4."),
+    ] = None,
+    seconds: Annotated[float, typer.Option(help="Frame time to cover, from the first frame.")] = (
+        600.0
+    ),
+    debug_video: Annotated[
+        Path | None,
+        typer.Option(help="Write the annotated frames (ROI, lines, boxes, track ids) to this MP4."),
+    ] = None,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    as_json: Annotated[bool, typer.Option("--json", help="Print the stats as JSON.")] = False,
+) -> None:
+    """Run gate + detector + ByteTrack over a flow camera or a clip and list the tracks (P5.4).
+
+    Each passing car should show up as one track id from entering to leaving the frame; check
+    it in `--debug-video`. Uses the camera's `detector` settings and its line file's ROI.
+    """
+    from parking.config import ConfigError, load_lines
+    from parking.vision.motion import MotionGate
+    from parking.vision.sources import make_source
+    from parking.vision.tracking import (
+        UltralyticsTracker,
+        VehicleTracker,
+        draw_tracks,
+        run_tracking,
+    )
+
+    if seconds <= 0:
+        raise typer.BadParameter("must be > 0", param_hint="--seconds")
+    _, cam, root = _camera(config, camera)
+    if cam.role != "flow":
+        _fail(f"camera '{camera}' is an {cam.role} camera; track-check needs a flow camera")
+    lines = None
+    try:
+        lines = load_lines(_resolve(cam.lines_file, root))
+    except (ConfigError, ValueError, OSError) as e:
+        typer.echo(f"warning: no usable line file ({e}); tracking the whole frame")
+    det = cam.detector
+    model = _resolve(Path(det.model), root)
+    if not model.exists():
+        _fail(f"model {model} not found; run `parking models export` first")
+    backend = UltralyticsTracker(str(model), det.imgsz, det.conf, det.classes)
+    tracker = VehicleTracker(backend, lines)
+    gate = MotionGate(cam.flow.motion_min_area_px, lines)
+    try:
+        src = make_source(source or cam.source, root)
+    except ValueError as e:
+        _fail(str(e))
+    writer = [None]
+
+    def write(image, elapsed: float, active: bool, tracks) -> None:
+        if debug_video is None:
+            return
+        import cv2
+
+        if writer[0] is None:
+            debug_video.parent.mkdir(parents=True, exist_ok=True)
+            fps = getattr(src, "native_fps", None) or cam.fps
+            size = (image.shape[1], image.shape[0])
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            writer[0] = cv2.VideoWriter(str(debug_video), fourcc, fps, size)
+            if not writer[0].isOpened():
+                _fail(f"can't write {debug_video}")
+        ids = " ".join(f"#{t.track_id}" for t in tracks)
+        banner = f"{elapsed:6.1f} s  {'ACTIVE' if active else 'idle'}  {ids}"
+        writer[0].write(draw_tracks(image, tracks, lines, banner))
+
+    try:
+        stats = run_tracking(src, gate, tracker, seconds, on_frame=write)
+    finally:
+        src.close()
+        if writer[0] is not None:
+            writer[0].release()
+    if not stats.frames:
+        _fail("no frames from the source")
+    if as_json:
+        typer.echo(json.dumps(stats.to_dict()))
+    else:
+        typer.echo(
+            f"{stats.frames} frames over {stats.seconds:.0f} s, {stats.active_frames} gated in "
+            f"({stats.track_ms_avg:.0f} ms each), {len(stats.spans)} track(s), "
+            f"{stats.resets} reset(s)"
+        )
+        for s in stats.spans:
+            (fx, fy), (lx, ly) = s.first_anchor, s.last_anchor
+            typer.echo(
+                f"  #{s.track_id:<4} {s.cls:<10} {s.frames:4d} frames {s.seconds:6.1f} s  "
+                f"({fx:.0f},{fy:.0f}) -> ({lx:.0f},{ly:.0f})"
+            )
+    if debug_video is not None and writer[0] is not None:
+        typer.echo(f"debug video -> {debug_video}")
+
+
 @app.command("lines-check")
 def lines_check(
     camera: Annotated[str, typer.Option(help="Flow camera id in the config, e.g. cam-ramp.")],

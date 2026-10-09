@@ -66,6 +66,13 @@ parking motion-check --camera cam-ramp --source "video:data/recordings/cam-ramp-
 2. When the gate goes inactive, **don't** reset the tracker straight away. Reset after 10 s inactive, to drop stale tracks.
 3. Apply the ROI by masking the frame (fill outside the ROI with black) before tracking.
 
+As built: details in [vision.md §7.1](../design/vision.md#71-frame-pipeline-flow-worker). Until the flow worker (P5.6) exists, the annotated export comes from `parking track-check`; on a P5.2 recording:
+
+```bash
+parking track-check --camera cam-ramp --source "video:data/recordings/cam-ramp-<date-time>.mp4?realtime=false" \
+  --seconds 3600 --debug-video out/tracks/cam-ramp.mp4
+```
+
 **Done when:** on a clip, each passing car keeps one track id from entering to leaving the frame (inspect with an annotated video export: `--debug-video out.mp4`).
 
 ## P5.5: Two-line counter
