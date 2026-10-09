@@ -118,7 +118,7 @@ api:
   - `capacity` is required for `count` and `flow` zones; for `slots` zones it defaults to the number of slots
   - occupancy cameras need `slots_file`, flow cameras need `lines_file` (the file may be missing in Phase 1 before slots are drawn; commands that need it fail with a clear message)
   - `0 < threshold < 1`, `consistent_readings ≥ 1`
-  - `reset` is only allowed on `flow` zones; `api.levels.filling < api.levels.plenty`
+  - `reset` is only allowed on `flow` zones, `reset.value ≤ capacity`, `reset.cron` is a 5-field crontab expression in `lot.timezone` (weekdays 0/7 = Sunday as in crontab; `crontab_trigger` converts them for APScheduler 3, which counts from Monday; a range through Sunday is written `*` or with names, e.g. `sat-sun` not `6-0`); `api.levels.filling < api.levels.plenty`
   - unknown keys are errors (catches typos such as `treshold`)
   - slot files: slot IDs unique, polygons ≥ 3 points and not self-intersecting (also `count_zones` and line-file `roi`)
 - `${VAR}` substitution skips only lines whose first non-space character is `#`; a variable that is set but empty is substituted as empty.

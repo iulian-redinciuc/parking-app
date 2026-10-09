@@ -7,11 +7,14 @@ the API lifespan, next to the push reminders.
 | `aggregate-hours` | hourly at :02 | `zone_hour` for the last 3 complete hours |
 | `prune` | daily 04:00 lot time | `rollups.prune` with the default retention |
 | `vacuum` | Sunday 04:30 lot time | `PRAGMA optimize; VACUUM` |
+| `reset-<zone>` | the zone's `reset.cron`, lot time | the flow count set to `reset.value` (P5.7) |
 
 Each job's synchronous core (`run_minutes(now)`, ...) runs in a thread; tests call them with
 a fake clock. The minute job starts at second 5 so the ingest writes of the closed minute are
 in. Missing minutes further back than the catch-up stay empty (the API was down: nothing is
-known) until `parking db aggregate --backfill`. The scheduled flow-zone reset is P5.7.
+known) until `parking db aggregate --backfill`. The scheduled flow-zone reset goes through
+`Ingestor.correct` (actor `scheduled-reset`, `zone_state` source `reset`), so it is logged in
+`correction` and published like an admin's correction; it needs an `ingestor`.
 """
 
 from __future__ import annotations
@@ -25,7 +28,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import Engine, text
 
-from parking.config import LotConfig
+from parking.api.ingest import Ingestor
+from parking.config import LotConfig, crontab_trigger
 from parking.core.clock import Clock
 from parking.db import rollups
 from parking.db.engine import session_scope
@@ -36,6 +40,7 @@ log = logging.getLogger(__name__)
 MINUTE_CATCH_UP = timedelta(minutes=10)
 HOUR_REDO = timedelta(hours=3)
 JOB_MISFIRE_S = 60
+RESET_ACTOR = "scheduled-reset"
 
 
 def lot_timezone(config: LotConfig) -> ZoneInfo:
@@ -61,9 +66,13 @@ class MaintenanceJobs:
         config: LotConfig,
         clock: Clock,
         retention: rollups.Retention | None = None,
+        ingestor: Ingestor | None = None,
     ):
         self.engine = engine
         self.zone_ids = [z.id for z in config.zones]
+        # zone id -> its enabled scheduled reset (flow zones only, config.md §1)
+        self.resets = {z.id: z.reset for z in config.zones if z.reset and z.reset.enabled}
+        self.ingestor = ingestor
         self.tz = lot_timezone(config)
         self.clock = clock
         self.retention = retention or rollups.Retention()
@@ -95,6 +104,14 @@ class MaintenanceJobs:
         vacuum(self.engine)
         log.info("vacuum done")
 
+    async def run_reset(self, zone_id: str) -> None:
+        """Set the zone's count to its `reset.value` (a `correction` row, published)."""
+        value = self.resets[zone_id].value
+        row = await self.ingestor.correct(
+            zone_id, value, RESET_ACTOR, f"scheduled reset ({self.resets[zone_id].cron})", "reset"
+        )
+        log.info("scheduled reset: zone %s %d -> %d", zone_id, row.old_occupied, row.new_occupied)
+
     # --- scheduling ---
 
     def start(self) -> None:
@@ -108,6 +125,14 @@ class MaintenanceJobs:
                 CronTrigger(day_of_week="sun", hour=4, minute=30, timezone=self.tz),
             ),
         }
+        if self.ingestor is not None:
+            for zone_id, reset in self.resets.items():
+                jobs[f"reset-{zone_id}"] = (
+                    self._reset_job(zone_id),
+                    crontab_trigger(reset.cron, self.tz),
+                )
+        elif self.resets:
+            log.warning("no ingestor: scheduled resets of %s are off", ", ".join(self.resets))
         for job_id, (func, trigger) in jobs.items():
             self._scheduler.add_job(
                 func,
@@ -124,6 +149,15 @@ class MaintenanceJobs:
         if self._scheduler is not None and self._scheduler.running:
             self._scheduler.shutdown(wait=False)
         self._scheduler = None
+
+    def _reset_job(self, zone_id: str):
+        async def run() -> None:
+            try:
+                await self.run_reset(zone_id)
+            except Exception:
+                log.exception("scheduled reset of zone %s failed", zone_id)
+
+        return run
 
     def _job(self, core):
         async def run() -> None:

@@ -185,11 +185,14 @@ class Ingestor:
             changes = self.store.replace_slot_file(camera_id, slot_file)
             await self._commit(_Pending(changes=changes))
 
-    async def correct(self, zone_id: str, occupied: int, actor: str, note: str) -> Correction:
-        """An admin's count for a `flow` zone (P7.4): store -> `correction` + `zone_state`
-        rows -> published. `KeyError` unknown zone, `NotCorrectableError` not a flow zone."""
+    async def correct(
+        self, zone_id: str, occupied: int, actor: str, note: str, source: str = "correction"
+    ) -> Correction:
+        """An admin's count for a `flow` zone (P7.4) or the scheduled reset (P5.7, `source`
+        `reset`): store -> `correction` + `zone_state` rows -> published. `KeyError` unknown
+        zone, `NotCorrectableError` not a flow zone."""
         async with self._lock:
-            old, new, changes = self.store.correct(zone_id, occupied)
+            old, new, changes = self.store.correct(zone_id, occupied, source)
             row = Correction(
                 ts=self.store.clock.now(),
                 zone_id=zone_id,

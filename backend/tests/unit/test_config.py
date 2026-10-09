@@ -13,6 +13,7 @@ from parking.config import (
     Settings,
     SlotFile,
     cli_env,
+    crontab_trigger,
     interpolate_env,
     load_config,
     load_lines,
@@ -135,6 +136,13 @@ def test_capacity_required_for_count_and_flow(raw, method):
 def test_reset_only_for_flow_zones(raw):
     raw["zones"][0]["reset"] = {"enabled": True}
     invalid(raw, "reset is only allowed for 'flow' zones")
+
+
+def test_reset_cron_and_value_checked(raw):
+    raw["zones"][1]["reset"] = {"enabled": True, "cron": "every night"}
+    invalid(raw, "not a 5-field crontab expression")
+    raw["zones"][1]["reset"] = {"enabled": True, "value": raw["zones"][1]["capacity"] + 1}
+    invalid(raw, "reset.value is over the capacity")
 
 
 def test_occupancy_camera_needs_slots_file(raw):
@@ -326,3 +334,17 @@ def test_load_config_with_cli_env_from_repo(monkeypatch):
         monkeypatch.delenv(key, raising=False)
     cfg = load_config(REPO / "config" / "lot.yaml", cli_env(REPO))
     assert cfg.camera("cam-ground").role == "occupancy"
+
+
+@pytest.mark.parametrize(
+    ("expr", "dow"),
+    [
+        ("0 3 * * *", "*"),
+        ("0 3 * * 1-5", "mon-fri"),
+        ("0 3 * * 0,7", "sun,sun"),
+        ("0 3 * * */2", "*/2"),
+    ],
+)
+def test_crontab_weekdays_count_from_sunday(expr, dow):
+    trigger = crontab_trigger(expr, "UTC")
+    assert str(trigger.fields[4]) == dow

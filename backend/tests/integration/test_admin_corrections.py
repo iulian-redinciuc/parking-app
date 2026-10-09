@@ -1,5 +1,6 @@
 """P7.4: `POST /api/admin/zones/{id}/correct` (flow zones only, a `correction` + `zone_state`
-row, the new status published) and the `GET /api/admin/corrections` audit log."""
+row, the new status published) and the `GET /api/admin/corrections` audit log; P5.7: the
+scheduled flow-zone reset (`zones[].reset`)."""
 
 import json
 from datetime import UTC, datetime
@@ -54,6 +55,15 @@ def lot(tmp_path):
 @pytest.fixture
 def clock():
     return FakeClock(T0)
+
+
+def with_reset(lot, cron="0 3 * * *", value=2):
+    zone = "{id: underground, name: {en: Underground, ro: Subteran}, method: flow, capacity: 60}"
+    reset = (
+        "  - {id: underground, name: {en: Underground}, method: flow, capacity: 60,\n"
+        f'     reset: {{enabled: true, cron: "{cron}", value: {value}}}}}'
+    )
+    (lot / "config" / "lot.yaml").write_text(LOT_YAML.replace(f"  - {zone}", reset))
 
 
 def make_client(lot, clock):
@@ -204,3 +214,40 @@ def test_restart_keeps_the_count_and_the_confidence_counters(lot, clock):
         assert counter.corrected_at == T0
         # 1 − 0.01 × 10 − 0.02 × 5 h
         assert round(counter.confidence(), 2) == 0.8
+
+
+def test_scheduled_reset_sets_the_count_like_a_correction(lot, clock):
+    with_reset(lot)
+    with make_client(lot, clock) as client:
+        runtime = client.app.state.runtime
+        published = []
+        runtime.ingestor.publish = published.append
+        events = [flow(f"e{i}") for i in range(7)]
+        client.post("/internal/flow-events", json={"events": events}, headers=auth(WORKER))
+        clock.advance(3600)
+        client.portal.call(runtime.jobs.run_reset, "underground")
+        counter = runtime.store.flow["underground"]
+        assert (counter.occupied, counter.events_since_correction) == (2, 0)
+        assert counter.confidence() == 1.0
+        assert published[-1].zones[1].occupied == 2
+        log = client.get("/api/admin/corrections", headers=auth()).json()
+        assert (log[0]["old_occupied"], log[0]["new_occupied"]) == (7, 2)
+        assert log[0]["actor"] == "scheduled-reset"
+    last = max(rows(lot, ZoneState), key=lambda r: r["id"])
+    assert (last["occupied"], last["source"]) == (2, "reset")
+
+
+def test_scheduled_reset_job_follows_the_cron_in_lot_time(lot, clock):
+    with_reset(lot, cron="30 3 * * 1")
+    with make_client(lot, clock) as client:
+        jobs = client.app.state.runtime.jobs
+
+        async def next_run():
+            jobs.start()
+            try:
+                return jobs._scheduler.get_job("reset-underground").next_run_time
+            finally:
+                jobs.shutdown()
+
+        when = client.portal.call(next_run)
+    assert (when.weekday(), when.hour, when.minute) == (0, 3, 30)

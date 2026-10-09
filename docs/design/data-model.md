@@ -17,7 +17,7 @@
 | occupied | int | |
 | free | int | |
 | confidence | real | |
-| source | text | the `StateStore` change source `observation \| flow \| health \| tick \| config \| correction` (`config` = an admin saved a new slot file, P7.3; `correction` = an admin set a flow zone's count, P7.4); later `reset`. `startup` changes are not written (they republish restored rows) |
+| source | text | the `StateStore` change source `observation \| flow \| health \| tick \| config \| correction` (`config` = an admin saved a new slot file, P7.3; `correction` = an admin set a flow zone's count, P7.4; `reset` = the scheduled flow-zone reset, P5.7). `startup` changes are not written (they republish restored rows) |
 
 ### `slot_state`: a slot's smoothed state, written only when it flips
 | Column | Type | Notes |
@@ -119,7 +119,7 @@ The occupancy camera sends ~17,000 observations a day but they're **not stored**
 | `aggregate_minutes` | every minute (second 5) | Build `zone_minute` for the minutes since the last bucket (at most 10 back, always redoing the last one) from `zone_state`, time-weighted |
 | `aggregate_hours` | hourly at :02 | Roll `zone_minute` → `zone_hour` for the last 3 complete hours |
 | `prune` | daily 04:00 local | Delete `slot_state`, `zone_state`, `flow_event` > 90 days (always keeping the newest `zone_state` per zone and `slot_state` per slot: they're restored at start-up and carried into the next minute); `zone_minute` > 30 days; `notification_log` > 30 days; expired `admin_session`. `zone_hour` and `correction` are kept |
-| `scheduled_reset` | per zone `reset.cron` | `FlowCounter.correct(value, actor="scheduled-reset")` (P5.7) |
+| `reset-<zone>` | per zone `reset.cron` (lot time), when `reset.enabled` | `Ingestor.correct(zone, reset.value, actor="scheduled-reset", source="reset")`: a `correction` row (note `scheduled reset (<cron>)`) + `zone_state` row, published like an admin correction (P5.7) |
 | `vacuum` | weekly Sunday 04:30 local | `PRAGMA optimize; VACUUM` (fine at this size) |
 
 The jobs live in `parking/api/jobs.py` (`MaintenanceJobs`, APScheduler, "local" = `lot.timezone`), the maths in `parking/db/rollups.py`. `zone_state` stores a zone's count only when it changes, so each zone is a step function and the minute rollup is time-weighted over it: free 10 for 45 s then 12 for 15 s → 10.5. Building the minutes from `zone_state` (not from memory) means the live job and a rebuild give the same rows, and every job can redo a range (its buckets are deleted first). Minutes missed while the API was down for more than 10 minutes stay empty.

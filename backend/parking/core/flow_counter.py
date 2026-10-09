@@ -1,8 +1,9 @@
 """Entry/exit counter for one `flow` zone (vision.md §7.4), kept in the API.
 
-Skeleton for Phase 2: the counting, clamping, idempotency, corrections and confidence rule are
-here so `StateStore` can show flow zones; wiring flow events in through `/internal/flow-events`,
-the DB and the admin corrections comes in Phase 5 (P5.7, P5.8).
+Counting, clamping, idempotency (the last 1000 ids here; the ingestor also checks the
+`flow_event` primary key), corrections and the confidence rule. `StateStore` owns one per flow
+zone; events arrive through `/internal/flow-events`, corrections from the admin endpoint (P7.4)
+and the scheduled reset (P5.7, `api/jobs.py`).
 """
 
 from __future__ import annotations

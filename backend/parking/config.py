@@ -11,6 +11,7 @@ from typing import Annotated, Literal, Self, get_args
 
 import shapely
 import yaml
+from apscheduler.triggers.cron import CronTrigger
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -59,9 +60,35 @@ class Lot(Strict):
     timezone: str
 
 
+_CRON_DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def crontab_trigger(expr: str, timezone) -> CronTrigger:
+    """A 5-field crontab expression as an APScheduler trigger. APScheduler 3 numbers weekdays
+    from 0 = Monday, crontab from 0 = Sunday, so numeric weekdays become names first."""
+    fields = expr.split()
+    if len(fields) != 5:
+        raise ValueError(f"expected 5 fields, got {len(fields)}")
+    minute, hour, day, month, dow = fields
+    dow = re.sub(r"(?<![/\d])[0-7](?!\d)", lambda m: _CRON_DAYS[int(m.group())], dow)
+    return CronTrigger(
+        minute=minute, hour=hour, day=day, month=month, day_of_week=dow, timezone=timezone
+    )
+
+
+def _crontab(value: str) -> str:
+    try:
+        crontab_trigger(value, "UTC")
+    except ValueError as e:
+        raise ValueError(f"not a 5-field crontab expression: {e}") from None
+    return value
+
+
 class ResetCfg(Strict):
+    """A flow zone's scheduled reset (P5.7): set the count to `value` at `cron`, lot time."""
+
     enabled: bool = False
-    cron: str = "0 3 * * *"
+    cron: Annotated[str, AfterValidator(_crontab)] = "0 3 * * *"
     value: int = Field(default=0, ge=0)
 
 
@@ -78,6 +105,12 @@ class Zone(Strict):
             raise ValueError(f"zone '{self.id}': capacity is required for '{self.method}' zones")
         if self.reset is not None and self.method != "flow":
             raise ValueError(f"zone '{self.id}': reset is only allowed for 'flow' zones")
+        if (
+            self.reset is not None
+            and self.capacity is not None
+            and self.reset.value > self.capacity
+        ):
+            raise ValueError(f"zone '{self.id}': reset.value is over the capacity")
         return self
 
     def display_name(self, lang: str = "en") -> str:

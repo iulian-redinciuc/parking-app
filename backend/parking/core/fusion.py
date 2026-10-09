@@ -279,9 +279,12 @@ class StateStore:
                 self.capacity[zone.id] = self.config.zone_capacity(zone.id, files)
         return self._diff("config")
 
-    def correct(self, zone_id: str, occupied: int) -> tuple[int, int, list[Change]]:
+    def correct(
+        self, zone_id: str, occupied: int, source: str = "correction"
+    ) -> tuple[int, int, list[Change]]:
         """Set a `flow` zone's count (clamped to its capacity) and reset its confidence
-        counters: (old occupied, new occupied, changes). Other zones -> `NotCorrectableError`."""
+        counters: (old occupied, new occupied, changes). Other zones -> `NotCorrectableError`.
+        `source` is `correction` (an admin) or `reset` (the scheduled reset, P5.7)."""
         counter = self.flow.get(zone_id)
         if counter is None:
             if zone_id not in self.capacity:
@@ -290,7 +293,7 @@ class StateStore:
         old = counter.occupied
         new = counter.correct(occupied)
         self._updated_at[zone_id] = self.clock.now()
-        return old, new, self._diff("correction")
+        return old, new, self._diff(source)
 
     def tick(self) -> list[Change]:
         """Call every second: zones going stale (or trends shifting) produce changes."""

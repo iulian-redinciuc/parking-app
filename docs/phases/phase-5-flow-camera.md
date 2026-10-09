@@ -111,7 +111,7 @@ docker compose run --rm vision-flow flow --camera cam-ramp --print --control-por
 1. `FlowCounter` per [vision.md §7.4](../design/vision.md#74-flow-counter-parkingcoreflow_counterpy-in-the-api): idempotent by `event_id` (keep the last 1000 IDs in memory + the DB primary key), clamp, `correct()`, `restore()`.
 2. `/internal/flow-events` → `ingest.py` → counter → `flow_event` row → zone change → SSE.
 3. `POST /api/admin/zones/{id}/correct` with `Authorization: Bearer $ADMIN_TOKEN` ([api.md §4](../design/api.md#4-admin-endpoints)). Writes a `correction` row. *(Already built in P7.4, with the restore of the confidence counters.)*
-4. Optional scheduled reset (`zones[].reset`) via APScheduler.
+4. Optional scheduled reset (`zones[].reset`) via APScheduler. *(Built in P5.7: a `reset-<zone>` job in `MaintenanceJobs` → `Ingestor.correct`, actor `scheduled-reset`, `zone_state` source `reset`; the cron is lot time with crontab weekdays.)*
 5. Tests: duplicates ignored; clamp sets `applied=false`; correction; restore after restart.
 
 **Done when:** `curl -X POST -H "Authorization: Bearer …" -d '{"occupied":37}' …/correct` updates the phone at once.

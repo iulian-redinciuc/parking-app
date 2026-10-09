@@ -225,7 +225,7 @@ As built (P5.5): a side change counts as a crossing only if the anchor's move fr
 occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
 ```
 - Idempotent: events carry `event_id`; duplicates (worker retries from its outbox) are ignored.
-- `correct(new_value, actor, note)` sets the value and resets the confidence counters.
+- `correct(new_value)` sets the value and resets the confidence counters; the actor and note go in the `correction` row the ingestor writes (admin endpoint, or the `reset-<zone>` job at `zones[].reset.cron`, actor `scheduled-reset`).
 - The current value is persisted (latest `zone_state` row), so a restart continues from it.
 - When clamping happens (e.g. OUT at 0), log a `clamped` warning. A frequent clamp means the count is off.
 
@@ -248,7 +248,7 @@ occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
 - Slot readings for slots not in the camera's slot file (or in a zone the camera doesn't cover) are ignored with a warning. `occupied` is clamped to the zone capacity. A count zone seen by several cameras sums their medians.
 - Trend: a per-zone buffer of `(ts, free)` appended whenever `free` changes, kept 20 min; Δfree = free now − free at `now − trend_window_min` (the oldest sample while the history is shorter). `tick()` also reports trend flips.
 - Payloads naming an unknown camera (or an observation from a flow camera) raise `UnknownCameraError`.
-- `FlowCounter` (`core/flow_counter.py`) already has `apply(event_id, direction)` (→ `True` applied / `False` clamped / `None` duplicate, last 1000 ids), `correct`, `restore` and the confidence formula; feeding flow events into the store comes in P5.7–P5.8.
+- `FlowCounter` (`core/flow_counter.py`) has `apply(event_id, direction)` (→ `True` applied / `False` clamped / `None` duplicate, last 1000 ids; the ingestor also checks the `flow_event` primary key, so ids older than that or from before a restart stay duplicates), `correct`, `restore` and the confidence formula. Flow events reach it through `/internal/flow-events` → `Ingestor.flow_events` → `StateStore.apply_flow_event` (change source `flow`, a `flow_event` row with `applied=false` when clamped); corrections through `StateStore.correct(zone, value, source)` (`correction` from an admin, `reset` from the scheduled reset, P5.7).
 
 ## 9. Per-slot classifier
 

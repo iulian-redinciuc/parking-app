@@ -149,7 +149,7 @@ def create_app(
                 almost_full.status_changed(old, new)
 
         ingestor = Ingestor(store, engine, broadcaster.publish, hook)
-        jobs = MaintenanceJobs(engine, config, clk)
+        jobs = MaintenanceJobs(engine, config, clk, ingestor=ingestor)
         app.state.runtime = Runtime(
             settings,
             config,
