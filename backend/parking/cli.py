@@ -738,6 +738,60 @@ def grab(
     typer.echo(f"{w}x{h} frame from '{camera}' at {frame.ts.isoformat()} -> {target}")
 
 
+@app.command("lines-check")
+def lines_check(
+    camera: Annotated[str, typer.Option(help="Flow camera id in the config, e.g. cam-ramp.")],
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    image: Annotated[
+        Path | None,
+        typer.Option(help="Reference frame (default data/reference/<camera>.jpg)."),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help="Overlay to write (default out/lines/<camera>.jpg)."),
+    ] = None,
+) -> None:
+    """Check a flow camera's line file and draw it on the reference frame (P5.1)."""
+    import cv2
+
+    from parking.config import ConfigError, load_lines
+    from parking.vision.lines import check_lines, draw_lines
+
+    _, cam, root = _camera(config, camera)
+    if cam.role != "flow":
+        _fail(f"camera '{camera}' is an {cam.role} camera; lines-check needs a flow camera")
+    path = _resolve(cam.lines_file, root)
+    try:
+        lf = load_lines(path)
+    except (ConfigError, ValueError) as e:
+        _fail(f"line file {path}: {e} (draw the lines with the slot editor's lines mode)")
+    if lf.camera_id != camera:
+        _fail(f"line file {path} is for camera '{lf.camera_id}', not '{camera}'")
+
+    ref_path = _resolve(image or Path(f"data/reference/{camera}.jpg"), root)
+    frame = cv2.imread(str(ref_path)) if ref_path.is_file() else None
+    if frame is None:
+        typer.echo(f"warning: no reference frame at {ref_path}; checking the file only")
+    res = check_lines(lf, None if frame is None else (frame.shape[1], frame.shape[0]))
+    typer.echo(
+        f"line_a {res.length_a:.0f} px, line_b {res.length_b:.0f} px, "
+        f"{res.gap:.0f} px apart, {res.angle:.0f}° between them, IN = {lf.in_direction}"
+    )
+    for msg in res.warnings:
+        typer.echo(f"warning: {msg}")
+    if frame is not None:
+        target = out or root / "out" / "lines" / f"{camera}.jpg"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(target), draw_lines(frame, lf)):
+            _fail(f"can't write {target}")
+        typer.echo(f"overlay -> {target} (check that the whole lane is in view)")
+    if not res.ok:
+        for msg in res.errors:
+            typer.echo(f"error: {msg}", err=True)
+        raise typer.Exit(1)
+    typer.echo("ok")
+
+
 @app.command("health-stats")
 def health_stats(
     logs: Annotated[

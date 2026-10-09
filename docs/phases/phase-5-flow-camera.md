@@ -19,8 +19,9 @@
 2. Network and harden it like Camera B (P4.2). Sub-stream 640×360, ~10–15 fps, H.264, keyframe interval ≤ 2 s.
 3. Save a sub-stream frame → `data/reference/cam-ramp.jpg`.
 4. Slot editor → **lines mode**: ROI, `line_a`, `line_b` (about a car-length apart, perpendicular to travel), `in_direction` → `config/lines/cam-ramp.json`.
+5. `parking lines-check --camera cam-ramp`: checks the line file (each line across the lane, not crossing, roughly parallel, ≥ 3% of the frame diagonal apart, inside the frame and the ROI, drawn on a frame of the reference's shape) and writes `out/lines/cam-ramp.jpg` with the ROI, A/B and the IN arrow on the reference frame. Exit 1 lists what to fix.
 
-**Done when:** the lines file is committed and the reference frame shows the whole lane.
+**Done when:** the lines file is committed, `parking lines-check --camera cam-ramp` prints `ok`, and its overlay shows the whole lane with ~3 m before and after the lines.
 
 ## P5.2: Low-latency RTSP + video file source
 **Files:** `parking/vision/sources.py`
