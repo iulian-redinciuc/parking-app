@@ -144,7 +144,7 @@ def _yolo_detector(det_cfg, root: Path):
 
 def _reference(occ, root: Path):
     """The empty-lot image for appearance scoring (`occupancy.appearance.reference_empty`)."""
-    if occ.method != "appearance" or occ.appearance.reference_empty is None:
+    if not occ.uses_appearance or occ.appearance.reference_empty is None:
         return None
     import cv2
 
@@ -155,9 +155,37 @@ def _reference(occ, root: Path):
     return ref
 
 
+METHOD_HELP = "Override occupancy.method: detector | appearance | classifier | ensemble."
+
+
 def _check_method(method: str | None) -> None:
-    if method is not None and method not in ("detector", "appearance"):
-        raise typer.BadParameter("must be detector or appearance", param_hint="--method")
+    from parking.config import OCCUPANCY_METHODS
+
+    if method is not None and method not in OCCUPANCY_METHODS:
+        raise typer.BadParameter(
+            f"must be one of {', '.join(OCCUPANCY_METHODS)}", param_hint="--method"
+        )
+
+
+def _with_classifier(occ, model: Path | None):
+    if model is None:
+        return occ
+    clf = occ.classifier.model_copy(update={"model": model.resolve()})
+    return occ.model_copy(update={"classifier": clf})
+
+
+def _classifier(occ, root: Path):
+    """The slot classifier (vision.md §9) for `classifier` / `ensemble`, else None."""
+    if not occ.uses_classifier:
+        return None
+    from parking.vision.slot_classifier import load_classifier
+
+    try:
+        return load_classifier(_resolve(occ.classifier.model, root))
+    except ImportError:
+        _fail("the slot classifier needs onnxruntime: uv sync --extra vision")
+    except Exception as e:
+        _fail(str(e))
 
 
 @app.command()
@@ -175,8 +203,9 @@ def analyze(
         str | None, typer.Option(help="Override occupancy.mode: mask | box_bottom.")
     ] = (None),
     imgsz: Annotated[int | None, typer.Option(help="Override detector.imgsz.")] = None,
-    method: Annotated[
-        str | None, typer.Option(help="Override occupancy.method: detector | appearance.")
+    method: Annotated[str | None, typer.Option(help=METHOD_HELP)] = None,
+    classifier: Annotated[
+        Path | None, typer.Option(help="Override occupancy.classifier.model (an .onnx file).")
     ] = None,
     fake_detector: Annotated[
         bool,
@@ -206,6 +235,7 @@ def analyze(
     # CLI flags override the config for experiments
     overrides = {"threshold": threshold, "mode": mode, "method": method}
     occ = cam.occupancy.model_copy(update={k: v for k, v in overrides.items() if v is not None})
+    occ = _with_classifier(occ, classifier)
     det_cfg = cam.detector.model_copy(update={"imgsz": imgsz} if imgsz else {})
     cam = cam.model_copy(update={"occupancy": occ, "detector": det_cfg})
 
@@ -218,8 +248,8 @@ def analyze(
         _fail(f"can't read image {image}")
 
     detector = None
-    if occ.method == "appearance":
-        pass  # no model: vision.md §2.1
+    if not occ.uses_detector:
+        pass  # appearance (vision.md §2.1) / slot classifier (§9)
     elif _fake_detector_on(fake_detector):
         from parking.vision.detector import FakeDetector
 
@@ -230,7 +260,9 @@ def analyze(
     else:
         detector = _yolo_detector(det_cfg, root)
 
-    result = analyze_frame(frame, cam, slot_file, detector, capacities, _reference(occ, root))
+    result = analyze_frame(
+        frame, cam, slot_file, detector, capacities, _reference(occ, root), _classifier(occ, root)
+    )
     png = annotate_occupancy(
         frame,
         slot_file.slots,
@@ -273,8 +305,9 @@ def evaluate(
         float | None, typer.Option(help="Override occupancy.threshold (0..1).")
     ] = None,
     imgsz: Annotated[int | None, typer.Option(help="Override detector.imgsz.")] = None,
-    method: Annotated[
-        str | None, typer.Option(help="Override occupancy.method: detector | appearance.")
+    method: Annotated[str | None, typer.Option(help=METHOD_HELP)] = None,
+    classifier: Annotated[
+        Path | None, typer.Option(help="Override occupancy.classifier.model (an .onnx file).")
     ] = None,
     out: Annotated[Path, typer.Option(help="Folder for the report and mistake images.")] = Path(
         "out/eval"
@@ -316,11 +349,12 @@ def evaluate(
 
     lot, cam, root = _occupancy_camera(config, camera, "evaluate")
     occ = cam.occupancy.model_copy(update={"method": method} if method else {})
-    appearance = occ.method == "appearance"
+    occ = _with_classifier(occ, classifier)
+    appearance = not occ.uses_detector  # appearance, classifier or ensemble: scores, no detector
     det_cfg = cam.detector.model_copy(update={"imgsz": imgsz} if imgsz else {})
-    threshold = threshold if threshold is not None else occ.threshold
+    threshold = threshold if threshold is not None else occ.decision_threshold
     if appearance:
-        modes = ["appearance"]  # `mode` only applies to the detector
+        modes = [occ.method]  # `mode` only applies to the detector
     else:
         modes = ["mask", "box_bottom"] if mode == "both" else [mode or occ.mode]
     slot_file = _slot_file(cam, root)
@@ -354,14 +388,16 @@ def evaluate(
 
     fake = not appearance and _fake_detector_on(fake_detector)
     if appearance:
+        read = lambda p: cv2.imread(str(p))  # noqa: E731
         try:
-            frames = ev.appearance_frames(
-                paths,
-                lambda p: cv2.imread(str(p)),
-                slot_file,
-                occ.appearance,
-                _reference(occ, root),
-            )
+            if occ.uses_classifier:
+                clf = _classifier(occ, root)
+                ref = _reference(occ, root)
+                frames = ev.classifier_frames(paths, read, slot_file, occ, clf, ref)
+            else:
+                frames = ev.appearance_frames(
+                    paths, read, slot_file, occ.appearance, _reference(occ, root)
+                )
         except ValueError as e:
             _fail(str(e))
         ran = len(frames)
@@ -396,7 +432,11 @@ def evaluate(
         except ValueError as e:
             _fail(str(e))
     if appearance:
-        source = "appearance scoring"
+        source = {
+            "appearance": "appearance scoring",
+            "classifier": f"slot classifier {Path(occ.classifier.model).name}",
+            "ensemble": f"slot classifier {Path(occ.classifier.model).name} + appearance",
+        }[occ.method]
         typer.echo(f"{len(frames)} image(s), {source} (no detector)\n")
     else:
         source = "fake detector" if fake else f"{Path(det_cfg.model).name} @ {det_cfg.imgsz}"

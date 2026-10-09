@@ -17,6 +17,7 @@ from parking.config import Camera, SlotFile
 from parking.vision.appearance import score_slots_appearance
 from parking.vision.detector import Detection, Detector
 from parking.vision.occupancy import SlotResult, count_in_zones, score_slots
+from parking.vision.slot_classifier import Classifier, score_slots_classifier
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ class AnalysisResult:
 
     @property
     def inference_ms(self) -> float:
-        """The detector's time; with appearance scoring (no detector) the scoring time."""
+        """The detector's time; without a detector (appearance, classifier) the scoring time."""
         return self.timings.get("detect_ms") or self.timings.get("score_ms", 0.0)
 
     def banner_totals(self) -> dict[str, tuple[int, int]]:
@@ -99,13 +100,15 @@ def analyze_frame(
     detector: Detector | None,
     capacities: Mapping[str, int] | None = None,
     reference: np.ndarray | None = None,
+    classifier: Classifier | None = None,
 ) -> AnalysisResult:
     """Score the slots, count the count zones and total each zone.
 
     `occupancy.method: detector` detects vehicles and scores slots by overlap;
     `appearance` (straight-down views, vision.md §2.1) never touches `detector` (it may be
     None), finds no vehicles and scores slots by how unlike pavement they look, using
-    `reference` (the empty lot) if given.
+    `reference` (the empty lot) if given; `classifier` / `ensemble` (vision.md §9) score
+    slots with `classifier`'s P(taken), alone or averaged with the appearance score.
     `capacities` (zone -> capacity, e.g. from `LotConfig.zone_capacity`) is optional; without
     it slot zones use their number of slots and count zones get no total.
     """
@@ -115,7 +118,26 @@ def analyze_frame(
     occ = camera_cfg.occupancy
 
     t0 = time.perf_counter()
-    if occ.method == "appearance":
+    if occ.uses_classifier:
+        if classifier is None:
+            raise ValueError(
+                f"camera '{camera_cfg.id}' uses the slot classifier but none was given"
+            )
+        detections = []
+        t1 = t0
+        slots = score_slots_classifier(
+            frame,
+            slot_file.slots,
+            frame_size,
+            slot_file.image_size,
+            classifier,
+            occ.classifier.threshold,
+            ensemble=occ.method == "ensemble",
+            appearance_threshold=occ.threshold,
+            appearance=occ.appearance,
+            reference=reference,
+        )
+    elif occ.method == "appearance":
         detections: list[Detection] = []
         t1 = t0  # no detector: detect_ms = 0
         slots = score_slots_appearance(

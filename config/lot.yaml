@@ -48,7 +48,7 @@ cameras:
       # The sample photo is shot straight down; COCO detectors don't see cars from above
       # (0-1 of 5), so this camera scores spaces by how unlike empty pavement they look
       # (vision.md §2.1). Switch back to `detector` for an angled camera.
-      method: appearance           # detector | appearance
+      method: appearance           # detector | appearance | classifier | ensemble (vision.md §9)
       threshold: 0.30              # score above which a slot is "taken" (P1.11: free <= 0.02, taken >= 0.61)
       mode: mask                   # mask | box_bottom (detector only)
       appearance:                  # tuned on ground-01/02.jpg (P1.4, P1.11)

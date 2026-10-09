@@ -123,9 +123,17 @@ Put the suggested values in `cameras[].health` in `lot.yaml` (check the night an
 **Done when:** slot accuracy ≥ 97% and count error ≤ 1 on ≥ 95% of frames, **or** you decide P4.10 is needed.
 
 ## P4.10: Per-slot classifier (only if P4.9 misses the target)
-**Files:** `parking/vision/slot_classifier.py`, `scripts/train_slot_classifier.py`
+**Files:** `backend/parking/vision/slot_classifier.py`, `backend/scripts/train_slot_classifier.py`
 
 **Steps:** follow [vision.md §9](../design/vision.md#9-per-slot-classifier). Train on a laptop or desktop with a GPU (or Google Colab), not on the dev Pi or the vision host. Export ONNX into `models/`. Add `classifier` and `ensemble` to `occupancy.method` (it replaces `appearance` on top-down views). Re-evaluate on the **same** validation set; keep 20% of frames held out from fine-tuning.
+
+The code, the methods and the training script are in place (prepared while P4.9 was blocked); what's left needs P4.8's labelled frames:
+
+1. On the GPU machine, from `backend/` (copy `data/validation/cam-ground/` and `data/labels/cam-ground-validation.json` over; never commit them):
+   `uv sync --extra vision && uv run --with onnx python scripts/train_slot_classifier.py --camera cam-ground --images ../data/validation/cam-ground --labels ../data/labels/cam-ground-validation.json --out ../models/slot_classifier.onnx`
+   (optionally pre-train first with `--crops <PKLot/CNRPark crops>` and fine-tune with `--init ../models/<pre-trained>.pt --lr 3e-4`). Copy `models/slot_classifier.{onnx,json,holdout.json}` to the vision host's and dev Pi's `models/`.
+2. Compare on the held-out frames only: `parking evaluate --camera cam-ground --images data/validation/cam-ground --labels models/slot_classifier.holdout.json --method M --sweep 0.1:0.9:0.05` for `M` = `appearance`, `classifier`, `ensemble` (add `--classifier FILE` to try another model).
+3. Set the winner as `occupancy.method` (and `classifier.threshold` if the sweep says so) in `config/lot.yaml`, `reload` the worker, record the numbers in PROGRESS.md Metrics.
 
 **Done when:** targets are met, or the gap and next steps are documented.
 

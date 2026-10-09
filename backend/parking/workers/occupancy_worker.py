@@ -29,6 +29,7 @@ from parking.vision.health import FrameHealth
 from parking.vision.health_stats import format_metrics
 from parking.vision.pipeline import AnalysisResult, analyze_frame
 from parking.vision.shift import ShiftDetector
+from parking.vision.slot_classifier import Classifier
 from parking.vision.sources import FolderReplaySource, Frame, FrameSource, make_source
 from parking.workers.base import Schedule, Worker, WorkerError, load_camera
 from parking.workers.debug_capture import capture_from_settings
@@ -91,6 +92,11 @@ class _Setup:
             self.detector = old.detector
         else:
             self.detector = _make_detector(cam, root, worker.fake_detector)
+        same_clf = old is not None and old.cam.occupancy.classifier == cam.occupancy.classifier
+        if same_clf and old.classifier is not None and cam.occupancy.uses_classifier:
+            self.classifier = old.classifier
+        else:
+            self.classifier = _make_classifier(cam, root)
         if old is not None and old.cam.source == cam.source:
             self.source = old.source
         else:
@@ -115,8 +121,8 @@ def _resolve(path: str | Path, root: Path) -> Path:
 
 
 def _make_detector(cam: Camera, root: Path, fake: bool) -> Detector | SidecarDetector | None:
-    if cam.occupancy.method == "appearance":
-        return None  # vision.md §2.1: no model
+    if not cam.occupancy.uses_detector:
+        return None  # appearance (vision.md §2.1) / slot classifier (§9): no detector
     det = cam.detector
     if fake:
         return SidecarDetector(det.conf, det.classes)
@@ -128,9 +134,21 @@ def _make_detector(cam: Camera, root: Path, fake: bool) -> Detector | SidecarDet
     return YoloDetector(str(model), det.imgsz, det.conf, det.classes, det.use_masks)
 
 
+def _make_classifier(cam: Camera, root: Path) -> Classifier | None:
+    occ = cam.occupancy
+    if not occ.uses_classifier:
+        return None
+    from parking.vision.slot_classifier import load_classifier
+
+    try:
+        return load_classifier(_resolve(occ.classifier.model, root))
+    except Exception as e:  # missing file, or onnxruntime can't load it
+        raise WorkerError(f"camera '{cam.id}': {e}") from None
+
+
 def _load_reference(cam: Camera, root: Path) -> np.ndarray | None:
     occ = cam.occupancy
-    if occ.method != "appearance" or occ.appearance.reference_empty is None:
+    if not occ.uses_appearance or occ.appearance.reference_empty is None:
         return None
     path = _resolve(occ.appearance.reference_empty, root)
     ref = cv2.imread(str(path))
@@ -243,7 +261,13 @@ class OccupancyWorker(Worker):
             detector = detector.for_frame(frame)
         try:
             result = analyze_frame(
-                frame.image, setup.cam, setup.slot_file, detector, setup.capacities, setup.reference
+                frame.image,
+                setup.cam,
+                setup.slot_file,
+                detector,
+                setup.capacities,
+                setup.reference,
+                setup.classifier,
             )
         except Exception:
             self.errors += 1

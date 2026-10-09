@@ -7,7 +7,7 @@ Spec: docs/design/config.md (§1 lot.yaml + loader rules, §2 slot file, §3 lin
 import os
 import re
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, get_args
 
 import shapely
 import yaml
@@ -113,11 +113,40 @@ class AppearanceCfg(Strict):
         return self
 
 
+class ClassifierCfg(Strict):
+    """Per-slot classifier (vision.md §9), for `occupancy.method: classifier | ensemble`."""
+
+    model: Path = Path("models/slot_classifier.onnx")
+    threshold: float = Field(default=0.5, gt=0, lt=1)  # on P(taken), or the ensemble's mean
+
+
+OccupancyMethod = Literal["detector", "appearance", "classifier", "ensemble"]
+OCCUPANCY_METHODS: tuple[str, ...] = get_args(OccupancyMethod)
+
+
 class OccupancyCfg(Strict):
-    method: Literal["detector", "appearance"] = "detector"
+    method: OccupancyMethod = "detector"
     threshold: float = Field(default=0.30, gt=0, lt=1)
     mode: Literal["mask", "box_bottom"] = "mask"
     appearance: AppearanceCfg = Field(default_factory=AppearanceCfg)
+    classifier: ClassifierCfg = Field(default_factory=ClassifierCfg)
+
+    @property
+    def uses_detector(self) -> bool:
+        return self.method == "detector"
+
+    @property
+    def uses_appearance(self) -> bool:
+        return self.method in ("appearance", "ensemble")
+
+    @property
+    def uses_classifier(self) -> bool:
+        return self.method in ("classifier", "ensemble")
+
+    @property
+    def decision_threshold(self) -> float:
+        """The cut-off on the slot score: the classifier's for classifier/ensemble."""
+        return self.classifier.threshold if self.uses_classifier else self.threshold
 
 
 class SmoothingCfg(Strict):

@@ -18,10 +18,11 @@ from typing import Any
 
 import numpy as np
 
-from parking.config import AppearanceCfg, ImageLabels, LabelFile, SlotFile
+from parking.config import AppearanceCfg, ImageLabels, LabelFile, OccupancyCfg, SlotFile
 from parking.vision.appearance import score_slots_appearance
 from parking.vision.detector import Detection, Detector, FakeDetector
 from parking.vision.occupancy import Mode, Size, SlotResult, score_slots
+from parking.vision.slot_classifier import Classifier, score_slots_classifier
 
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
 # The occupancy target (phase 4, P4.9): below it, P4.10 (per-slot classifier) is needed.
@@ -326,6 +327,23 @@ def detect_frames(
     return frames, ran
 
 
+def scored_frames(
+    images: Sequence[Path],
+    read: Callable[[Path], np.ndarray | None],
+    score: Callable[[np.ndarray, Size], list[SlotResult]],
+) -> list[Frame]:
+    """Slot scores for every image from `score(pixels, (w, h))`; no detector, no cache."""
+    frames = []
+    for img in images:
+        pixels = read(img)
+        if pixels is None:
+            raise ValueError(f"can't read image {img}")
+        h, w = pixels.shape[:2]
+        results = score(pixels, (w, h))
+        frames.append(Frame(img.name, (w, h), [], tuple(r.score for r in results)))
+    return frames
+
+
 def appearance_frames(
     images: Sequence[Path],
     read: Callable[[Path], np.ndarray | None],
@@ -333,18 +351,40 @@ def appearance_frames(
     params: AppearanceCfg,
     reference: np.ndarray | None = None,
 ) -> list[Frame]:
-    """Appearance scores for every image (vision.md §2.1); no detector, no cache."""
-    frames = []
-    for img in images:
-        pixels = read(img)
-        if pixels is None:
-            raise ValueError(f"can't read image {img}")
-        h, w = pixels.shape[:2]
-        results = score_slots_appearance(
-            pixels, slot_file.slots, (w, h), slot_file.image_size, 0.5, params, reference
-        )
-        frames.append(Frame(img.name, (w, h), [], tuple(r.score for r in results)))
-    return frames
+    """Appearance scores for every image (vision.md §2.1)."""
+    return scored_frames(
+        images,
+        read,
+        lambda px, size: score_slots_appearance(
+            px, slot_file.slots, size, slot_file.image_size, 0.5, params, reference
+        ),
+    )
+
+
+def classifier_frames(
+    images: Sequence[Path],
+    read: Callable[[Path], np.ndarray | None],
+    slot_file: SlotFile,
+    occ: OccupancyCfg,
+    clf: Classifier,
+    reference: np.ndarray | None = None,
+) -> list[Frame]:
+    """Slot classifier (or ensemble) scores for every image (vision.md §9)."""
+    return scored_frames(
+        images,
+        read,
+        lambda px, size: score_slots_classifier(
+            px,
+            slot_file.slots,
+            size,
+            slot_file.image_size,
+            clf,
+            ensemble=occ.method == "ensemble",
+            appearance_threshold=occ.threshold,
+            appearance=occ.appearance,
+            reference=reference,
+        ),
+    )
 
 
 # --- report ---
