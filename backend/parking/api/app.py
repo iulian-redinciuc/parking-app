@@ -15,8 +15,9 @@ import asyncio
 import contextlib
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
+from typing import Any
 
 import anyio
 from fastapi import FastAPI, Request
@@ -29,11 +30,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from parking import __version__
 from parking.api.deps import ApiError, RateLimiter, Runtime
 from parking.api.ingest import Ingestor
-from parking.api.routes import internal, public
+from parking.api.routes import internal, public, push
 from parking.api.sse import Broadcaster
 from parking.config import LotConfig, Settings, SlotFile, cli_env, load_config, load_slots
 from parking.core.clock import Clock, SystemClock
 from parking.db.engine import default_url, make_engine, upgrade
+from parking.push.sender import PushSender
 
 log = logging.getLogger(__name__)
 
@@ -96,9 +98,11 @@ def create_app(
     clock: Clock | None = None,
     db_url: str | None = None,
     tick: bool = True,
+    webpush: Callable[..., Any] | None = None,
 ) -> FastAPI:
     """The API. `config_path` is lot.yaml; its folder's parent is the app root (`config/`,
-    `data/`, `deploy/.env`). `tick=False` leaves the tick task off (tests call `tick()`)."""
+    `data/`, `deploy/.env`). `tick=False` leaves the tick task off (tests call `tick()`);
+    `webpush` replaces pywebpush's sender (tests)."""
     config_path = find_config(config_path)
     root = config_path.resolve().parent.parent
     settings = settings or Settings(_env_file=root / "deploy" / ".env")
@@ -111,10 +115,12 @@ def create_app(
         url = db_url or settings.parking_db_url or default_url(root)
         await anyio.to_thread.run_sync(upgrade, url)
         engine = make_engine(url)
-        store = StateStore(config, clock or SystemClock(), load_slot_files(config, root))
+        clk = clock or SystemClock()
+        store = StateStore(config, clk, load_slot_files(config, root))
         broadcaster = Broadcaster()
         ingestor = Ingestor(store, engine, broadcaster.publish)
-        app.state.runtime = Runtime(settings, config, engine, store, ingestor, broadcaster)
+        sender = _push_sender(engine, settings, clk, webpush)
+        app.state.runtime = Runtime(settings, config, engine, store, ingestor, broadcaster, sender)
         if settings.worker_token is None:
             log.warning("WORKER_TOKEN is not set: every /internal/* request gets 401")
         await ingestor.restore()
@@ -150,8 +156,22 @@ def create_app(
             allow_headers=CORS_HEADERS,
         )
     app.include_router(public.router)
+    app.include_router(push.router)
     app.include_router(internal.router)
     return app
+
+
+def _push_sender(engine, settings: Settings, clock: Clock, webpush) -> PushSender | None:
+    """The push sender, or None (push routes answer 503) without VAPID keys or subject."""
+    if not (settings.vapid_public_key and settings.vapid_private_key and settings.vapid_subject):
+        log.warning("VAPID_* not set: Web Push is off (run `parking push vapid-keys`)")
+        return None
+    kw = {"webpush": webpush} if webpush is not None else {}
+    try:
+        return PushSender.from_settings(engine, settings, clock=clock, **kw)
+    except Exception as e:  # a malformed private key
+        log.error("Web Push is off: %s", e)
+        return None
 
 
 def _error(status: int, code: str, message: str, details=None, headers=None) -> JSONResponse:

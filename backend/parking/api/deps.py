@@ -20,6 +20,7 @@ from parking.api.ingest import Ingestor
 from parking.api.sse import Broadcaster
 from parking.config import LotConfig, Settings
 from parking.core.fusion import StateStore
+from parking.push.sender import PushSender
 
 
 class ApiError(Exception):
@@ -51,6 +52,7 @@ class Runtime:
     store: StateStore
     ingestor: Ingestor
     broadcaster: Broadcaster
+    push: PushSender | None = None  # None without VAPID keys in .env
 
 
 def runtime(request: Request) -> Runtime:

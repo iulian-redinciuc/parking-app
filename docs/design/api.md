@@ -71,12 +71,14 @@ Codes: `bad_request` (400; also 422 for a body or query that fails validation, w
 Zone names (`/api/lot`, `/api/status`, `/api/stream`): `?lang=` first, then the `Accept-Language` languages by `q` (primary subtag only: `ro-RO` → `ro`; `q=0` and `*` ignored); the first one that any zone has a name in wins, else `en` (a zone without that name falls back to `en`, then its first name). `/api/lot` and `/api/status` send `Vary: Accept-Language`. `?lang=` longer than 35 characters → 422.
 | GET | `/api/history` | 7 | Query: `zone` (or `total`), `from`, `to`, `bucket=minute\|hour\|day`. Returns `{"zone":"ground","bucket":"hour","points":[{"t":"…","free_avg":12.4,"free_min":8,"occupied_avg":27.6}]}`. Max 2000 points |
 | GET | `/api/forecast` | 7 | Query: `zone`, `at` (ISO, default now + 30 min). Returns `{"zone":"ground","at":"…","free_expected":10,"basis":"median of last 8 same weekday/hour"}` |
-| GET | `/api/push/vapid-public-key` | 6 | `{"key":"BAx…"}` |
-| POST | `/api/push/subscriptions` | 6 | Body: `{"subscription": <PushSubscription JSON>, "prefs": Prefs, "tz": "Europe/Bucharest", "lang": "en"}` → 201 `{"id":"…"}`. Upserts by endpoint |
-| PATCH | `/api/push/subscriptions` | 6 | Body: `{"endpoint":"…","prefs":Prefs}` |
-| DELETE | `/api/push/subscriptions` | 6 | Body: `{"endpoint":"…"}` → 204 |
-| POST | `/api/push/on-my-way` | 6 | Body: `{"endpoint":"…","minutes":30}` (5–120) → 202, plus an immediate push |
-| POST | `/api/push/test` | 6 | Body: `{"endpoint":"…"}`. Sends one test push. Rate limit 3/hour per endpoint |
+| GET | `/api/push/vapid-public-key` | 6 | `{"key":"BAx…"}`; `503 unavailable` when the VAPID keys aren't set |
+| POST | `/api/push/subscriptions` | 6 | Body: `{"subscription": <PushSubscription JSON>, "prefs": Prefs, "tz": "Europe/Bucharest", "lang": "en"}` → 201 `{"id":"…"}`. Upserts by endpoint (same `id`; keys, prefs, tz, lang replaced, `failures` reset) |
+| PATCH | `/api/push/subscriptions` | 6 | Body: `{"endpoint":"…","prefs":Prefs}` → 200 `{"id","prefs"}` (prefs replaced as a whole); unknown endpoint 404 |
+| DELETE | `/api/push/subscriptions` | 6 | Body: `{"endpoint":"…"}` → 204, also for an unknown endpoint (idempotent) |
+| POST | `/api/push/on-my-way` | 6 | Body: `{"endpoint":"…","minutes":30}` (5–120, or `0` = cancel) → 202 `{"until":"…Z"\|null,"sent":bool}`, plus an immediate push (`Urgency: high`; none on cancel) |
+| POST | `/api/push/test` | 6 | Body: `{"endpoint":"…"}`. Sends one test push with the current status → 200 `{"sent":bool,"deleted":bool}`. Rate limit 3/hour per endpoint |
+
+Push routes (`parking/api/routes/push.py`, P6.2): the subscription is found by `endpoint`; every call with one updates `last_seen_at`; an unknown endpoint is 404 (except DELETE). Without `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT` the key, test and on-my-way routes answer `503 unavailable` (subscriptions are still stored). Validation (422): `endpoint` an `https://` URL ≤ 2048 chars; `keys.p256dh`/`keys.auth` base64url; `tz` a valid IANA zone (`zoneinfo`); `lang` a language tag; unknown fields in `Prefs` (and the bodies) are rejected, other `PushSubscription` fields (`expirationTime`) ignored. The push payload is built by `parking/push/payload.py` from the current status in the subscription's `lang`, `tz` and `prefs.zones` (`"No data yet"` before the first data).
 
 `GET /api/lot`:
 ```json
@@ -101,7 +103,7 @@ Zone names (`/api/lot`, `/api/status`, `/api/stream`): `?lang=` first, then the 
   "alert_when_almost_full": true
 }
 ```
-(`days`: 1 = Monday … 7 = Sunday, in the subscription's `tz`.)
+(`days`: 1 = Monday … 7 = Sunday, in the subscription's `tz`.) Rules: `radius_m` 100–5000 (`null` = the lot's `notify_radius_m`); `zones` ids from lot.yaml (`null` = all); `time`, `from`, `to` are `HH:MM` (00:00–23:59); `days` 1–7, 1–7 entries, stored sorted and unique; at most 10 schedules. Defaults when left out: `proximity` / `alert_when_almost_full` `false`, `radius_m` / `zones` / `quiet_hours` `null`, `schedules` `[]`; the stored prefs always have every key.
 
 ---
 
@@ -245,6 +247,6 @@ Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `
 ## 7. Cross-cutting
 
 - **CORS:** allow only `CORS_ORIGINS`; methods GET/POST/PATCH/PUT/DELETE; headers `Content-Type, Authorization`. Empty `CORS_ORIGINS` = no CORS headers at all (same-origin only).
-- **Rate limits** (per client IP, moving window, in memory per API process): public GET 120/min (one budget shared by `/healthz` and all public `/api/*` GETs, incl. connecting to `/api/stream`), push POST 20/hour, login 5/15 min; `/internal/*` has none. Implemented as a FastAPI dependency (`rate_limit(limit, group)` in `parking/api/deps.py`) on the `limits` library, the engine behind slowapi: slowapi's decorators need a module-global limiter and its middleware is a `BaseHTTPMiddleware`. The client IP is `request.client.host`; behind the tunnel/proxy uvicorn must trust the proxy's `X-Forwarded-For` (`--proxy-headers --forwarded-allow-ips`, set up in P2.10/P8), otherwise every visitor shares one budget.
+- **Rate limits** (per client IP, moving window, in memory per API process): public GET 120/min (one budget shared by `/healthz` and all public `/api/*` GETs, incl. connecting to `/api/stream`; the push `PATCH`/`DELETE` use it too, so a settings screen saving often isn't cut off), push POST 20/hour (one budget for `subscriptions`, `on-my-way` and `test`), test push 3/hour per endpoint, login 5/15 min; `/internal/*` has none. Implemented as a FastAPI dependency (`rate_limit(limit, group)` in `parking/api/deps.py`) on the `limits` library, the engine behind slowapi: slowapi's decorators need a module-global limiter and its middleware is a `BaseHTTPMiddleware`. The client IP is `request.client.host`; behind the tunnel/proxy uvicorn must trust the proxy's `X-Forwarded-For` (`--proxy-headers --forwarded-allow-ips`, set up in P2.10/P8), otherwise every visitor shares one budget.
 - **Compression:** gzip for responses > 1 KB (Starlette's `GZipMiddleware`, which never compresses `text/event-stream`).
 - **OpenAPI docs** at `/docs` (and `/openapi.json`) only when `LOG_LEVEL=DEBUG`; otherwise both are 404. No ReDoc.

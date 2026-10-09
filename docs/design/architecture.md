@@ -107,6 +107,7 @@ backend/
 │   │       └── admin.py         # /api/admin/*
 │   └── push/
 │       ├── sender.py            # pywebpush wrapper, expiry cleanup
+│       ├── payload.py           # push payload (api.md §6) from the current status
 │       ├── rules.py             # when to notify (on-my-way, schedules, quiet hours)
 │       └── scheduler.py         # APScheduler jobs
 └── tests/
