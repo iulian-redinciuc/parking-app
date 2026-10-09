@@ -17,7 +17,15 @@ from parking.db.models import FlowEvent, ZoneState
 from parking.messages import CameraHealthMsg
 
 T0 = datetime(2026, 10, 8, 18, 0, tzinfo=UTC)
-TABLES = {"zone_state", "slot_state", "camera_health", "flow_event", "correction"}
+TABLES = {
+    "zone_state",
+    "slot_state",
+    "camera_health",
+    "flow_event",
+    "correction",
+    "push_subscription",
+    "notification_log",
+}
 
 
 @pytest.fixture

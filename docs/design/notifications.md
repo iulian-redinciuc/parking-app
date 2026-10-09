@@ -13,6 +13,7 @@
 ## 2. Web Push basics
 
 - Keys: `parking push vapid-keys` prints `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` for `.env`. **Never rotate casually**: rotating invalidates every subscription.
+  - Formats (unpadded URL-safe base64): the public key is the 65-byte uncompressed P-256 point (the browser's `applicationServerKey`), the private key the raw 32-byte scalar (`py_vapid.Vapid.from_string` reads it). The command prints both lines to stdout and a back-up reminder to stderr.
 - Subscribe in the browser (`lib/push.ts`):
   1. `Notification.requestPermission()`, only inside the click handler of "Enable notifications".
   2. `reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) })`, where `key` comes from `GET /api/push/vapid-public-key`.
@@ -23,6 +24,8 @@
   - Urgency header `high` for on-my-way and almost-full; `normal` for schedules.
   - 404/410 → delete the subscription. Other errors → `failures += 1`, delete at 5.
   - Send in a thread pool (pywebpush is blocking), max 10 at a time.
+  - API: `PushSender(engine, vapid_private_key, vapid_subject, clock=, webpush=)` (or `PushSender.from_settings(engine, settings)`); `send(sub, payload, urgency) -> SendResult(subscription_id, ok, status_code, deleted, error)` and `send_many(subs, payload, urgency) -> list[SendResult]` (input order). `webpush` is injectable for tests. The private key is parsed once at construction (a missing key or subject raises `ValueError`).
+  - Every attempt writes a `notification_log` row (`kind` from the payload, `status` `sent`/`failed`, error truncated to 500 chars). Success resets `failures` to 0 and sets `last_sent_at`; `last_sent_free`/`last_sent_level` are left to the rules (P6.6–P6.7). Network errors (no HTTP status) count as failures.
 - **Payload:** see [api.md §6](api.md#6-push-notification-payload-web-push-encrypted-by-pywebpush). `tag: "parking-status"` replaces the previous notification instead of piling up.
 
 ### iPhone specifics

@@ -1,4 +1,4 @@
-"""Tables for Phase 2 (data-model.md §1). Push and admin tables arrive with Phases 6–7.
+"""Tables for Phases 2 and 6 (data-model.md §1). Admin tables arrive with Phase 7.
 
 Timestamps are tz-aware UTC, stored as fixed-width ISO 8601 text so they sort as strings.
 """
@@ -6,8 +6,9 @@ Timestamps are tz-aware UTC, stored as fixed-width ISO 8601 text so they sort as
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import Index, String, TypeDecorator
+from sqlalchemy import JSON, Index, String, TypeDecorator
 from sqlmodel import Field, SQLModel
 
 
@@ -96,3 +97,43 @@ class CameraHealth(SQLModel, table=True):
     fps: float | None = None
     last_frame_age_s: float | None = None
     inference_ms_avg: float | None = None
+
+
+class PushSubscription(SQLModel, table=True):
+    """One browser's Web Push subscription (pseudonymous: no names or emails)."""
+
+    __tablename__ = "push_subscription"
+
+    id: str = Field(primary_key=True)  # uuid4
+    endpoint: str = Field(unique=True)
+    p256dh: str
+    auth: str
+    prefs: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    tz: str = "UTC"
+    lang: str = "en"
+    created_at: datetime = _ts()
+    last_seen_at: datetime = _ts()
+    on_my_way_until: datetime | None = _ts(default=None)
+    last_sent_at: datetime | None = _ts(default=None)
+    last_sent_free: int | None = None
+    last_sent_level: str | None = None
+    failures: int = 0  # consecutive send failures; deleted at 404/410 or >= 5
+
+    def subscription_info(self) -> dict[str, Any]:
+        """The `PushSubscription` JSON shape pywebpush expects."""
+        return {"endpoint": self.endpoint, "keys": {"p256dh": self.p256dh, "auth": self.auth}}
+
+
+class NotificationLog(SQLModel, table=True):
+    """One send attempt. `subscription_id` is kept as plain text (no foreign key) so the log
+    survives the subscription being deleted after a 404/410."""
+
+    __tablename__ = "notification_log"
+
+    id: int | None = Field(default=None, primary_key=True)
+    ts: datetime = _ts(index=True)
+    subscription_id: str
+    kind: str  # test | on_my_way | schedule | almost_full | admin_alert
+    payload: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    status: str  # sent | failed | skipped_quiet
+    error: str | None = None

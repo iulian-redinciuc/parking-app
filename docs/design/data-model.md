@@ -83,6 +83,8 @@
 ### `notification_log`
 | id | ts | subscription_id | kind | payload json | status (`sent \| failed \| skipped_quiet`) | error |
 
+`subscription_id` has no foreign key on purpose: the log row stays when the subscription is deleted after a 404/410. `ts` is indexed for the 30-day prune. Both push tables come from migration `0002` (P6.1).
+
 ### `admin_session`
 | id | token_hash (sha256) | created_at | expires_at | revoked_at | ip | user_agent |
 

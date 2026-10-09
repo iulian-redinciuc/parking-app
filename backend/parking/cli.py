@@ -747,3 +747,18 @@ def db_upgrade(
     except Exception as e:  # alembic/sqlalchemy errors: show the message, not a traceback
         _fail(f"upgrade failed: {e}")
     typer.echo(f"database at {revision}: {url}")
+
+
+@push_app.command("vapid-keys")
+def push_vapid_keys() -> None:
+    """Generate a VAPID key pair and print it as `.env` lines (notifications.md §2)."""
+    from parking.push.sender import generate_vapid_keys
+
+    public, private = generate_vapid_keys()
+    typer.echo(f"VAPID_PUBLIC_KEY={public}")
+    typer.echo(f"VAPID_PRIVATE_KEY={private}")
+    typer.echo(
+        "Put both in deploy/.env (never commit them) and back them up: losing or rotating "
+        "them breaks every push subscription.",
+        err=True,
+    )
