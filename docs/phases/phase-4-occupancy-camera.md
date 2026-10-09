@@ -112,7 +112,7 @@ Put the suggested values in `cameras[].health` in `lot.yaml` (check the night an
 
 ## P4.9: Evaluate and tune
 **Steps**
-1. `parking evaluate --images data/validation/cam-ground --labels … --sweep … --mode both`.
+1. `parking evaluate --camera cam-ground --images data/validation/cam-ground --labels data/labels/cam-ground-validation.json --sweep 0.1:0.6:0.05 --mode both` (with `occupancy.method: appearance`, `--mode` is ignored and the sweep re-thresholds the appearance scores). The overall line and the sweep's best threshold each end with a `target (…): met | missed (…)` line (the Done-when below).
 2. Read the per-condition breakdown. The usual fixes, in order:
    - wrong threshold → sweep
    - small cars missed → `imgsz 1280` / tiling

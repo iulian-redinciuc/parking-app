@@ -140,6 +140,8 @@ def test_evaluate_with_fake_detector(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "overall: slot accuracy 100.0% (2/2), free-precision 100.0%" in result.output
     assert "count error 0.00" in result.output
+    assert "count error <= 1 on >= 95% of images): met" in result.output
+    assert "at 0.30: target (" in result.output
     assert "best threshold (mask): 0.30" in result.output
     assert "best threshold (box_bottom): 0.30" in result.output  # 35% box bottom vs 0.5
     [report] = (tmp_path / "out" / "eval").glob("cam-ground-*.json")
@@ -162,6 +164,7 @@ def test_evaluate_lists_mistakes(tmp_path, monkeypatch):
     assert "G02 (taken, said free)" in result.output
     assert "slot accuracy 50.0% (1/2), free-precision 0.0%" in result.output
     assert "best threshold" not in result.output  # only with --sweep
+    assert "missed (slot accuracy 50.0%)" in result.output
     assert (tmp_path / "out" / "eval" / "cam-ground-img-mask.png").stat().st_size > 0
 
 

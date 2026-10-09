@@ -417,6 +417,7 @@ def evaluate(
         typer.echo(f"== mode {m}, threshold {threshold:.2f} ==")
         typer.echo("\n".join(ev.image_table(evals)))
         typer.echo(ev.summary_line("overall", overall))
+        typer.echo(ev.target_line(overall))
         conds = ev.by_condition(evals)
         for tag, s in conds.items():
             typer.echo(ev.summary_line(f"  {tag}", s))
@@ -448,6 +449,7 @@ def evaluate(
                 f"best threshold ({m}): {best:.2f} (slot accuracy {ev.pct(bs.accuracy)}, "
                 f"free-precision {ev.pct(bs.free_precision)})"
             )
+            typer.echo(f"at {best:.2f}: {ev.target_line(bs)}")
             entry["sweep"] = [{"threshold": t, **s.to_dict()} for t, s in rows]
             entry["best_threshold"] = best
 

@@ -20,6 +20,7 @@ from parking.vision.evaluate import (
     save_detections,
     summarize,
     sweep,
+    target_line,
 )
 from parking.vision.occupancy import SlotResult
 
@@ -81,6 +82,28 @@ def test_summary_maths():
     assert s.count_within_1 == pytest.approx(2 / 3)
     d = s.to_dict()
     assert d["accuracy"] == pytest.approx(0.75) and d["free_fp"] == 2
+
+
+def test_target():
+    perfect = evaluate_image("a.jpg", results("G1", "G2 G3"), label(["G1"]))
+    s = summarize([perfect])
+    assert s.meets_target is True and s.to_dict()["meets_target"] is True
+    assert target_line(s).endswith(": met")
+    # 1 of 3 slots wrong (count error 1): accuracy misses, count error doesn't
+    off_by_one = evaluate_image("b.jpg", results("", "G1 G2 G3"), label(["G1"]))
+    s = summarize([off_by_one])
+    assert s.meets_target is False
+    assert target_line(s).endswith("missed (slot accuracy 66.7%)")
+    # 39 perfect 3-slot images + 1 with count error 2 -> accuracy 98.3%, within 1 in 97.5%
+    two_off = evaluate_image("c.jpg", results("", "G1 G2 G3"), label(["G1", "G2"]))
+    assert summarize([perfect] * 39 + [two_off]).meets_target is True
+    # 38 perfect + 2 with count error 2 -> accuracy 96.7%, within 1 in exactly 95%
+    s = summarize([perfect] * 38 + [two_off] * 2)
+    assert target_line(s).endswith("missed (slot accuracy 96.7%)")
+    # 18 perfect + 2 with count error 2 -> within 1 in 90%
+    s = summarize([perfect] * 18 + [two_off] * 2)
+    assert "count error <= 1 in 90.0%" in target_line(s)
+    assert summarize([]).meets_target is None and "n/a" in target_line(summarize([]))
 
 
 def test_summary_without_data_is_none():

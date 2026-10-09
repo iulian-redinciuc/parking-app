@@ -24,6 +24,9 @@ from parking.vision.detector import Detection, Detector, FakeDetector
 from parking.vision.occupancy import Mode, Size, SlotResult, score_slots
 
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
+# The occupancy target (phase 4, P4.9): below it, P4.10 (per-slot classifier) is needed.
+TARGET_ACCURACY = 0.97
+TARGET_COUNT_WITHIN_1 = 0.95
 
 
 # --- metrics ---
@@ -122,8 +125,23 @@ class Summary:
         """Share of images whose free count is off by at most 1."""
         return _ratio(sum(e <= 1 for e in self.count_errors), len(self.count_errors))
 
+    @property
+    def meets_target(self) -> bool | None:
+        """Slot accuracy >= TARGET_ACCURACY and count error <= 1 on >= TARGET_COUNT_WITHIN_1
+        of the images; None without data."""
+        if self.accuracy is None or self.count_within_1 is None:
+            return None
+        return self.accuracy >= TARGET_ACCURACY and self.count_within_1 >= TARGET_COUNT_WITHIN_1
+
     def to_dict(self) -> dict[str, Any]:
-        keys = ("accuracy", "free_precision", "free_recall", "mean_count_error", "count_within_1")
+        keys = (
+            "accuracy",
+            "free_precision",
+            "free_recall",
+            "mean_count_error",
+            "count_within_1",
+            "meets_target",
+        )
         return {
             "images": self.images,
             "labelled": self.labelled,
@@ -363,6 +381,24 @@ def summary_line(name: str, s: Summary) -> str:
         f"count error {num(s.mean_count_error)} (<= 1 in {pct(s.count_within_1)} of "
         f"{s.images} image(s))"
     )
+
+
+def target_line(s: Summary) -> str:
+    """The P4.9 verdict: target met, or which part missed it."""
+    goal = (
+        f"slot accuracy >= {TARGET_ACCURACY * 100:.0f}% and count error <= 1 on "
+        f">= {TARGET_COUNT_WITHIN_1 * 100:.0f}% of images"
+    )
+    if s.meets_target is None:
+        return f"target ({goal}): n/a (no labelled slots)"
+    if s.meets_target:
+        return f"target ({goal}): met"
+    short = []
+    if (s.accuracy or 0.0) < TARGET_ACCURACY:
+        short.append(f"slot accuracy {pct(s.accuracy)}")
+    if (s.count_within_1 or 0.0) < TARGET_COUNT_WITHIN_1:
+        short.append(f"count error <= 1 in {pct(s.count_within_1)}")
+    return f"target ({goal}): missed ({', '.join(short)})"
 
 
 def sweep_table(rows: Sequence[tuple[float, Summary]], best: float) -> list[str]:
