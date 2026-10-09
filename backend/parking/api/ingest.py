@@ -70,7 +70,7 @@ class Ingestor:
         self.store = store
         self.engine = engine
         self.publish = publish
-        self.on_status = on_status  # the on-my-way push rules (P6.6)
+        self.on_status = on_status  # the push rules (on-my-way, almost-full)
         self._last_status: LotStatus | None = None
         self.stats = IngestStats()
         self._lock = asyncio.Lock()

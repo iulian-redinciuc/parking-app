@@ -3,7 +3,8 @@
 Start-up: `db upgrade`, load lot.yaml and the slot files, restore the `StateStore` from the
 DB (stale until fresh data, data-model.md §2) and start the 1 s `tick()` task. Every new
 status goes to the SSE `Broadcaster` (`/api/stream`) and, with push configured, to the
-on-my-way rules (`OnMyWayNotifier`, notifications.md §4).
+on-my-way and almost-full rules (`OnMyWayNotifier`, `AlmostFullNotifier`, notifications.md
+§4-5); the minutely reminder job (`PushScheduler`, APScheduler) runs alongside.
 
 Around the routes (api.md §7): CORS for `CORS_ORIGINS` only, gzip for responses over 1 KB
 (Starlette never compresses `text/event-stream`), every error as `{"error": {code, message}}`
@@ -36,14 +37,16 @@ from parking.api.sse import Broadcaster
 from parking.config import LotConfig, Settings, SlotFile, cli_env, load_config, load_slots
 from parking.core.clock import Clock, SystemClock
 from parking.db.engine import default_url, make_engine, upgrade
+from parking.messages import LotStatus
 from parking.push.on_my_way import OnMyWayNotifier
 from parking.push.payload import app_url
+from parking.push.scheduler import AlmostFullNotifier, PushScheduler
 from parking.push.sender import PushSender
 
 log = logging.getLogger(__name__)
 
 TICK_S = 1.0
-SHUTDOWN_DRAIN_S = 15  # pending on-my-way pushes (each send times out after 10 s)
+SHUTDOWN_DRAIN_S = 15  # pending status-change pushes (each send times out after 10 s)
 GZIP_MIN_BYTES = 1000
 CORS_METHODS = ["GET", "POST", "PATCH", "PUT", "DELETE"]
 CORS_HEADERS = ["Content-Type", "Authorization"]
@@ -105,7 +108,8 @@ def create_app(
     webpush: Callable[..., Any] | None = None,
 ) -> FastAPI:
     """The API. `config_path` is lot.yaml; its folder's parent is the app root (`config/`,
-    `data/`, `deploy/.env`). `tick=False` leaves the tick task off (tests call `tick()`);
+    `data/`, `deploy/.env`). `tick=False` leaves the tick task and the reminder job off (tests
+    call `tick()` / `run_due()`);
     `webpush` replaces pywebpush's sender (tests)."""
     config_path = find_config(config_path)
     root = config_path.resolve().parent.parent
@@ -123,19 +127,39 @@ def create_app(
         store = StateStore(config, clk, load_slot_files(config, root))
         broadcaster = Broadcaster()
         sender = _push_sender(engine, settings, clk, webpush)
-        notifier = None
+        notifier = almost_full = scheduler = hook = None
         if sender is not None:
             url = app_url(settings.public_app_url)
-            notifier = OnMyWayNotifier(engine, sender, config, clk, url)
-        hook = notifier.status_changed if notifier else None
+            lock = asyncio.Lock()  # one push dispatch at a time
+            notifier = OnMyWayNotifier(engine, sender, config, clk, url, lock)
+            almost_full = AlmostFullNotifier(engine, sender, config, clk, url, lock)
+            scheduler = PushScheduler(
+                engine, sender, config, clk, url, lambda: _current(store), lock
+            )
+
+            def hook(old, new):
+                notifier.status_changed(old, new)
+                almost_full.status_changed(old, new)
+
         ingestor = Ingestor(store, engine, broadcaster.publish, hook)
         app.state.runtime = Runtime(
-            settings, config, engine, store, ingestor, broadcaster, sender, notifier
+            settings,
+            config,
+            engine,
+            store,
+            ingestor,
+            broadcaster,
+            sender,
+            notifier,
+            almost_full,
+            scheduler,
         )
         if settings.worker_token is None:
             log.warning("WORKER_TOKEN is not set: every /internal/* request gets 401")
         await ingestor.restore()
         task = asyncio.create_task(_tick_loop(ingestor)) if tick else None
+        if scheduler is not None and tick:
+            scheduler.start()
         log.info("API ready: lot %s, %d zone(s), db %s", config.lot.id, len(config.zones), url)
         try:
             yield
@@ -144,9 +168,12 @@ def create_app(
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            if scheduler is not None:
+                scheduler.shutdown()
             if notifier is not None:
+                pending = asyncio.gather(notifier.drain(), almost_full.drain())
                 with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(notifier.drain(), SHUTDOWN_DRAIN_S)
+                    await asyncio.wait_for(pending, SHUTDOWN_DRAIN_S)
             app.state.runtime = None
             engine.dispose()
 
@@ -173,6 +200,10 @@ def create_app(
     app.include_router(push.router)
     app.include_router(internal.router)
     return app
+
+
+def _current(store) -> LotStatus | None:
+    return store.status() if store.has_data else None
 
 
 def _push_sender(engine, settings: Settings, clock: Clock, webpush) -> PushSender | None:

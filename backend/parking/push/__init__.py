@@ -1,2 +1,2 @@
-"""Web Push: VAPID keys, the sender, the notification rules and the on-my-way dispatch
-(notifications.md)."""
+"""Web Push: VAPID keys, the sender, the notification rules, the on-my-way and almost-full
+dispatch and the reminder scheduler (notifications.md)."""

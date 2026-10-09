@@ -64,6 +64,11 @@ class FakeWebpush:
 
 @pytest.fixture
 def lot(tmp_path):
+    return write_lot(tmp_path)
+
+
+def write_lot(tmp_path):
+    """lot.yaml + a 20-space slot file under `tmp_path/config` (also used by P6.7's tests)."""
     (tmp_path / "config" / "slots").mkdir(parents=True)
     (tmp_path / "config" / "lot.yaml").write_text(LOT_YAML)
     slots = [{"id": s, "zone": "ground", "polygon": SQUARE} for s in SLOTS]
@@ -73,7 +78,7 @@ def lot(tmp_path):
 
 
 @contextlib.asynccontextmanager
-async def running(lot, webpush, clock, vapid=True):
+async def running(lot, webpush, clock, vapid=True, tick=False):
     keys = {"vapid_public_key": PUBLIC, "vapid_private_key": PRIVATE} if vapid else {}
     settings = Settings(
         _env_file=None,
@@ -86,7 +91,7 @@ async def running(lot, webpush, clock, vapid=True):
         settings,
         clock=clock,
         db_url=f"sqlite:///{lot}/parking.sqlite",
-        tick=False,
+        tick=tick,
         webpush=webpush,
     )
     transport = httpx.ASGITransport(app=app)
@@ -99,7 +104,7 @@ async def running(lot, webpush, clock, vapid=True):
 
 class Feed:
     """Sets how many ground spaces are free, like the replay feed does, and waits for the
-    resulting on-my-way dispatch."""
+    resulting push dispatches."""
 
     def __init__(self, client, rt, clock):
         self.client, self.rt, self.clock = client, rt, clock
@@ -117,8 +122,9 @@ class Feed:
         }
         r = await self.client.post("/internal/observations", json=body, headers=AUTH)
         assert r.status_code == 204, r.text
-        if self.rt.on_my_way is not None:
-            await self.rt.on_my_way.drain()
+        for notifier in (self.rt.on_my_way, self.rt.almost_full):
+            if notifier is not None:
+                await notifier.drain()
 
 
 async def subscribe(client, zones=("ground",)):

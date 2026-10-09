@@ -108,9 +108,10 @@ backend/
 │   └── push/
 │       ├── sender.py            # pywebpush wrapper, expiry cleanup
 │       ├── payload.py           # push payload (api.md §6) from the current status
-│       ├── rules.py             # when to notify (on-my-way, schedules, quiet hours)
+│       ├── rules.py             # when to notify (on-my-way, schedules, quiet hours, almost full)
+│       ├── dispatch.py          # shared ingest-hook plumbing + one payload per (lang, tz, zones)
 │       ├── on_my_way.py         # Tier 2 dispatch on every status change (ingest hook)
-│       └── scheduler.py         # APScheduler jobs
+│       └── scheduler.py         # APScheduler reminder job + almost-full ingest hook
 └── tests/
     ├── unit/
     ├── integration/
