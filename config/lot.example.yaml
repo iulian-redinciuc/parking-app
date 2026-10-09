@@ -31,7 +31,7 @@ cameras:
     zones: [ground]                # zones this camera reports on
     source: "file:data/samples/ground-01.jpg"
     # Phase 2:  "folder:data/replay/ground?interval=5&loop=true"
-    # Phase 4:  "snapshot:${CAM_GROUND_SNAPSHOT_URL}"  or  "rtsp:${CAM_GROUND_RTSP_URL}"
+    # Phase 4:  "snapshot:${CAM_GROUND_SNAPSHOT_URL}" (preferred)  or  "rtsp:${CAM_GROUND_RTSP_URL}"
     sample_every_s: 5
     slots_file: config/slots/cam-ground.json
     control_url: http://vision-occupancy:9000   # how the API reaches this worker (VPN address in T2)

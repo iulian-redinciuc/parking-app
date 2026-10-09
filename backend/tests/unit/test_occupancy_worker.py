@@ -172,8 +172,10 @@ def test_appearance_needs_no_model_and_file_source(lot):
     [
         (lambda root: (root / "config" / "slots" / "cam-ground.json").unlink(), "slot file"),
         (
-            lambda root: (root / "config" / "lot.yaml").write_text(LOT.format(source="rtsp:x")),
-            "Phase 4",
+            lambda root: (root / "config" / "lot.yaml").write_text(
+                LOT.format(source="rtsp:http://cam/x")
+            ),
+            "expected an rtsp:// URL",
         ),
     ],
 )

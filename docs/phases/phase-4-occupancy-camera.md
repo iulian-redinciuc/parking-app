@@ -48,7 +48,7 @@ docker compose run --rm --no-deps --entrypoint /app/backend/.venv/bin/python vis
 
 **Steps**
 1. `SnapshotSource`: `httpx.Client` with digest and basic auth (parse credentials from the URL); 5 s timeout; decode with `cv2.imdecode`.
-2. `RtspSource`: `cv2.VideoCapture(url, cv2.CAP_FFMPEG)` with env `OPENCV_FFMPEG_CAPTURE_OPTIONS="rtsp_transport;tcp|stimeout;5000000"`. A **reader thread** keeps only the latest frame (a lock + a single slot); `read()` returns it, or `None` if it's older than 5 s.
+2. `RtspSource`: `cv2.VideoCapture(url, cv2.CAP_FFMPEG)` with env `OPENCV_FFMPEG_CAPTURE_OPTIONS="rtsp_transport;tcp|timeout;5000000"` (FFmpeg ≥ 5, bundled with OpenCV, renamed `stimeout` to `timeout`) and 5 s open/read timeouts. A **reader thread** keeps only the latest frame (a lock + a single slot); `read()` returns it, or `None` if it's older than 5 s.
 3. Reconnect with exponential backoff (1, 2, 4 … 60 s), logging each attempt. Report `connect_failed` to health.
 4. Prefer `snapshot:` for occupancy (lower CPU, full resolution on demand); `rtsp:` is the fallback.
 5. Tests: `SnapshotSource` against a local `http.server` serving a fixture; `RtspSource` reconnect logic with a mocked `VideoCapture`.

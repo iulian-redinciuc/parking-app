@@ -46,7 +46,7 @@ cameras:
     zones: [ground]                # zones this camera reports on
     source: "file:data/samples/ground-01.jpg"
     # Phase 2:  "folder:data/replay/ground?interval=5&loop=true"
-    # Phase 4:  "snapshot:${CAM_GROUND_SNAPSHOT_URL}"  or  "rtsp:${CAM_GROUND_RTSP_URL}"
+    # Phase 4:  "snapshot:${CAM_GROUND_SNAPSHOT_URL}" (preferred)  or  "rtsp:${CAM_GROUND_RTSP_URL}"
     sample_every_s: 5
     slots_file: config/slots/cam-ground.json
     control_url: http://vision-occupancy:9000   # how the API reaches this worker (VPN address in T2)
@@ -129,11 +129,13 @@ api:
 |--------|---------|-----------|
 | `file:` | `file:data/samples/ground-01.jpg` | The same image every time |
 | `folder:` | `folder:data/replay/ground?interval=5&loop=true` | Images in name order, one per `interval` seconds. `loop=false` stops at the end. New files dropped into the folder are picked up |
-| `snapshot:` | `snapshot:http://user:pass@10.0.20.11/cgi-bin/snapshot.jpg` | HTTP GET per sample (JPEG) |
-| `rtsp:` | `rtsp:rtsp://user:pass@10.0.20.12:554/sub` | Continuous stream on a reader thread that keeps only the latest frame |
+| `snapshot:` | `snapshot:http://user:pass@10.0.20.11/cgi-bin/snapshot.jpg` | HTTP GET per sample (JPEG). **Preferred for occupancy** (no decoding between samples, full resolution) |
+| `rtsp:` | `rtsp:rtsp://user:pass@10.0.20.12:554/sub` | Continuous stream on a reader thread that keeps only the latest frame. The occupancy fallback |
 | `video:` | `video:data/recordings/ramp-2026-11-02.mp4` | Plays a file at its native fps (for flow tests) |
 
 Relative paths resolve against the repo root. `folder:` reads `.jpg`/`.jpeg`/`.png`/`.bmp`/`.webp` files, re-scans the folder at the start of every pass, and only parses `interval` (default 5 s; the worker loop does the waiting: for `folder:` sources the occupancy worker samples every `interval`, which replaces the camera's `sample_every_s`). With `loop=false`, `read()` returns nothing after the last image and the source reports `exhausted`. A missing or unreadable image is a failed read (`connect_failed`), not an error. Unknown schemes and options are rejected; error messages never echo the URI (it may hold camera credentials).
+
+**Camera sources** (`snapshot:`, `rtsp:`, P4.3). `snapshot:` takes the `user:pass@` out of the URL (percent-decoded, so encode `@ : /` in passwords) and answers the camera's 401 with **digest or basic**, whichever it asks for; credentials in the query string (some Reolink firmware: `?cmd=Snap&channel=0&user=…&password=…`) are passed as they are. Timeout 5 s; the body is decoded with `cv2.imdecode`; a non-200 or non-image answer is a failed read. `rtsp:` opens `cv2.VideoCapture(url, cv2.CAP_FFMPEG)` with `OPENCV_FFMPEG_CAPTURE_OPTIONS=rtsp_transport;tcp|timeout;5000000` (set only if the environment doesn't already set it; FFmpeg ≥ 5 calls the old `stimeout` `timeout`) plus 5 s open/read timeouts; its reader thread starts on the first read, and `read()` returns the latest frame or nothing when it's **older than 5 s**. Both reconnect with **exponential backoff 1, 2, 4 … 60 s** (back to 1 s after a frame), log each attempt without the URL, and a failed or skipped read is `connect_failed` for health (vision.md §5).
 
 ---
 

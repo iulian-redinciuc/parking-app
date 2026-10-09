@@ -115,8 +115,20 @@ def test_unknown_scheme_does_not_echo_credentials():
     assert "secret" not in str(e.value)
 
 
-@pytest.mark.parametrize("scheme", ["snapshot", "rtsp", "video"])
-def test_later_schemes_not_implemented(scheme):
-    with pytest.raises(NotImplementedError, match=f"'{scheme}:' sources arrive in Phase") as e:
-        make_source(f"{scheme}:rtsp://user:secret@cam/x")
+def test_video_not_implemented_yet():
+    with pytest.raises(NotImplementedError, match="'video:' sources arrive in Phase") as e:
+        make_source("video:rtsp://user:secret@cam/x")
+    assert "secret" not in str(e.value)
+
+
+@pytest.mark.parametrize(
+    ("uri", "msg"),
+    [
+        ("snapshot:rtsp://user:secret@cam/x", "expected an http"),
+        ("rtsp:http://user:secret@cam/x", "expected an rtsp"),
+    ],
+)
+def test_camera_sources_check_the_url_scheme(uri, msg):
+    with pytest.raises(ValueError, match=msg) as e:
+        make_source(uri)
     assert "secret" not in str(e.value)
