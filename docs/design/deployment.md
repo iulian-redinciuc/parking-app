@@ -191,7 +191,7 @@ Dev override (`docker-compose.dev.yml`): each service drops the GHCR `image` (`i
 
 Notes:
 - On one machine, workers reach the API at `http://api:8000/internal/*`, and the API reaches workers at `http://vision-occupancy:9000/control/*`. Both use `WORKER_TOKEN`.
-- Across machines (T2), see §9.
+- Across machines (T2), see §9. `docker-compose.server.yml` and `docker-compose.site.yml` are **standalone** files (not overrides of the base file): the server has `api` + `tunnel`, the lot box has the two workers without the `depends_on: api`. Both refuse to start without a pinned `PARKING_VERSION` and `VPN_BIND_IP`.
 - Workers need a route to the camera IPs. If Docker bridge routing can't reach the camera network, set `network_mode: host` on the vision services only.
 - CPU and memory limits come from `.env`, because they differ per machine.
 
@@ -302,3 +302,29 @@ Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-d
 - `/internal/*` therefore never crosses the public internet, and the public entry (§5) still forwards only `/api/*` and `/healthz`.
 - Workers keep their flow-event **outbox**, so a flaky lot connection loses nothing.
 - Video never leaves the site. Bandwidth is a few KB per minute.
+
+Chosen in P8.2: **WireGuard**, one tunnel just for this app (`wg0`, UDP 51820 on the server). The lot box dials out with a 25 s keepalive, so it works behind NAT/CGNAT (a 4G router) and needs no open port at the lot.
+
+| | Server (cloud VM) | Lot box (vision host) |
+|---|---|---|
+| VPN address (`VPN_BIND_IP`) | `10.77.0.1` | `10.77.0.2` |
+| Compose file | `docker-compose.server.yml` | `docker-compose.site.yml` |
+| Published on the VPN address | API `:8000` (also on `127.0.0.1` for the public entry) | occupancy worker `/control/*` `:9000`, flow worker `:9001` |
+| `.env` | `VPN_BIND_IP=10.77.0.1` | `VPN_BIND_IP=10.77.0.2`, `API_INTERNAL_URL=http://10.77.0.1:8000`, the server's `WORKER_TOKEN` |
+| `lot.yaml` | `control_url: http://10.77.0.2:9000` (`cam-ground`), `http://10.77.0.2:9001` (`cam-ramp`) | same file |
+
+Ports published by Docker bypass `ufw`, so the protection is the **bind address**: nothing is published on a public or LAN interface. Docker is ordered after `wg-quick@wg0` (a systemd drop-in) so the VPN address exists when the containers start at boot.
+
+## 10. Provisioning the production machines (T2)
+
+Two scripts in `deploy/scripts/`, run on the production machine itself (never on the dev Pi). The step-by-step is in the [phase guide, P8.2](../phases/phase-8-hardening.md#p82-provision-the-production-machines).
+
+- **`provision.sh server|site`** (with `sudo`; Debian 12+, 64-bit Raspberry Pi OS, Ubuntu 24.04+; safe to re-run; `DRY_RUN=1` only prints):
+  - `unattended-upgrades` on (security updates daily, Raspberry Pi archive included, reboot at 04:00 when a kernel update needs it);
+  - Docker Engine + the compose plugin from Docker's apt repository, started on boot;
+  - SSH with keys only (`/etc/ssh/sshd_config.d/00-parking.conf`; it stops before changing anything if the login user has no authorized key);
+  - `ufw`: deny inbound; allow SSH; server: also UDP 51820 (VPN) and, with `--public-proxy`, 80/443 for a reverse proxy (§5 Option B; a tunnel needs none); lot box: nothing else;
+  - WireGuard: a key pair per machine (`/etc/wireguard/parking.key`, never leaves it); the first run prints the public key, the second run with `--peer-key <other machine's key>` (lot box: also `--endpoint <server address>`) writes `wg0.conf` and enables it;
+  - `/opt/parking/{deploy,config,models,data}` (`config`, `data`, `models` owned by uid 1000, the containers' user); `--version v0.x.y` copies that release's `deploy/` and `config/` there without overwriting existing config files.
+- **`prod-env.sh server|site`** (`PARKING_VERSION=v0.x.y` required): writes a new `deploy/.env` (mode 600) from `.env.example`, never overwrites one, never prints a secret. `server` generates a fresh `WORKER_TOKEN`, `ADMIN_TOKEN` and VAPID key pair (from the released API image); `site` takes the server's `WORKER_TOKEN` from the environment and leaves the API's secrets empty. It lists what is still to fill in by hand (lot location, camera URLs, admin password hash, public origins).
+- **Server VM:** any provider's small x86-64 or ARM64 VM that meets [hardware.md §4.3](hardware.md#43-production-api-server-topologies-t2t3), with a public IPv4 address.

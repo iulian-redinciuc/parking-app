@@ -65,6 +65,7 @@ Pick by measuring: record clips from the real cameras (P5.2), then run `parking 
 
 ### 4.3 Production API server (topologies T2/T3)
 - **T2:** a small cloud VM or any always-on server: 1–2 vCPU, 1–2 GB RAM, ~20 GB disk, Linux with Docker. The API doesn't run AI, so it needs very little.
+- **Chosen in P8.2 (to order):** a small shared-CPU cloud VM in an EU region, **2 vCPU / 2–4 GB RAM / ≥ 20 GB SSD, a public IPv4 address, Debian 12** (e.g. Hetzner Cloud's smallest shared instance, CX22 class; DigitalOcean, OVH or Scaleway equivalents are fine; x86-64 or ARM64, the images exist for both). Check the current price (a few euros a month). Set up with `deploy/scripts/provision.sh server` ([deployment.md §10](deployment.md#10-provisioning-the-production-machines-t2)).
 - **T3:** a VM big enough to also run vision for every camera (benchmark first), or one with a GPU.
 
 ### 4.4 Site extras (T1/T2)

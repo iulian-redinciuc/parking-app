@@ -243,6 +243,7 @@ Git-ignored. One row per count during the drift test (P5.11): ISO time (no offse
 | `TUNNEL_TOKEN` | from the Cloudflare dashboard | cloudflared |
 | `LOG_LEVEL` | `INFO` | all |
 | `PARKING_VERSION` | `latest` (dev) or `v0.x.y` (pinned in production) | compose (image tag) |
+| `VPN_BIND_IP` | empty (dev); T2 production: this machine's own VPN address, `10.77.0.1` on the server, `10.77.0.2` on the lot box | compose (`docker-compose.server.yml` / `docker-compose.site.yml` publish the API / the workers' control ports on it; [deployment.md §9](deployment.md#9-workers-and-api-on-different-machines-t2)) |
 | `VISION_CPUS`, `FLOW_CPUS` | `1.0`, `1.5` | compose (worker CPU limits, per machine; [deployment.md §4](deployment.md#4-compose-deploy)) |
 
 Frontend build-time variables (not secrets, because they end up in public JS; set per build: preview or production):

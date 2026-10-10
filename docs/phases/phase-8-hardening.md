@@ -41,6 +41,33 @@ docker pull ghcr.io/iulian-redinciuc/parking-vision:v0.1.0
 4. On the vision host: `parking models export --runtime <runtime for this machine>` ([vision.md §11](../design/vision.md#11-runtimes-and-performance)).
 5. **Re-measure on production hardware:** `parking benchmark`, `parking evaluate` on the validation set, `parking evaluate-flow` on the test clips. Re-tune `imgsz`, thresholds and CPU limits in the production config if the numbers differ from the dev Pi. Record them in PROGRESS.md → Metrics, labelled "production".
 
+**Commands (T2, chosen in P4.1).** Scripts and addresses: [deployment.md §9–§10](../design/deployment.md#10-provisioning-the-production-machines-t2). On each machine, logged in with an SSH key:
+```bash
+# both machines (server = the cloud VM, site = the Pi at the lot); the first run prints the WireGuard public key
+curl -fsSLO https://raw.githubusercontent.com/iulian-redinciuc/parking-app/v0.x.y/deploy/scripts/provision.sh
+sudo bash provision.sh server --version v0.x.y                      # on the lot box: site
+sudo bash provision.sh server --version v0.x.y --peer-key <site key>
+sudo bash provision.sh site --version v0.x.y --peer-key <server key> --endpoint <server public IP>
+ping -c 3 10.77.0.1                                                 # from the lot box: the VPN is up
+
+# server: new secrets, then the API
+cd /opt/parking/deploy
+PARKING_VERSION=v0.x.y scripts/prod-env.sh server                   # then fill in what it lists
+PARKING_VERSION=v0.x.y docker compose -f docker-compose.server.yml up -d
+curl -fsS http://127.0.0.1:8000/healthz
+
+# lot box: the server's WORKER_TOKEN, the same lot.yaml (control_url → http://10.77.0.2:9000 / :9001), camera URLs
+cd /opt/parking/deploy
+PARKING_VERSION=v0.x.y WORKER_TOKEN=<from the server's .env> scripts/prod-env.sh site
+P="docker run --rm --env-file .env -v /opt/parking/config:/app/config -v /opt/parking/data:/app/data -v /opt/parking/models:/app/models -w /app --entrypoint /app/backend/.venv/bin/parking ghcr.io/iulian-redinciuc/parking-vision:v0.x.y"
+$P models export --model yolo11n --imgsz 640 --runtime ncnn --out models        # step 4 (the runtime for this machine)
+$P benchmark --image data/reference/cam-ground.jpg --camera cam-ground --out data/benchmarks   # step 5
+$P evaluate --camera cam-ground --images data/validation/cam-ground             # P4.8's validation set, ≥ 97%
+$P evaluate-flow --video data/recordings/<clip>.mp4 --camera cam-ramp           # P5.9's clips, ≥ 98%; fps as in P5.10
+PARKING_VERSION=v0.x.y docker compose -f docker-compose.site.yml --profile flow up -d
+```
+The API server runs no AI, so step 5 is measured on the lot box only; on the server check `docker stats parking-api` (the load test is P8.10).
+
 **Done when:** `PARKING_VERSION=<tag> docker compose up -d` runs on the production machine(s), and accuracy and speed meet the targets on that hardware.
 
 ## P8.3: Production public entry and frontend hosting

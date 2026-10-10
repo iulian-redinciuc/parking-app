@@ -1,0 +1,49 @@
+# T2 lot box (vision host): vision workers only. Spec: docs/design/deployment.md §4, §9
+#   cd /opt/parking/deploy                       # .env from scripts/prod-env.sh site
+#   PARKING_VERSION=v0.x.y docker compose -f docker-compose.site.yml up -d
+# Entry/exit camera (Phase 5): add  --profile flow
+# Workers send results to the API over the private VPN (API_INTERNAL_URL=http://<server-vpn-address>:8000)
+# and the API reaches their /control/* at this machine's VPN address: occupancy on port 9000, flow on
+# 9001 (cameras[].control_url in the server's lot.yaml). Nothing is published on the LAN or the internet.
+# Published ports bypass ufw: the bind address is the protection.
+name: parking
+
+x-worker: &worker
+  image: ghcr.io/iulian-redinciuc/parking-vision:${PARKING_VERSION:?set PARKING_VERSION to a release tag (v0.x.y)}
+  env_file: .env
+  restart: unless-stopped
+  volumes:
+    - ../config:/app/config
+    - ../data:/app/data
+    - ../models:/app/models:ro
+  networks: [egress]                                           # the cameras and the VPN
+  environment:
+    OMP_NUM_THREADS: "2"
+    API_INTERNAL_URL: "${API_INTERNAL_URL:?set API_INTERNAL_URL to http://<server-vpn-address>:8000}"
+  healthcheck:                                                 # the /control/* server is up
+    test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 60s
+    start_interval: 2s
+  logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+services:
+  vision-occupancy:
+    <<: *worker
+    container_name: parking-vision-occupancy
+    command: ["occupancy", "--camera", "cam-ground"]
+    ports: ["${VPN_BIND_IP:?set VPN_BIND_IP to this machine's VPN address}:9000:9000"]
+    deploy: { resources: { limits: { cpus: "${VISION_CPUS:-1.0}", memory: 1200M } } }
+
+  vision-flow:
+    <<: *worker
+    container_name: parking-vision-flow
+    command: ["flow", "--camera", "cam-ramp"]
+    profiles: ["flow"]                                         # enabled from Phase 5
+    ports: ["${VPN_BIND_IP:?set VPN_BIND_IP to this machine's VPN address}:9001:9000"]
+    deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: 1200M } } }
+
+networks:
+  egress: {}

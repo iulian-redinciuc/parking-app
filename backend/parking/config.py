@@ -471,6 +471,7 @@ class Settings(BaseSettings):
     tunnel_token: SecretStr | None = None
     log_level: str = "INFO"
     parking_version: str = "latest"
+    vpn_bind_ip: str | None = None
     vision_cpus: float | None = None
     flow_cpus: float | None = None
 

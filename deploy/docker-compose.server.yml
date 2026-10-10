@@ -1,0 +1,46 @@
+# T2 production server (cloud VM): API + public entry only. Spec: docs/design/deployment.md §4, §9
+#   cd /opt/parking/deploy                       # .env from scripts/prod-env.sh server
+#   PARKING_VERSION=v0.x.y docker compose -f docker-compose.server.yml up -d
+# The workers at the lot reach the API over the private VPN at http://${VPN_BIND_IP}:8000, so the API
+# is published on loopback (for the reverse proxy / checks) and on this machine's VPN address only,
+# never on the public interface. Published ports bypass ufw: the bind address is the protection.
+# Public entry (deployment.md §5, chosen in P8.3): add  --profile public  for the Cloudflare tunnel.
+name: parking
+
+services:
+  api:
+    container_name: parking-api
+    image: ghcr.io/iulian-redinciuc/parking-api:${PARKING_VERSION:?set PARKING_VERSION to a release tag (v0.x.y)}
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - ../config:/app/config
+      - ../data:/app/data
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-8000}:8000"                # loopback only
+      - "${VPN_BIND_IP:?set VPN_BIND_IP to this machine's VPN address}:8000:8000"   # workers, over the VPN
+    networks: [internal, egress]                               # egress: Web Push
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+  tunnel:
+    container_name: parking-tunnel
+    image: cloudflare/cloudflared:2026.10.0
+    command: tunnel --no-autoupdate run
+    environment: { TUNNEL_TOKEN: "${TUNNEL_TOKEN:-}" }
+    restart: unless-stopped
+    networks: [internal, egress]                               # internal: reach api:8000
+    profiles: ["public"]
+    depends_on:
+      api: { condition: service_healthy }
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+networks:
+  internal: { internal: true }
+  egress: {}
