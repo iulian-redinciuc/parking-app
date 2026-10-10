@@ -141,6 +141,15 @@ docker compose run --rm vision-flow flow --camera cam-ramp --print --control-por
 2. If fps drops below 8 while cars pass, or the CPU runs hot: try a smaller ROI or `imgsz=480` first. If still short, add the accelerator that fits that machine: an **AI HAT+** with a `HailoDetector` on a Pi, or a faster runtime / GPU elsewhere. The `Detector` protocol keeps this a contained change.
 3. The dev Pi's numbers are only a worst-case reference. Record the vision host's numbers and the decision.
 
+How to measure (on the vision host, from the repo root; set `cam-ramp`'s `source` to `video:data/recordings/<busiest clip>.mp4?realtime=true&loop=true` in a copy of lot.yaml):
+```bash
+docker compose -f deploy/docker-compose.yml --profile flow up -d   # API + occupancy + flow workers on their usual CPU limits
+python3 backend/scripts/soak.py sample --out out/perf/sample.jsonl --interval 10 --duration 900 \
+  --containers parking-api,parking-vision-occupancy,parking-vision-flow &   # temperature, throttling, per-container CPU
+docker compose -f deploy/docker-compose.yml logs -f vision-flow | grep '"fps"'   # health every 10 s: fps, inference_ms_avg, gate_active_ratio
+```
+Read fps from the health lines with a high `gate_active_ratio` (cars passing). If the flow container sits at its `FLOW_CPUS` limit (1.5 by default), try `FLOW_CPUS=2` before anything else. For a 480 px model: `parking models export --model yolo11n --imgsz 480 --runtime ncnn`, then check that its accuracy holds with `parking evaluate-flow` on the P5.9 clips. The dev Pi reference (2026-10-10, synthetic clip): 8.9 fps median, 7.5 at worst at 640; 9.6 / 8.4 at 480 (PROGRESS.md → Metrics).
+
 **Done when:** the decision is recorded with numbers.
 
 ## P5.11: Live week drift test
