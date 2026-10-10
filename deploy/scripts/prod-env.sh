@@ -2,8 +2,10 @@
 # Create a NEW production deploy/.env with fresh secrets (never the dev tokens, keys or passwords).
 # Spec: docs/design/config.md §5, deployment.md §9, §10 · Guide: docs/phases/phase-8-hardening.md P8.2
 #
-#   PARKING_VERSION=v0.x.y ./prod-env.sh server                      # on the cloud VM: new WORKER_TOKEN,
-#                                                                    # ADMIN_TOKEN and VAPID keys
+#   PARKING_VERSION=v0.x.y PUBLIC_HOST=<hostname> ./prod-env.sh server   # on the cloud VM: new WORKER_TOKEN,
+#                                                                    # ADMIN_TOKEN and VAPID keys; PUBLIC_HOST
+#                                                                    # (optional here) also sets CORS_ORIGINS
+#                                                                    # and PUBLIC_APP_URL (deployment.md §5-§6)
 #   PARKING_VERSION=v0.x.y WORKER_TOKEN=<the server's> ./prod-env.sh site   # on the lot box
 #
 # Writes ../.env next to the compose files (ENV_FILE=<path> for another place), mode 600, and never
@@ -50,9 +52,18 @@ if [ "$ROLE" = server ]; then
     [ -n "$value" ] || die "no $name in the output of: ${cli[*]} push vapid-keys"
     set_var "$name" "$value"
   done
-  todo="LOT_LAT / LOT_LON, CORS_ORIGINS and PUBLIC_APP_URL (P8.3), VAPID_SUBJECT,
+  public="PUBLIC_HOST, CORS_ORIGINS and PUBLIC_APP_URL (P8.3), "
+  if [ -n "${PUBLIC_HOST:-}" ]; then
+    [[ "$PUBLIC_HOST" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ && "$PUBLIC_HOST" == *.* ]] \
+      || die "PUBLIC_HOST must be a bare hostname (no https://, port or path): $PUBLIC_HOST"
+    set_var PUBLIC_HOST "$PUBLIC_HOST"
+    set_var CORS_ORIGINS "https://$PUBLIC_HOST"
+    set_var PUBLIC_APP_URL "https://$PUBLIC_HOST/"
+    public=
+  fi
+  todo="LOT_LAT / LOT_LON, ${public}VAPID_SUBJECT,
   ADMIN_PASSWORD_HASH (${cli[*]} admin hash-password; with docker add -it),
-  TUNNEL_TOKEN (only for a Cloudflare tunnel, P8.3)"
+  TUNNEL_TOKEN (only for a Cloudflare tunnel instead of parking-web, P8.3)"
 else
   [[ "${WORKER_TOKEN:-}" =~ ^[0-9a-f]{64}$ ]] || die "set WORKER_TOKEN to the value in the server's .env (64 hex characters)"
   set_var VPN_BIND_IP "$VPN_SITE_IP"

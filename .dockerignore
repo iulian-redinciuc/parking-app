@@ -1,4 +1,5 @@
-# Docker build context = the repo root (backend/Dockerfile copies backend/ only).
+# Docker build context = the repo root (backend/Dockerfile copies backend/ only; frontend/Dockerfile
+# copies frontend/, tools/slot-editor/ and deploy/Caddyfile).
 # Keep private data, local venvs and caches out of the images and the context.
 *
 !backend/
@@ -8,3 +9,14 @@ backend/.ruff_cache/
 backend/.coverage
 **/__pycache__/
 backend/tests/
+!frontend/
+frontend/node_modules/
+frontend/dist/
+frontend/.lighthouseci/
+frontend/.env*
+!tools/
+tools/*
+!tools/slot-editor/
+!deploy/
+deploy/*
+!deploy/Caddyfile

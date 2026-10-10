@@ -30,7 +30,7 @@ A mobile-friendly web app that shows **how many parking spaces are free, in real
 | Machine | Iulian's **Raspberry Pi 5** (8 GB, ARM64, CPU only) | **The cloud or another Raspberry Pi** (exact setup chosen before real cameras go in, Phase 4); deployed in Phase 8 |
 | Purpose | Build and test everything; run the still-image, replay-feed and recorded-clip tests | Run the real system for real users |
 | Rules | The app is **isolated** from everything else on the Pi: own containers, networks and data; nothing existing is used or changed ([deployment.md §1](docs/design/deployment.md#1-development-on-the-raspberry-pi)) | Its own dedicated environment |
-| Frontend | **Preview** on GitHub Pages: https://iulian-redinciuc.github.io/parking-app/ | Production web hosting decided in Phase 8 (it can stay on Pages or move) |
+| Frontend | **Preview** on GitHub Pages: https://iulian-redinciuc.github.io/parking-app/ | Served by the production server's reverse proxy, same origin as the API (chosen in P8.3, [deployment.md §6](docs/design/deployment.md#6-frontend-hosting)) |
 
 Because production is undecided, the design is **portable**:
 - Docker images are built for both **x86-64** (normal PCs, servers, cloud) and **ARM64** (Pi-class boards), so the same release runs anywhere with Docker.
@@ -62,7 +62,7 @@ Full detail: [architecture.md](docs/design/architecture.md).
 | Backend | **FastAPI**, SSE, SQLite + Alembic, APScheduler, pywebpush | Async, simple, one language with vision |
 | Worker → API | **Plain HTTP** with a worker token; private Docker network on one machine, VPN between machines; no message broker | Simplest option that works on one machine or several |
 | Frontend | **Vite + React + TS + Tailwind + vite-plugin-pwa**, HashRouter, i18next | Large ecosystem; static build that any web host can serve |
-| Hosting | **Dev:** API on the Pi; frontend preview on GitHub Pages. **Production:** to be chosen (Phase 8) | Keep options open until the production location is known |
+| Hosting | **Dev:** API on the Pi; frontend preview on GitHub Pages. **Production:** Caddy on the cloud server: HTTPS, the API and the frontend on one origin (P8.3) | One public listener and one certificate; no extra hosting account |
 | Packaging | **Docker Compose** + **multi-arch images** (amd64 + arm64) published to GitHub's container registry | The same release runs on the dev Pi and on any production machine |
 | Optional | A hardware AI accelerator for the flow camera (e.g. an AI HAT+ on a production Pi) | Only if needed |
 

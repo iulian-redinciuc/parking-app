@@ -145,12 +145,55 @@ def _compose(name: str) -> dict:
 def test_server_compose_publishes_the_api_on_loopback_and_vpn_only():
     compose = _compose("docker-compose.server.yml")
     assert compose["name"] == "parking"
-    assert set(compose["services"]) == {"api", "tunnel"}
+    assert set(compose["services"]) == {"api", "web", "tunnel"}
     ports = compose["services"]["api"]["ports"]
     assert len(ports) == 2
     assert ports[0].startswith("127.0.0.1:") and ports[1].startswith("${VPN_BIND_IP:?")
     assert compose["services"]["tunnel"]["profiles"] == ["public"]
     assert "ports" not in compose["services"]["tunnel"]
+
+
+def test_server_compose_web_is_the_only_public_listener():
+    compose = _compose("docker-compose.server.yml")
+    web = compose["services"]["web"]
+    assert web["profiles"] == ["web"]
+    assert web["image"].endswith("/parking-web:${PARKING_VERSION}")
+    assert web["ports"] == ["80:80", "443:443", "443:443/udp"]
+    assert "caddy-data:/data" in web["volumes"] and "caddy-data" in compose["volumes"]
+    # the API trusts X-Forwarded-For only from the internal network the proxy is on
+    subnet = compose["networks"]["internal"]["ipam"]["config"][0]["subnet"]
+    allowed = compose["services"]["api"]["environment"]["FORWARDED_ALLOW_IPS"]
+    assert subnet == "${INTERNAL_SUBNET:-172.31.77.0/24}"
+    assert allowed == "${FORWARDED_ALLOW_IPS:-172.31.77.0/24}"
+
+
+def test_caddyfile_forwards_only_api_and_healthz():
+    caddyfile = (DEPLOY / "Caddyfile").read_text()
+    assert "@api path /api/* /healthz\n" in caddyfile
+    assert caddyfile.count("reverse_proxy") == 1
+    assert "flush_interval -1" in caddyfile  # SSE
+    assert "{$PUBLIC_HOST:localhost} {" in caddyfile
+    for private in ("/internal", "/control", "/docs"):
+        assert private not in "".join(
+            ln for ln in caddyfile.splitlines() if not ln.strip().startswith("#")
+        )
+
+
+def test_prod_env_server_public_host_sets_the_origins(tmp_path):
+    r = _prod_env(tmp_path, "server", PARKING_VERSION="v0.1.0", PUBLIC_HOST="203-0-113-7.sslip.io")
+    assert r.returncode == 0, r.stderr
+    env = _read_env(tmp_path / ".env")
+    assert env["PUBLIC_HOST"] == "203-0-113-7.sslip.io"
+    assert env["CORS_ORIGINS"] == "https://203-0-113-7.sslip.io"
+    assert env["PUBLIC_APP_URL"] == "https://203-0-113-7.sslip.io/"
+    assert "CORS_ORIGINS" not in r.stdout
+
+
+@pytest.mark.parametrize("host", ["https://parking.example.org", "parking.example.org/", "nodots"])
+def test_prod_env_refuses_a_public_host_that_is_not_a_hostname(tmp_path, host):
+    r = _prod_env(tmp_path, "server", PARKING_VERSION="v0.1.0", PUBLIC_HOST=host)
+    assert r.returncode == 1 and "PUBLIC_HOST" in r.stderr
+    assert not (tmp_path / ".env").exists()
 
 
 def test_site_compose_has_only_the_workers_on_the_vpn_address():

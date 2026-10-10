@@ -1,6 +1,6 @@
 # Release pipeline (P8.1). Spec: docs/design/deployment.md §2 (multi-arch) and §8 (releases)
 #   git tag v0.x.y && git push origin v0.x.y
-# builds the api and vision images for amd64 + arm64, pushes them to GHCR as :v0.x.y (and :latest),
+# builds the api, vision and web images for amd64 + arm64, pushes them to GHCR as :v0.x.y (and :latest),
 # pulls and starts them on an x86 and an ARM runner, then publishes the GitHub release with notes
 # from the commit messages. "Run workflow" (workflow_dispatch) only builds: nothing is pushed.
 # No CUDA variant: the chosen production vision host is a Raspberry Pi (deployment.md §2).
@@ -31,7 +31,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [api, vision]
+        include:
+          - { target: api, file: backend/Dockerfile }
+          - { target: vision, file: backend/Dockerfile }
+          - { target: web, file: frontend/Dockerfile }       # Caddy + the built frontend (P8.3)
     steps:
       - uses: actions/checkout@v4
       - name: Tag matches the backend version
@@ -66,7 +69,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: backend/Dockerfile
+          file: ${{ matrix.file }}
           target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
           push: ${{ github.ref_type == 'tag' }}
@@ -94,7 +97,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pull and start both images
+      - name: Pull and start the images
         run: |
           for target in api vision; do
             image="$IMAGE_PREFIX-$target:$GITHUB_REF_NAME"
@@ -103,6 +106,12 @@ jobs:
             [ "$arch" = "${{ matrix.arch }}" ] || { echo "::error::$image is $arch"; exit 1; }
             docker run --rm --entrypoint /app/backend/.venv/bin/parking "$image" --version
           done
+          image="$IMAGE_PREFIX-web:$GITHUB_REF_NAME"
+          docker pull "$image"
+          arch=$(docker image inspect --format '{{.Architecture}}' "$image")
+          [ "$arch" = "${{ matrix.arch }}" ] || { echo "::error::$image is $arch"; exit 1; }
+          docker run --rm "$image" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker run --rm "$image" test -s /srv/index.html
           # the ML stack loads on this CPU type
           docker run --rm --entrypoint /app/backend/.venv/bin/python "$IMAGE_PREFIX-vision:$GITHUB_REF_NAME" \
             -c "import torch, ultralytics, ncnn, onnxruntime, cv2; print('torch', torch.__version__)"

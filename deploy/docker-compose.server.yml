@@ -4,7 +4,10 @@
 # The workers at the lot reach the API over the private VPN at http://${VPN_BIND_IP}:8000, so the API
 # is published on loopback (for the reverse proxy / checks) and on this machine's VPN address only,
 # never on the public interface. Published ports bypass ufw: the bind address is the protection.
-# Public entry (deployment.md §5, chosen in P8.3): add  --profile public  for the Cloudflare tunnel.
+# Public entry + frontend (deployment.md §5 Option B, §6; chosen in P8.3): add  --profile web  for
+# parking-web (Caddy: HTTPS for PUBLIC_HOST, /api/* + /healthz -> the API, the rest = the frontend);
+# needs 80/443 open (provision.sh server --public-proxy). Alternative for a machine without a public
+# address:  --profile public  for the Cloudflare tunnel (API only, frontend hosted elsewhere).
 name: parking
 
 services:
@@ -12,6 +15,9 @@ services:
     container_name: parking-api
     image: ghcr.io/iulian-redinciuc/parking-api:${PARKING_VERSION:?set PARKING_VERSION to a release tag (v0.x.y)}
     env_file: .env
+    environment:
+      # trust X-Forwarded-For from the proxy/tunnel containers only (rate limits are per client IP)
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.31.77.0/24}
     restart: unless-stopped
     volumes:
       - ../config:/app/config
@@ -29,6 +35,31 @@ services:
       start_interval: 2s
     logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
 
+  web:
+    container_name: parking-web
+    image: ghcr.io/iulian-redinciuc/parking-web:${PARKING_VERSION}
+    environment:
+      PUBLIC_HOST: "${PUBLIC_HOST:-}"
+    restart: unless-stopped
+    ports:
+      - "80:80"                                                # certificate challenge + redirect to HTTPS
+      - "443:443"
+      - "443:443/udp"                                          # HTTP/3
+    volumes:
+      - caddy-data:/data                                       # certificates: keep them across updates
+      - caddy-config:/config
+    networks: [internal, egress]                               # internal: reach api:8000; egress: Let's Encrypt
+    profiles: ["web"]
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "443"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
   tunnel:
     container_name: parking-tunnel
     image: cloudflare/cloudflared:2026.10.0
@@ -42,5 +73,11 @@ services:
     logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
 
 networks:
-  internal: { internal: true }
+  internal:
+    internal: true
+    ipam: { config: [{ subnet: "${INTERNAL_SUBNET:-172.31.77.0/24}" }] }   # fixed: FORWARDED_ALLOW_IPS
   egress: {}
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}

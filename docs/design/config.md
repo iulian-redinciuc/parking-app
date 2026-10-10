@@ -231,8 +231,8 @@ Git-ignored. One row per count during the drift test (P5.11): ISO time (no offse
 | `API_HOST_PORT` | `8000` (bound to 127.0.0.1 only) | compose |
 | `CAM_GROUND_SNAPSHOT_URL`, `CAM_GROUND_RTSP_URL` | `http://user:pass@10.0.20.11/...` | occupancy worker |
 | `CAM_RAMP_RTSP_URL` | `rtsp://user:pass@10.0.20.12:554/sub` | flow worker |
-| `CORS_ORIGINS` | dev: `https://iulian-redinciuc.github.io`; prod: the production frontend origin | API |
-| `PUBLIC_APP_URL` | dev: `https://iulian-redinciuc.github.io/parking-app/`; prod: the production frontend URL | API (notification links) |
+| `CORS_ORIGINS` | dev: `https://iulian-redinciuc.github.io`; prod: the production frontend origin, `https://<PUBLIC_HOST>` | API |
+| `PUBLIC_APP_URL` | dev: `https://iulian-redinciuc.github.io/parking-app/`; prod: the production frontend URL, `https://<PUBLIC_HOST>/` | API (notification links) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | from `parking push vapid-keys` | API |
 | `VAPID_SUBJECT` | `mailto:you@example.com` | API |
 | `ADMIN_PASSWORD_HASH` | from `parking admin hash-password` (prints the line in single quotes so Compose and dotenv keep the `$`s) | API |
@@ -240,6 +240,7 @@ Git-ignored. One row per count during the drift test (P5.11): ISO time (no offse
 | `DEBUG_CAPTURE` | `false` (save frames + observations to `data/debug/`, [vision.md §6.1](vision.md#61-debug-frame-capture-parkingworkersdebug_capturepy)) | workers |
 | `DEBUG_CAPTURE_EVERY_MIN` | `10` (periodic capture interval; slot flips are captured too) | workers |
 | `DEBUG_RETENTION_HOURS` | `24` (captures older than this are deleted, even with capture off) | workers |
+| `PUBLIC_HOST` | empty (dev); production: the app's public hostname, a domain whose A record points at the server or `<server IPv4 with dashes>.sslip.io` | compose (`parking-web`: Caddy's site name and certificate; [deployment.md §5](deployment.md#5-public-access-for-the-api)) |
 | `TUNNEL_TOKEN` | from the Cloudflare dashboard | cloudflared |
 | `LOG_LEVEL` | `INFO` | all |
 | `PARKING_VERSION` | `latest` (dev) or `v0.x.y` (pinned in production) | compose (image tag) |

@@ -77,6 +77,25 @@ The API server runs no AI, so step 5 is measured on the lot box only; on the ser
 3. Production `CORS_ORIGINS`, `PUBLIC_APP_URL`, and **production VAPID keys**. Push subscriptions made against the preview don't carry over: testers re-enable notifications once.
 4. Keep the GitHub Pages preview pointed at the dev API (or `mock`) for future testing.
 
+**Chosen (P8.3):** Caddy on the cloud VM (`parking-web`, Option B) as the one public listener, also serving the frontend at the same origin; hostname = a domain if there is one, otherwise `<VM IPv4 with dashes>.sslip.io`. Details: [deployment.md §5 Option B](../design/deployment.md#option-b-reverse-proxy-on-a-machine-with-a-public-ip-t2t3-server), [§6](../design/deployment.md#6-frontend-hosting).
+
+**Files:** `deploy/Caddyfile`, `frontend/Dockerfile` (image `parking-web`), `deploy/docker-compose.server.yml` (service `web`, profile `web`), `deploy/scripts/prod-env.sh` (`PUBLIC_HOST`), `release.yml` / `ci.yml` (the image).
+
+**Commands** (on the server, after P8.2; needs a release that has the `parking-web` image, i.e. a tag after `v0.1.0`):
+```bash
+sudo bash provision.sh server --public-proxy                  # opens 80, 443/tcp, 443/udp
+cd /opt/parking/deploy
+# new .env: add PUBLIC_HOST to P8.2's command; an existing .env: set PUBLIC_HOST, CORS_ORIGINS, PUBLIC_APP_URL by hand
+PARKING_VERSION=v0.x.y PUBLIC_HOST=203-0-113-7.sslip.io scripts/prod-env.sh server    # or parking.<your domain>
+docker compose -f docker-compose.server.yml --profile web up -d
+docker compose -f docker-compose.server.yml logs -f web      # "certificate obtained successfully"
+H=https://203-0-113-7.sslip.io
+curl -fsS $H/healthz && curl -fsS $H/api/status | head -c 200
+curl -s -o /dev/null -w '%{http_code}\n' $H/internal/observations   # 404
+curl -sN --max-time 5 $H/api/stream | head -n 5               # events arrive at once
+```
+Then on a phone over mobile data: open `https://<PUBLIC_HOST>/`, install it, enable notifications, *Send test notification* ([notifications.md §6.2](../design/notifications.md#62-how-to-run-it-on-a-phone)). The VAPID keys are the production ones `prod-env.sh` generated (step 3). The Pages preview stays on the dev API / `mock` (step 4, nothing to change).
+
 **Done when:** the production URL works on a phone over mobile data, and push works from production.
 
 ## P8.4: Compose hardening

@@ -59,7 +59,8 @@ USER 1000:1000
 ENTRYPOINT ["/app/backend/.venv/bin/parking", "worker"]
 ```
 
-- The build context is the repo root; `.dockerignore` lets in only `backend/` (minus `.venv`, caches and `tests/`), so `data/`, `models/` and `deploy/.env` never reach an image.
+- The build context is the repo root; `.dockerignore` lets in only `backend/` (minus `.venv`, caches and `tests/`) and, for the web image, `frontend/` (minus `node_modules`, `dist`, `.env*`), `tools/slot-editor/` and `deploy/Caddyfile`, so `data/`, `models/` and `deploy/.env` never reach an image.
+- **web** image (`frontend/Dockerfile`, P8.3): a `node:22-alpine` stage builds the frontend with `VITE_BASE=/` and an empty `VITE_API_BASE` (same origin as the API), then `caddy:2.11-alpine` gets the built files in `/srv` and `deploy/Caddyfile` ([§5 Option B](#option-b-reverse-proxy-on-a-machine-with-a-public-ip-t2t3-server)). Nothing about a hostname is built in: `PUBLIC_HOST` is read when the container starts. Released as `ghcr.io/iulian-redinciuc/parking-web:<version>` from the first tag after `v0.1.0`; CI builds it on both CPU types when the frontend or the Caddyfile changes (job `web-image`).
 - The working directory is `/app`, so the default `config/lot.yaml` and the relative paths in it resolve against the mounted `/app/config`, `/app/data` and `/app/models`. Containers run as uid 1000 (the owner of the repo folders on the dev Pi).
 - The **api** image stays small (no PyTorch). Only **vision** carries the ML stack (expect ~2 GB).
 - **Multi-arch:** CI builds every image for `linux/amd64` **and** `linux/arm64` with `docker buildx`, so the same version runs on the dev Pi and on any production machine. On pushes and PRs that touch `backend/`, CI only builds them (the `images` job in `ci.yml`: each CPU type on its own native runner, then `parking --version` in the image) to catch "works on ARM, breaks on x86" early. On a release tag (`v*`), `release.yml` builds both platforms in one go (QEMU) and pushes them to **GitHub Container Registry**: `ghcr.io/iulian-redinciuc/parking-api:<version>` and `parking-vision:<version>` (`<version>` is the tag, e.g. `v0.1.0`; `:latest` moves with every full release). Details in [§8](#8-releases-and-updating).
@@ -96,7 +97,7 @@ Files:
 | `docker-compose.yml` | Base definition (all services, using released images from GHCR) |
 | `docker-compose.dev.yml` | Dev Pi: builds images locally, mounts source for quick iteration |
 | `docker-compose.site.yml` | T2 lot box: vision services only, `API_INTERNAL_URL` = the API's VPN address |
-| `docker-compose.server.yml` | T2 server: API + public entry only |
+| `docker-compose.server.yml` | T2 server: API + public entry only (`--profile web`: `parking-web`, Caddy + the frontend; or `--profile public`: the Cloudflare tunnel) |
 
 Base file (abridged):
 ```yaml
@@ -218,22 +219,29 @@ No account, no domain, no token: cloudflared asks Cloudflare for a random `https
 - The address isn't a secret (it is built into the public preview's JavaScript); what protects the API is the same as in production: the path rule, the tokens and the rate limits.
 
 ### Option B: reverse proxy on a machine with a public IP (T2/T3 server)
-A `parking-caddy` container (Caddy obtains HTTPS certificates automatically):
+**Chosen for production in P8.3** (the T2 server is a cloud VM with a public IPv4 address, so no Cloudflare account or tunnel is needed). A `parking-web` container (image `parking-web`, [§2](#2-docker-images-backenddockerfile-multi-stage); Caddy obtains and renews HTTPS certificates automatically) is the one public listener, and it also serves the frontend ([§6](#6-frontend-hosting)). `deploy/Caddyfile`, abridged:
 ```
-<api-host> {
-  @public path /api/* /healthz
-  handle @public { reverse_proxy api:8000 { flush_interval -1 } }   # -1: stream SSE immediately
-  handle { respond 404 }
+{$PUBLIC_HOST:localhost} {
+  @api path /api/* /healthz
+  handle @api { reverse_proxy api:8000 { flush_interval -1 } }   # -1: stream SSE immediately
+  handle { root * /srv; file_server }                             # the frontend; unknown paths: 404
 }
 ```
-Open ports 80/443 on that server's firewall only.
+- Only `/api/*` and `/healthz` have a route to the API. `/internal/*`, `/control/*`, `/docs` and everything else end in the file server and get a 404.
+- **`PUBLIC_HOST`** (`.env`) is the public hostname. Either a domain or subdomain whose DNS **A record** points at the server, or, **without a domain**, `<server IPv4 with dashes>.sslip.io` (e.g. `203-0-113-7.sslip.io`; sslip.io is a free public DNS service that answers with the address in the name, and Let's Encrypt issues certificates for such names). Moving to a real domain later = change `PUBLIC_HOST`, `CORS_ORIGINS`, `PUBLIC_APP_URL` and restart; push subscriptions and home-screen installs belong to the origin, so users install and enable notifications again once.
+- `docker compose -f docker-compose.server.yml --profile web up -d`. Ports 80, 443/tcp and 443/udp (HTTP/3) are published; open them with `provision.sh server --public-proxy` ([§10](#10-provisioning-the-production-machines-t2)). Certificates live in the `parking_caddy-data` volume: keep it across updates (Let's Encrypt limits how often a name can get a new certificate).
+- Headers: HSTS, `X-Content-Type-Options: nosniff`; `Cache-Control: no-cache` for `/`, `index.html`, `sw.js`, `registerSW.js` and the manifest (a new release reaches installed apps on the next load), one year `immutable` for the hashed `/assets/*`.
+- **Client IP:** the API's rate limits are per client IP, so uvicorn must take it from the proxy's `X-Forwarded-For`. `docker-compose.server.yml` gives the `internal` network a fixed subnet (`INTERNAL_SUBNET`, default `172.31.77.0/24`) and sets uvicorn's `FORWARDED_ALLOW_IPS` to it for the API: the header is trusted only from containers on that network (Caddy or cloudflared), not from the VPN or loopback.
+- Checked on the dev Pi (P8.3, the image on a loopback port in front of the dev API, `PUBLIC_HOST=localhost` = Caddy's own test certificate): `/`, `/sw.js`, the manifest, `/healthz`, `/api/status` 200; `/internal/*`, `/control/*`, `/docs`, `/openapi.json` 404; `/api/stream` delivers its first event at once. The real certificate and a phone over mobile data need the production server.
 
 ## 6. Frontend hosting
 
 | Stage | Where | Build settings |
 |-------|-------|----------------|
 | **Preview** (development, now) | GitHub Pages: `https://iulian-redinciuc.github.io/parking-app/` | `VITE_BASE=/parking-app/`, `VITE_API_BASE` = dev API URL or `mock` |
-| **Production** (decided in Phase 8) | Options: keep GitHub Pages (custom domain possible); any static host (Cloudflare Pages, Netlify); or the production reverse proxy serving the built files (same origin as the API, so no CORS needed) | `VITE_BASE` and `VITE_API_BASE` for that host |
+| **Production** (chosen in P8.3) | **The production reverse proxy**: `parking-web` serves the built files at `https://<PUBLIC_HOST>/`, the same origin as the API (no CORS preflights, one certificate, the frontend and the API are always the same release). The other options stay possible: GitHub Pages with a custom domain, or any static host (Cloudflare Pages, Netlify) | `VITE_BASE=/`, `VITE_API_BASE=` (empty = same origin), set in `frontend/Dockerfile`; another host builds with its own values |
+
+The GitHub Pages preview is unchanged by production: it keeps building from `main` with the repository variable `API_BASE` (the dev API or `mock`). `CORS_ORIGINS` on the production server is only `https://<PUBLIC_HOST>` (the preview is not allowed to call the production API).
 
 The build is host-agnostic: `HashRouter` needs no server rewrite rules, and the base path and API URL are build variables.
 
@@ -280,8 +288,8 @@ Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-d
 ## 8. Releases and updating
 
 - **Release:** set `version` in `backend/pyproject.toml` (and `uv lock`) if it changed, then `git tag v0.x.y && git push origin v0.x.y` → `.github/workflows/release.yml`:
-  1. **images**: checks that the tag matches the backend version (`v0.1.0` or `v0.1.0-rc1` ↔ `0.1.0`), then builds `api` and `vision` for `linux/amd64,linux/arm64` (QEMU + buildx) and pushes `ghcr.io/iulian-redinciuc/parking-api:<tag>` and `parking-vision:<tag>`. `:latest` is moved too, except for pre-release tags (a `-` in the tag).
-  2. **verify**: on an x86 runner and on an ARM runner, `docker pull` both images, check the architecture, run `parking --version`, and import the ML stack in the vision image.
+  1. **images**: checks that the tag matches the backend version (`v0.1.0` or `v0.1.0-rc1` ↔ `0.1.0`), then builds `api`, `vision` and (after `v0.1.0`) `web` for `linux/amd64,linux/arm64` (QEMU + buildx) and pushes `ghcr.io/iulian-redinciuc/parking-api:<tag>`, `parking-vision:<tag>` and `parking-web:<tag>`. `:latest` is moved too, except for pre-release tags (a `-` in the tag).
+  2. **verify**: on an x86 runner and on an ARM runner, `docker pull` both images, check the architecture, run `parking --version`, and import the ML stack in the vision image; for `web`, `caddy validate` and the frontend's `index.html`.
   3. **release**: publishes the GitHub release with notes from the commit messages since the previous `v*` tag, grouped by the phase in the task ID (`deploy/scripts/release-notes.sh <tag>`; the first release lists the whole history). Pre-release tags are marked as pre-releases.
   *Run workflow* on the Actions page (`workflow_dispatch`) is a dry run: it builds both platforms and pushes nothing.
 - **Pulling:** both packages are **public** (linked to this public repo), so `docker pull` / `docker compose pull` need no login on any machine. `docker buildx imagetools inspect ghcr.io/iulian-redinciuc/parking-api:<tag>` lists the platforms (the extra `unknown/unknown` entries are the build attestations).
@@ -291,6 +299,7 @@ Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-d
   cd /opt/parking/deploy                       # a checkout of the repo's deploy/ + config/ on that machine
   PARKING_VERSION=v0.x.y docker compose pull
   PARKING_VERSION=v0.x.y docker compose --profile public --profile flow up -d
+  # T2: -f docker-compose.server.yml --profile web  on the server, -f docker-compose.site.yml --profile flow  on the lot box
   docker compose logs -f --tail=100 api
   ```
 - Migrations run automatically at API start-up. **Roll back** by deploying the previous version (and restore the DB if a migration wasn't backwards compatible).
@@ -326,5 +335,5 @@ Two scripts in `deploy/scripts/`, run on the production machine itself (never on
   - `ufw`: deny inbound; allow SSH; server: also UDP 51820 (VPN) and, with `--public-proxy`, 80/443 for a reverse proxy (§5 Option B; a tunnel needs none); lot box: nothing else;
   - WireGuard: a key pair per machine (`/etc/wireguard/parking.key`, never leaves it); the first run prints the public key, the second run with `--peer-key <other machine's key>` (lot box: also `--endpoint <server address>`) writes `wg0.conf` and enables it;
   - `/opt/parking/{deploy,config,models,data}` (`config`, `data`, `models` owned by uid 1000, the containers' user); `--version v0.x.y` copies that release's `deploy/` and `config/` there without overwriting existing config files.
-- **`prod-env.sh server|site`** (`PARKING_VERSION=v0.x.y` required): writes a new `deploy/.env` (mode 600) from `.env.example`, never overwrites one, never prints a secret. `server` generates a fresh `WORKER_TOKEN`, `ADMIN_TOKEN` and VAPID key pair (from the released API image); `site` takes the server's `WORKER_TOKEN` from the environment and leaves the API's secrets empty. It lists what is still to fill in by hand (lot location, camera URLs, admin password hash, public origins).
+- **`prod-env.sh server|site`** (`PARKING_VERSION=v0.x.y` required): writes a new `deploy/.env` (mode 600) from `.env.example`, never overwrites one, never prints a secret. `server` generates a fresh `WORKER_TOKEN`, `ADMIN_TOKEN` and VAPID key pair (from the released API image) and, given `PUBLIC_HOST=<hostname>`, sets `PUBLIC_HOST`, `CORS_ORIGINS=https://<hostname>` and `PUBLIC_APP_URL=https://<hostname>/`; `site` takes the server's `WORKER_TOKEN` from the environment and leaves the API's secrets empty. It lists what is still to fill in by hand (lot location, camera URLs, admin password hash, public origins).
 - **Server VM:** any provider's small x86-64 or ARM64 VM that meets [hardware.md §4.3](hardware.md#43-production-api-server-topologies-t2t3), with a public IPv4 address.
