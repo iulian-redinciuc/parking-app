@@ -12,6 +12,11 @@
 - `rtsp:<rtsp url>`: a reader thread decodes the stream and keeps only the newest frame
   (older ones are overwritten, never queued); `read()` returns it, or `None` when it's older
   than 5 s. The fallback for occupancy, and the flow camera's live source.
+- `device:/dev/video0?width=3840&height=2160&fourcc=MJPG&fps=1`: a camera plugged into this
+  machine (USB/UVC webcam, anything V4L2), opened with OpenCV's V4L2 backend. Latest frame and
+  reconnects as for `rtsp:`; with `fps`, only that many frames per second are decoded.
+- `picamera:0?width=4608&height=2592&fps=2&focus=0`: a Raspberry Pi camera module (libcamera),
+  read as MJPEG from an `rpicam-vid` process. Latest frame and reconnects as for `rtsp:`.
 - `video:<path>?realtime=true&loop=false`: a recording (P5.2). `realtime=true` plays at the
   file's native fps like a live camera (`read()` waits for the next frame and skips frames the
   caller was too slow for); `realtime=false` returns every frame as fast as it's read, for
@@ -20,17 +25,24 @@
 `read()` returns `None` when no frame could be read (missing or unreadable file, camera
 unreachable); the caller reports that as `connect_failed` (vision.md §5). The camera sources
 reconnect with exponential backoff (1, 2, 4 … 60 s) and never log the URL (it holds the
-camera's credentials).
+camera's credentials). `device:` and `picamera:` log why an attempt failed (device missing,
+no permission, busy, no camera detected) and keep it in `last_error`.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
+import re
+import select
+import shutil
+import subprocess
 import threading
 import time
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol, runtime_checkable
@@ -51,6 +63,10 @@ RTSP_TIMEOUT_MS = 5000  # open and read timeouts of the FFmpeg capture
 RTSP_CAPTURE_OPTIONS = "rtsp_transport;tcp|timeout;5000000|fflags;nobuffer|flags;low_delay"
 FPS_WINDOW_S = 5.0  # `fps` = frames per second over this many recent seconds
 VIDEO_DEFAULT_FPS = 10.0  # when a file doesn't say (or says something absurd)
+PICAMERA_DEFAULT_FPS = 2.0  # `picamera:` without `fps`: plenty for occupancy, little CPU
+PICAMERA_TIMEOUT_S = 10.0  # no JPEG from rpicam-vid for this long = a failed read
+PICAMERA_JPEG_QUALITY = 90  # rpicam-vid's MJPEG default is 50
+RPICAM_BINARIES = ("rpicam-vid", "libcamera-vid")  # the second: Raspberry Pi OS before 2024
 
 
 class Frame(NamedTuple):
@@ -342,10 +358,15 @@ def _open_video(path: str) -> Any:
     return _capture_with_options(None, path, cv2.CAP_FFMPEG)
 
 
-class RtspSource:
-    """`rtsp:` — a reader thread keeps only the newest decoded frame (a lock + one slot).
+class CaptureError(Exception):
+    """Why a plugged-in camera couldn't be opened; the text is safe to log (no credentials)."""
 
-    The thread reads as fast as the stream delivers, so frames never queue up behind a slow
+
+class LiveSource:
+    """A live camera on a reader thread that keeps only the newest decoded frame (a lock + one
+    slot); the base of `rtsp:`, `device:` and `picamera:`.
+
+    The thread reads as fast as the camera delivers, so frames never queue up behind a slow
     caller: a frame the caller didn't read before the next one arrived is overwritten and
     counted in `dropped`. `fps` is the decode rate over the last 5 s. The thread starts on the
     first `read()`. When opening or reading fails, the capture is released and reopened after
@@ -353,26 +374,26 @@ class RtspSource:
     """
 
     replay = False
+    label = "rtsp"  # the log prefix and the reader thread's name
 
     def __init__(
         self,
-        url: str,
+        target: Any,
+        open_capture: Callable[[Any], Any],
         max_age: float = RTSP_MAX_AGE_S,
-        open_capture: Callable[[str], Any] = _open_capture,
         backoff: Backoff | None = None,
         clock: Callable[[], float] = time.monotonic,
     ):
-        if urlsplit(url).scheme not in ("rtsp", "rtsps"):
-            raise ValueError("rtsp source: expected an rtsp:// URL")
-        self.url = url
         self.max_age = max_age
         self.clock = clock
         self.backoff = backoff or Backoff(clock=clock)
         self.connected = False
+        self.last_error: str | None = None  # why the latest attempt failed, when that's known
         self.reconnects = 0  # captures reopened after a failure
         self.frames = 0  # frames decoded by the reader thread (= the newest frame's seq)
         self.dropped = 0  # frames overwritten before any read() returned them
         self._meter = RateMeter(clock=clock)
+        self._target = target
         self._open = open_capture
         self._lock = threading.Lock()
         # image, ts, clock time, seq
@@ -384,7 +405,9 @@ class RtspSource:
     def read(self) -> Frame | None:
         alive = self._thread is not None and self._thread.is_alive()
         if not alive and not self._stop.is_set():  # first read, or the thread crashed
-            self._thread = threading.Thread(target=self._run, name="rtsp-reader", daemon=True)
+            self._thread = threading.Thread(
+                target=self._run, name=f"{self.label}-reader", daemon=True
+            )
             self._thread.start()
         with self._lock:
             latest = self._latest
@@ -408,6 +431,12 @@ class RtspSource:
 
     # --- reader thread ---
 
+    def _next(self, cap: Any) -> tuple[bool, np.ndarray | None]:
+        """The camera's next frame: (False, None) = the read failed, (True, None) = a frame
+        arrived but was skipped."""
+        ok, img = cap.read()
+        return (True, img) if ok and img is not None else (False, None)
+
     def _run(self) -> None:
         cap = None
         try:
@@ -416,13 +445,16 @@ class RtspSource:
                     cap = self._connect()
                     if cap is None:
                         continue
-                ok, img = cap.read()
-                if not ok or img is None:
-                    log.warning("rtsp: stream read failed, reconnecting")
+                ok, img = self._next(cap)
+                if not ok:
+                    log.warning("%s: stream read failed, reconnecting", self.label)
+                    reason = getattr(cap, "error", None)  # an rpicam process says why it died
                     cap.release()
                     cap = None
                     self.connected = False
-                    self._fail()
+                    self._fail(reason)
+                    continue
+                if img is None:
                     continue
                 with self._lock:
                     if self._latest is not None and self._latest[3] > self._returned:
@@ -430,40 +462,314 @@ class RtspSource:
                     self.frames += 1
                     self._latest = (img, _now(), self.clock(), self.frames)
                 self._meter.tick()
+                self.last_error = None
                 if self.backoff.failures:
-                    log.info("rtsp: camera back after %d failed attempt(s)", self.backoff.failures)
+                    log.info(
+                        "%s: camera back after %d failed attempt(s)",
+                        self.label,
+                        self.backoff.failures,
+                    )
                     self.backoff.succeeded()
         except Exception:
-            log.exception("rtsp: reader thread crashed")
+            log.exception("%s: reader thread crashed", self.label)
         finally:
             if cap is not None:
                 cap.release()
             self.connected = False
 
     def _connect(self) -> Any:
-        """One attempt to open the stream (after the backoff wait); None on failure."""
+        """One attempt to open the camera (after the backoff wait); None on failure."""
         wait = self.backoff.next_at - self.clock()
         if wait > 0 and self._stop.wait(wait):
             return None
         if self.backoff.failures or self.frames:
             self.reconnects += 1
-        log.info("rtsp: connecting (attempt %d)", self.backoff.failures + 1)
+        log.info("%s: connecting (attempt %d)", self.label, self.backoff.failures + 1)
+        reason = None
         try:
-            cap = self._open(self.url)
-        except Exception as e:  # don't log the URL: it holds the credentials
-            log.warning("rtsp: open raised %s", type(e).__name__)
+            cap = self._open(self._target)
+        except CaptureError as e:
+            reason = str(e)
+            cap = None
+        except Exception as e:  # don't log the text: an rtsp URL holds the credentials
+            log.warning("%s: open raised %s", self.label, type(e).__name__)
             cap = None
         if cap is None or not cap.isOpened():
             if cap is not None:
                 cap.release()
-            self._fail()
+            self._fail(reason)
             return None
         self.connected = True
         return cap
 
-    def _fail(self) -> None:
+    def _fail(self, reason: str | None = None) -> None:
+        self.last_error = reason
         delay = self.backoff.failed()
-        log.warning("rtsp: attempt %d failed, next try in %g s", self.backoff.failures, delay)
+        log.warning(
+            "%s: attempt %d failed%s, next try in %g s",
+            self.label,
+            self.backoff.failures,
+            f" ({reason})" if reason else "",
+            delay,
+        )
+
+
+class RtspSource(LiveSource):
+    """`rtsp:` — a network camera's stream through FFmpeg (see `LiveSource`)."""
+
+    def __init__(
+        self,
+        url: str,
+        max_age: float = RTSP_MAX_AGE_S,
+        open_capture: Callable[[str], Any] = _open_capture,
+        backoff: Backoff | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        if urlsplit(url).scheme not in ("rtsp", "rtsps"):
+            raise ValueError("rtsp source: expected an rtsp:// URL")
+        super().__init__(url, open_capture, max_age=max_age, backoff=backoff, clock=clock)
+        self.url = url
+
+
+@dataclass(frozen=True)
+class DeviceSettings:
+    """What a `device:` URI asks of a V4L2 camera (None = the camera's default)."""
+
+    device: str | int  # `/dev/video0` (or a stable `/dev/v4l/by-id/…` link), or an index
+    width: int | None = None
+    height: int | None = None
+    fourcc: str | None = None  # e.g. MJPG: webcams only reach high resolutions compressed
+    fps: float | None = None
+
+
+def _open_device(settings: DeviceSettings) -> Any:
+    """Open a V4L2 camera and apply the settings; `CaptureError` says what's wrong."""
+    dev = settings.device
+    if isinstance(dev, str):
+        if not os.path.exists(dev):
+            raise CaptureError(
+                f"{dev} not found: is the camera plugged in (and passed to the container)?"
+            )
+        if not os.access(dev, os.R_OK | os.W_OK):
+            raise CaptureError(f"no permission for {dev}: the user must be in the 'video' group")
+    cap = cv2.VideoCapture(dev, cv2.CAP_V4L2)
+    if not cap.isOpened():
+        cap.release()
+        name = dev if isinstance(dev, str) else f"camera {dev}"
+        raise CaptureError(
+            f"can't open {name}: busy (another program is using it) or not a capture device"
+        )
+    # the pixel format first: the sizes a camera offers depend on it
+    if settings.fourcc:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*settings.fourcc))
+    if settings.width:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.width)
+    if settings.height:
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.height)
+    if settings.fps:
+        cap.set(cv2.CAP_PROP_FPS, settings.fps)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # the driver's queue: don't hand out old frames
+    got = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+    asked = (settings.width or got[0], settings.height or got[1])
+    if got != asked:  # a camera silently picks its nearest mode
+        log.warning("device: asked for %dx%d, the camera gives %dx%d", *asked, *got)
+    return cap
+
+
+class DeviceSource(LiveSource):
+    """`device:` — a camera plugged into this machine (USB/UVC, anything V4L2).
+
+    As `rtsp:` (newest frame only, reconnects with backoff), plus: with `fps`, the camera is
+    asked for that rate and at most that many frames per second are **decoded**; the others
+    are taken off the driver's queue and thrown away undecoded, because a webcam that only
+    offers 30 fps at 4K would otherwise keep a CPU core busy decoding frames nobody reads.
+    """
+
+    label = "device"
+
+    def __init__(
+        self,
+        settings: DeviceSettings,
+        max_age: float = RTSP_MAX_AGE_S,
+        open_capture: Callable[[DeviceSettings], Any] = _open_device,
+        backoff: Backoff | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        # between decoded frames the newest one is up to 1/fps old
+        max_age = max(max_age, 3 / settings.fps) if settings.fps else max_age
+        super().__init__(settings, open_capture, max_age=max_age, backoff=backoff, clock=clock)
+        self.settings = settings
+        self._decoded_at: float | None = None
+
+    def _next(self, cap: Any) -> tuple[bool, np.ndarray | None]:
+        if not cap.grab():
+            return False, None
+        now = self.clock()
+        fps = self.settings.fps
+        # 0.75: a camera that does deliver at `fps` must not lose every other frame to jitter
+        if fps and self._decoded_at is not None and now - self._decoded_at < 0.75 / fps:
+            return True, None
+        ok, img = cap.retrieve()
+        if not ok or img is None:
+            return False, None
+        self._decoded_at = now
+        return True, img
+
+
+@dataclass(frozen=True)
+class PicameraSettings:
+    """What a `picamera:` URI asks of a Raspberry Pi camera module."""
+
+    camera: int = 0  # index in `rpicam-hello --list-cameras`
+    width: int | None = None  # None = the sensor mode rpicam-vid picks (not full resolution)
+    height: int | None = None
+    fps: float = PICAMERA_DEFAULT_FPS
+    focus: float | None = None  # fixed lens position in dioptres (0 = infinity); None = autofocus
+    rotation: int = 0  # 0 or 180
+
+    def command(self, binary: str) -> list[str]:
+        cmd = [binary, "--camera", str(self.camera), "--timeout", "0", "--nopreview"]
+        cmd += ["--codec", "mjpeg", "--quality", str(PICAMERA_JPEG_QUALITY)]
+        cmd += ["--framerate", f"{self.fps:g}", "--flush", "--output", "-"]
+        if self.width:
+            cmd += ["--width", str(self.width)]
+        if self.height:
+            cmd += ["--height", str(self.height)]
+        if self.focus is not None:
+            cmd += ["--autofocus-mode", "manual", "--lens-position", f"{self.focus:g}"]
+        if self.rotation:
+            cmd += ["--rotation", str(self.rotation)]
+        return cmd
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_SOI, _EOI = b"\xff\xd8", b"\xff\xd9"  # a JPEG's first and last two bytes
+
+
+class RpicamCapture:
+    """An `rpicam-vid` process writing MJPEG to its stdout, with the part of `cv2.VideoCapture`
+    that `LiveSource` uses. The process keeps exposure, white balance and focus settled between
+    frames, which a new `rpicam-still` per sample would not."""
+
+    def __init__(
+        self,
+        cmd: list[str],
+        timeout: float = PICAMERA_TIMEOUT_S,
+        popen: Callable[..., Any] = subprocess.Popen,
+    ):
+        self.timeout = timeout
+        self._proc = popen(
+            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0
+        )
+        self._buf = bytearray()
+        self._scanned = 0  # bytes of _buf already searched for the end marker
+        self._jpeg: bytes | None = None
+        self._errors: deque[str] = deque(maxlen=20)
+        self._drain = threading.Thread(target=self._read_stderr, name="rpicam-stderr", daemon=True)
+        self._drain.start()
+
+    def _read_stderr(self) -> None:
+        for raw in self._proc.stderr:  # until the process closes it
+            line = _ANSI.sub("", raw.decode(errors="replace")).strip()
+            if line:
+                self._errors.append(line)
+
+    @property
+    def error(self) -> str | None:
+        """rpicam's own words for what went wrong (its last ERROR line, or its last line)."""
+        self._drain.join(timeout=0.5)  # a process that just died: let its last lines arrive
+        lines = list(self._errors)
+        for line in reversed(lines):
+            if "error" in line.lower() or "failed" in line.lower():
+                return line.removeprefix("ERROR: ").strip("* ")
+        return lines[-1] if lines else None
+
+    def isOpened(self) -> bool:  # noqa: N802 (OpenCV's name)
+        return self._proc.poll() is None
+
+    def grab(self) -> bool:
+        """Read up to the end of the next JPEG; False on end of stream or after `timeout`."""
+        fd = self._proc.stdout.fileno()
+        deadline = time.monotonic() + self.timeout
+        while True:
+            end = self._buf.find(_EOI, self._scanned)
+            if end >= 0:
+                start = self._buf.find(_SOI)
+                self._jpeg = bytes(self._buf[start : end + 2]) if 0 <= start < end else None
+                del self._buf[: end + 2]
+                self._scanned = 0
+                if self._jpeg is not None:
+                    return True
+                continue  # an end without a start (joined mid-frame): look for the next one
+            self._scanned = max(0, len(self._buf) - 1)  # the marker may straddle two reads
+            wait = deadline - time.monotonic()
+            if wait <= 0 or not select.select([fd], [], [], wait)[0]:
+                return False
+            chunk = os.read(fd, 1 << 20)
+            if not chunk:
+                return False  # the process closed its output
+            self._buf += chunk
+
+    def retrieve(self) -> tuple[bool, np.ndarray | None]:
+        if self._jpeg is None:
+            return False, None
+        img = cv2.imdecode(np.frombuffer(self._jpeg, np.uint8), cv2.IMREAD_COLOR)
+        self._jpeg = None
+        return img is not None, img
+
+    def read(self) -> tuple[bool, np.ndarray | None]:
+        return self.retrieve() if self.grab() else (False, None)
+
+    def release(self) -> None:
+        if self._proc.poll() is None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+                self._proc.wait(timeout=3)
+        for pipe in (self._proc.stdout, self._proc.stderr):
+            with contextlib.suppress(OSError):
+                pipe.close()
+
+
+def _open_picamera(settings: PicameraSettings) -> Any:
+    """Start rpicam-vid and wait for its first frame; `CaptureError` says what's wrong."""
+    binary = next((b for b in map(shutil.which, RPICAM_BINARIES) if b), None)
+    if binary is None:
+        raise CaptureError(
+            "rpicam-vid not found: install rpicam-apps (Raspberry Pi OS), or use the "
+            "vision-picamera image in Docker"
+        )
+    try:
+        cap = RpicamCapture(settings.command(binary))
+    except OSError as e:
+        raise CaptureError(f"can't start {binary}: {e.strerror}") from None
+    if not cap.grab():  # also how a missing camera shows: rpicam-vid says so and exits 0
+        reason = cap.error or f"no frame within {cap.timeout:g} s"
+        cap.release()
+        raise CaptureError(f"rpicam-vid: {reason}")
+    return cap
+
+
+class PicameraSource(LiveSource):
+    """`picamera:` — a Raspberry Pi camera module, which libcamera drives (it is not a plain
+    V4L2 capture device, so `device:` can't open it). As `rtsp:`: newest frame only, the
+    `rpicam-vid` process is restarted with backoff when it dies or goes quiet."""
+
+    label = "picamera"
+
+    def __init__(
+        self,
+        settings: PicameraSettings,
+        max_age: float = RTSP_MAX_AGE_S,
+        open_capture: Callable[[PicameraSettings], Any] = _open_picamera,
+        backoff: Backoff | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        max_age = max(max_age, 3 / settings.fps)
+        super().__init__(settings, open_capture, max_age=max_age, backoff=backoff, clock=clock)
+        self.settings = settings
 
 
 class VideoFileSource:
@@ -607,6 +913,54 @@ def _options(uri: str, query: str, allowed: set[str]) -> dict[str, str]:
     return params
 
 
+def _number(params: dict[str, str], key: str, cast: type = int, least: float = 1) -> Any:
+    """An optional numeric option, at least `least`; None when it isn't given."""
+    if key not in params:
+        return None
+    try:
+        value = cast(params[key])
+    except ValueError:
+        raise ValueError(f"{key} must be a number") from None
+    if not value >= least or value == float("inf"):  # also NaN
+        raise ValueError(f"{key} must be ≥ {least:g}")
+    return value
+
+
+def _device_settings(target: str, params: dict[str, str]) -> DeviceSettings:
+    if target.isdigit():
+        device: str | int = int(target)
+    elif target.startswith("/dev/"):
+        device = target
+    else:
+        raise ValueError("expected a /dev/… path or a camera index")
+    fourcc = params.get("fourcc")
+    if fourcc is not None and (len(fourcc) != 4 or not fourcc.isascii()):
+        raise ValueError("fourcc must be 4 characters, e.g. MJPG")
+    return DeviceSettings(
+        device,
+        width=_number(params, "width"),
+        height=_number(params, "height"),
+        fourcc=fourcc,
+        fps=_number(params, "fps", float, 0.01),
+    )
+
+
+def _picamera_settings(target: str, params: dict[str, str]) -> PicameraSettings:
+    if not target.isdigit():
+        raise ValueError("expected a camera index (0 = the first camera)")
+    rotation = _number(params, "rotation", int, 0) or 0
+    if rotation not in (0, 180):
+        raise ValueError("rotation must be 0 or 180")
+    return PicameraSettings(
+        int(target),
+        width=_number(params, "width"),
+        height=_number(params, "height"),
+        fps=_number(params, "fps", float, 0.01) or PICAMERA_DEFAULT_FPS,
+        focus=_number(params, "focus", float, 0),
+        rotation=rotation,
+    )
+
+
 def make_source(uri: str, root: Path | None = None) -> FrameSource:
     """Build the source for a `scheme:rest` URI. Relative paths resolve against `root`."""
     scheme, sep, rest = uri.partition(":")
@@ -629,6 +983,17 @@ def make_source(uri: str, root: Path | None = None) -> FrameSource:
         return SnapshotSource(rest)
     if scheme == "rtsp":
         return RtspSource(rest)
+    if scheme in ("device", "picamera"):
+        target, _, query = rest.partition("?")
+        allowed = {"width", "height", "fps"}
+        allowed |= {"fourcc"} if scheme == "device" else {"focus", "rotation"}
+        params = _options(uri, query, allowed)
+        try:
+            if scheme == "device":
+                return DeviceSource(_device_settings(target, params))
+            return PicameraSource(_picamera_settings(target, params))
+        except ValueError as e:
+            raise ValueError(f"source {uri!r}: {e}") from None
     if scheme == "video":
         path, _, query = rest.partition("?")
         params = _options(uri, query, {"realtime", "loop"})
@@ -641,4 +1006,6 @@ def make_source(uri: str, root: Path | None = None) -> FrameSource:
             raise ValueError("video source: expected a file path (use 'rtsp:' for streams)")
         return VideoFileSource(_resolve(path, root), realtime=realtime, loop=loop)
     # don't echo the URI: it may hold camera credentials
-    raise ValueError(f"unknown source scheme {scheme!r} (file, folder, snapshot, rtsp, video)")
+    raise ValueError(
+        f"unknown source scheme {scheme!r} (file, folder, snapshot, rtsp, device, picamera, video)"
+    )

@@ -484,6 +484,11 @@ class Settings(BaseSettings):
     web_cpus: float | None = None
     web_memory: str | None = None
     docker_gid: int | None = None
+    # a camera plugged into the vision host (docker-compose.device.yml / .picamera.yml)
+    camera_device: str | None = None
+    video_gid: int | None = None
+    media_major: int | None = None
+    dma_heap_major: int | None = None
     heartbeat_file: Path | None = None  # set by the vision image, not in .env
 
     @property

@@ -97,6 +97,8 @@ Files:
 | `docker-compose.yml` | Base definition (all services, using released images from GHCR) |
 | `docker-compose.dev.yml` | Dev Pi: builds images locally, mounts source for quick iteration |
 | `docker-compose.site.yml` | T2 lot box: vision services and `autoheal` only, `API_INTERNAL_URL` = the API's VPN address |
+| `docker-compose.device.yml` | Opt-in override (on the base or the site file): passes one USB camera to `vision-occupancy` (§4.3) |
+| `docker-compose.picamera.yml` + `Dockerfile.picamera` | Opt-in override (on the base or the site file): `vision-occupancy` with `rpicam-vid` and the Pi camera's device nodes (§4.3) |
 | `docker-compose.server.yml` | T2 server: API + public entry only (`--profile web`: `parking-web`, Caddy + the frontend; or `--profile public`: the Cloudflare tunnel) |
 
 Base file (abridged):
@@ -265,6 +267,38 @@ The Docker socket is root on the host for whoever can talk to it, so this is the
 **Restart count:** an autoheal restart doesn't raise Docker's own `RestartCount`. Every health message carries the worker process's `started_at`; the API counts a restart whenever a camera's value changes and shows it in `/healthz` as `restarts` ([api.md §2](api.md#2-public-rest-endpoints)), with a warning in its log.
 
 **Testing it:** `docker compose kill -s USR1 vision-occupancy` (or `vision-flow`). `SIGUSR1` makes the worker's main thread sleep forever inside the signal handler, so the loop stops wherever it was while the other threads go on, which is what a real hang looks like. `docker compose pause` doesn't count: a paused container can't be health-checked. Measured on the dev Pi: PROGRESS.md → Metrics.
+
+### 4.3 A camera plugged into the vision host (P4.12)
+
+The standalone box ([hardware.md §4.6](hardware.md#46-default-from-2026-10-10-standalone-box-no-access-to-the-lots-cameras-or-network)) has its camera on a USB or CSI port, not on the network, so the worker's container needs the device. That is **opt-in**: two override files that go on top of the base file (everything on one machine) or the site file (T2 lot box). Neither touches the §4.1 hardening: the worker stays read-only, uid 1000, without capabilities; it only gains the host's `video` group (`VIDEO_GID`, 44 on Debian and Raspberry Pi OS) and the devices below.
+
+| | USB camera (`device:`) | Raspberry Pi camera module (`picamera:`) |
+|---|---|---|
+| Override | `docker-compose.device.yml` | `docker-compose.picamera.yml` |
+| Image | the released `parking-vision` (OpenCV's wheel has V4L2) | `parking-vision-picamera`, **built on the box**: `Dockerfile.picamera` = the `parking-vision` image of `PARKING_VERSION` + `rpicam-apps-lite` from Raspberry Pi's package archive (signed). ARM64 only, never published. `PICAMERA_BASE` names another base image (the dev Pi's local `parking-vision-occupancy`) |
+| Devices | one: `devices: [CAMERA_DEVICE]` (default `/dev/video0`) | libcamera uses several video, media and DMA-heap nodes whose numbers differ per board and kernel, so the host's `/dev` and `/run/udev` (read-only) are mounted, and `device_cgroup_rules` admit only those three kinds: `c 81:*` (video4linux), `c MEDIA_MAJOR:*`, `c DMA_HEAP_MAJOR:*`. Everything else in `/dev` is refused by the cgroup or by file permissions (disks, serial ports, GPIO: checked on the dev Pi) |
+| `.env` | `CAMERA_DEVICE` (prefer the `/dev/v4l/by-id/…` link), `VIDEO_GID` | `VIDEO_GID`, `MEDIA_MAJOR`, `DMA_HEAP_MAJOR` (the file refuses to start without the last two) |
+| `config/lot.yaml` | `source: "device:/dev/video0?width=3840&height=2160&fourcc=MJPG&fps=1"` (the same path as `CAMERA_DEVICE`) | `source: "picamera:0?width=4608&height=2592&focus=0"` |
+
+```bash
+cd deploy          # /opt/parking/deploy on the lot box; there: -f docker-compose.site.yml instead of the base file
+# USB camera
+docker compose -f docker-compose.yml -f docker-compose.device.yml up -d
+# Raspberry Pi camera module
+printf 'MEDIA_MAJOR=%s\nDMA_HEAP_MAJOR=%s\n' "$(grep -w media /proc/devices | cut -d' ' -f1)" \
+  "$(grep -w dma_heap /proc/devices | cut -d' ' -f1)" >> .env
+docker compose -f docker-compose.yml -f docker-compose.picamera.yml up -d --build
+# one frame through the same container, before trusting the worker (out/ is git-ignored; never commit frames)
+docker compose -f docker-compose.yml -f docker-compose.picamera.yml run --rm --no-deps \
+  --entrypoint /app/backend/.venv/bin/parking vision-occupancy grab --camera cam-ground --out /app/data/grab.jpg --force
+docker compose logs -f vision-occupancy      # "picamera: connecting", then observations; or why not
+```
+
+Notes:
+- Keep the same `-f` pair in every later command (`pull`, `up`, `logs`), or the worker comes back without its camera. After an update of `PARKING_VERSION`, add `--build` again for the picamera image.
+- A USB camera's node must exist when the container starts (`up` fails with `error gathering device information` otherwise). Unplugged while running, the worker reports `connect_failed` and retries with backoff; if it doesn't come back after replugging (the node got another number), `docker compose … restart vision-occupancy`.
+- Without Docker (a quick try on a Pi): `uv run parking grab --camera cam-ground --source "picamera:0?width=4608&height=2592"` from `backend/`, with `rpicam-apps` installed and the user in the `video` group.
+- Not yet run against a real camera (none on the dev Pi): there, the container starts with both overrides, `rpicam-vid` runs inside it and answers `no cameras available`, and the worker logs exactly that and keeps retrying.
 
 ## 5. Public access for the API
 

@@ -1,0 +1,12 @@
+# The vision image + rpicam-vid, for a Raspberry Pi camera module (`picamera:` source, P4.12).
+# Built on the box by docker-compose.picamera.yml; ARM64 only. Spec: docs/design/deployment.md §4.3
+ARG BASE=ghcr.io/iulian-redinciuc/parking-vision:latest
+FROM ${BASE}
+USER root
+# rpicam-apps and its libcamera (with the Pi's camera tuning) come from Raspberry Pi's own archive
+ADD --chmod=644 https://archive.raspberrypi.com/debian/raspberrypi.gpg.key /etc/apt/keyrings/raspberrypi.asc
+RUN echo "deb [signed-by=/etc/apt/keyrings/raspberrypi.asc] https://archive.raspberrypi.com/debian/ bookworm main" \
+      > /etc/apt/sources.list.d/raspi.list \
+    && apt-get update && apt-get install -y --no-install-recommends rpicam-apps-lite \
+    && rm -rf /var/lib/apt/lists/*
+USER 1000:1000

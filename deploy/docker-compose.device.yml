@@ -1,0 +1,12 @@
+# Opt-in override: a USB camera plugged into this machine (`device:` source, P4.12).
+# Spec: docs/design/deployment.md §4.3
+#   camera source in config/lot.yaml:  device:/dev/video0?width=3840&height=2160&fourcc=MJPG&fps=1
+#   docker compose -f docker-compose.yml -f docker-compose.device.yml up -d              # one machine
+#   docker compose -f docker-compose.site.yml -f docker-compose.device.yml up -d         # lot box (T2)
+# The worker keeps the base file's hardening; it only gains this one device and the group that may read it.
+# CAMERA_DEVICE must exist when the container starts: use the stable /dev/v4l/by-id/... link if the box
+# has more than one video device.
+services:
+  vision-occupancy:
+    devices: ["${CAMERA_DEVICE:-/dev/video0}:${CAMERA_DEVICE:-/dev/video0}"]
+    group_add: ["${VIDEO_GID:-44}"]                            # the host's `video` group

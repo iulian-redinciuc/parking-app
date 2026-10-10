@@ -74,7 +74,7 @@ backend/
 │   │   ├── flow.py              # TwoLineCounter (per-track crossing state machine)
 │   │   ├── tracking.py          # wrapper around ByteTrack (via ultralytics)
 │   │   ├── motion.py            # MotionGate (MOG2)
-│   │   ├── sources.py           # FrameSource protocol + file/folder/snapshot/rtsp/video sources
+│   │   ├── sources.py           # FrameSource protocol + file/folder/snapshot/rtsp/device/picamera/video sources
 │   │   ├── recording.py         # `parking record` (FFmpeg stream copy) + `stream-check` fps stats
 │   │   ├── health.py            # black / frozen / blurry frame checks
 │   │   ├── shift.py             # camera shift detection vs reference frame (ORB)

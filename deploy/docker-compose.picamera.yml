@@ -1,0 +1,25 @@
+# Opt-in override: a Raspberry Pi camera module on this machine's CSI port (`picamera:` source, P4.12).
+# Spec: docs/design/deployment.md §4.3. Raspberry Pi (ARM64) only.
+#   camera source in config/lot.yaml:  picamera:0?width=4608&height=2592&focus=0
+#   docker compose -f docker-compose.yml -f docker-compose.picamera.yml up -d --build        # one machine
+#   docker compose -f docker-compose.site.yml -f docker-compose.picamera.yml up -d --build   # lot box (T2)
+# The image is the vision image + rpicam-vid (Dockerfile.picamera), built on the box, never published.
+# libcamera drives the camera through several video, media and DMA-heap device nodes whose numbers differ
+# per board and kernel, so the container sees the host's /dev, but its device cgroup only admits those
+# three kinds, and it stays uid 1000 with no capabilities (the base file's hardening): what it can open
+# is what the host's `video` group can.
+services:
+  vision-occupancy:
+    image: parking-vision-picamera:${PARKING_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.picamera
+      args: { BASE: "${PICAMERA_BASE:-ghcr.io/iulian-redinciuc/parking-vision:${PARKING_VERSION:-latest}}" }
+    group_add: ["${VIDEO_GID:-44}"]                            # the host's `video` group
+    volumes:
+      - /dev:/dev
+      - /run/udev:/run/udev:ro                                 # how libcamera finds the camera
+    device_cgroup_rules:
+      - "c 81:* rmw"                                           # video4linux (fixed number)
+      - "c ${MEDIA_MAJOR:?set MEDIA_MAJOR in .env (grep -w media /proc/devices | cut -d' ' -f1)}:* rmw"
+      - "c ${DMA_HEAP_MAJOR:?set DMA_HEAP_MAJOR in .env (grep -w dma_heap /proc/devices | cut -d' ' -f1)}:* rmw"

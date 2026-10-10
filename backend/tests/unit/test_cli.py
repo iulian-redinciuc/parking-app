@@ -434,5 +434,10 @@ def test_grab_errors(tmp_path, monkeypatch):
     assert res.exit_code == 1 and "no frame" in res.output
     res = CliRunner().invoke(app, [*args, "--source", "bogus:x"])
     assert res.exit_code == 1 and "unknown source scheme" in res.output
+    # a plugged-in camera that isn't there: the message says so (P4.12)
+    missing = "device:/dev/video-none"
+    res = CliRunner().invoke(app, [*args, "--source", missing, "--timeout", "0.5"])
+    assert res.exit_code == 1 and "no frame" in res.output
+    assert "not found: is the camera plugged in" in res.output
     res = CliRunner().invoke(app, ["grab", "--camera", "nope"])
     assert res.exit_code == 1 and "not in" in res.output

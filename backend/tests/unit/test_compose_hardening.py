@@ -210,3 +210,40 @@ def test_boot_check_fails_past_the_limit(tmp_path):
 
 def test_boot_check_usage(tmp_path):
     assert _boot_check(tmp_path, "everything").returncode == 2
+
+
+# --- a camera plugged into the vision host (P4.12, deployment.md §4.3) ---
+
+CAMERA_OVERRIDES = ["docker-compose.device.yml", "docker-compose.picamera.yml"]
+
+
+@pytest.mark.parametrize("file", CAMERA_OVERRIDES)
+def test_camera_overrides_keep_the_hardening(file):
+    services = _services(file)
+    assert list(services) == ["vision-occupancy"]  # opt-in, and only the worker that needs it
+    svc = services["vision-occupancy"]
+    assert svc["group_add"] == ["${VIDEO_GID:-44}"]
+    # nothing that would undo the base file's lock-down
+    assert not {"privileged", "cap_add", "user", "read_only", "security_opt", "cap_drop"} & set(svc)
+    assert "docker.sock" not in (DEPLOY / file).read_text()
+
+
+def test_device_override_passes_one_device():
+    svc = _services("docker-compose.device.yml")["vision-occupancy"]
+    assert svc["devices"] == ["${CAMERA_DEVICE:-/dev/video0}:${CAMERA_DEVICE:-/dev/video0}"]
+    assert "volumes" not in svc and "device_cgroup_rules" not in svc
+
+
+def test_picamera_override_admits_only_camera_device_kinds():
+    svc = _services("docker-compose.picamera.yml")["vision-occupancy"]
+    assert svc["volumes"] == ["/dev:/dev", "/run/udev:/run/udev:ro"]
+    rules = svc["device_cgroup_rules"]
+    assert rules[0] == "c 81:* rmw" and len(rules) == 3
+    assert rules[1].startswith("c ${MEDIA_MAJOR:?") and rules[2].startswith("c ${DMA_HEAP_MAJOR:?")
+    assert all("*:*" not in r and r.startswith("c ") for r in rules)
+    # its own image, built on the box on top of the released vision image
+    assert svc["image"].startswith("parking-vision-picamera:")
+    assert svc["build"]["dockerfile"] == "Dockerfile.picamera"
+    dockerfile = (DEPLOY / "Dockerfile.picamera").read_text()
+    assert "rpicam-apps-lite" in dockerfile and "signed-by=" in dockerfile
+    assert dockerfile.rstrip().endswith("USER 1000:1000")

@@ -844,7 +844,8 @@ def grab(
     finally:
         src.close()
     if frame is None:
-        _fail(f"no frame from '{camera}' within {timeout:g} s")
+        reason = getattr(src, "last_error", None)  # device:/picamera: say what's wrong
+        _fail(f"no frame from '{camera}' within {timeout:g} s" + (f": {reason}" if reason else ""))
 
     target.parent.mkdir(parents=True, exist_ok=True)
     if not cv2.imwrite(str(target), frame.image, [cv2.IMWRITE_JPEG_QUALITY, 95]):

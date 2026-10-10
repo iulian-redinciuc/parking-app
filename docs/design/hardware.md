@@ -99,6 +99,16 @@ The lot's existing cameras and the building's network can't be used. So the defa
 | Power | One mains socket | |
 | First try | An old phone at the window as a temporary camera (an IP-camera app gives `rtsp:`/`snapshot:` over the phone's own hotspot) | Costs nothing; proves the view before buying |
 
+**How the camera is read** (P4.12; formats in [config.md → Source URI formats](config.md#source-uri-formats), containers in [deployment.md §4.3](deployment.md#43-a-camera-plugged-into-the-vision-host-p412)):
+
+| Camera | `source` in `lot.yaml` | Notes | Tested |
+|--------|------------------------|-------|--------|
+| Raspberry Pi Camera Module 3 / 3 Wide (CSI ribbon cable) | `picamera:0?width=4608&height=2592&focus=0` | Full 12 MP at 2 frames a second (the default) through `rpicam-vid`. `focus=0` fixes the lens at infinity: behind glass, autofocus tends to lock onto the pane. Other Pi modules (HQ, v2, Module 3 NoIR) work the same way at their own resolutions; without autofocus, leave `focus` out | Not yet (no module on the dev Pi) |
+| 4K USB webcam (UVC) | `device:/dev/video0?width=3840&height=2160&fourcc=MJPG&fps=1` | `MJPG` is needed for 4K over USB; `fps=1` decodes one frame a second and throws the rest away undecoded. List what a camera offers with `v4l2-ctl -d /dev/video0 --list-formats-ext`; turn its autofocus off there too if it hunts (`v4l2-ctl -c focus_automatic_continuous=0 -c focus_absolute=0`) | Not yet (no webcam on the dev Pi) |
+| Old phone with an IP-camera app (first try) | `snapshot:http://…` or `rtsp:rtsp://…` | Already supported (P4.3) | With a local HTTP server and a mocked stream only |
+
+First check on the real box, before anything else: `parking grab --camera cam-ground --out out/grab.jpg` (it prints the frame's size, or why there is none: device missing, no permission, busy, no camera detected), then look at the picture: every space visible, in focus, no reflection of the room. Update the *Tested* column with the model and the resolution that worked.
+
 The PoE cameras of §4.5 stay the choice **if** wired access is ever granted. The underground level (Camera A at the ramp) has no window, so it waits for that access, or the app runs **ground level only** at first.
 
 **Permission is still needed** from the lot's owner / building management to film the car park, even from inside (security-privacy.md §4): the points in its favour are that nothing connects to their network, frames are processed in memory and never stored or sent, and only counts leave the box.

@@ -151,7 +151,7 @@ The code, the methods and the training script are in place (prepared while P4.9 
 **Done when:** 7 days with no unrecovered outage and no memory growth (`soak.py report` says `verdict: PASSED`, exit 0).
 
 ## P4.12: Camera plugged into the vision host (`device:` source)
-**Files:** `backend/parking/vision/sources.py`, `docs/design/config.md` (source formats), `docs/design/hardware.md`, tests
+**Files:** `backend/parking/vision/sources.py`, `deploy/docker-compose.device.yml`, `deploy/docker-compose.picamera.yml`, `deploy/Dockerfile.picamera`, `docs/design/config.md` (source formats), `docs/design/hardware.md`, `docs/design/deployment.md` §4.3, tests
 
 **Why:** the lot's existing cameras and the building's network are **not available** (2026-10-10 decision), so the default hardware is a **standalone box**: a Raspberry Pi with its own camera at a window overlooking the lot and its own mobile internet (hardware.md §4.6). That camera is not a network camera, so it needs its own source.
 
@@ -162,6 +162,16 @@ The code, the methods and the training script are in place (prepared while P4.9 
 4. hardware.md §4.6 and config.md updated with the formats and the tested cameras.
 
 **Done when:** tests pass and the docs say how to run the worker from a plugged-in camera. (The check on a real camera happens when the box exists; a USB webcam on the dev Pi is enough if one is ever plugged in.)
+
+**Implementation:** `LiveSource` (the reader thread `rtsp:` already had) with `RtspSource`, `DeviceSource` and `PicameraSource` on it; formats and options in [config.md → Source URI formats](../design/config.md#source-uri-formats). `picamera:` reads MJPEG from one long-running `rpicam-vid` (not `rpicam-still` per sample: exposure and focus stay settled). Containers: `deploy/docker-compose.device.yml` and `deploy/docker-compose.picamera.yml` + `deploy/Dockerfile.picamera`, [deployment.md §4.3](../design/deployment.md#43-a-camera-plugged-into-the-vision-host-p412). Tests: `tests/unit/test_device_sources.py` (fake V4L2 capture, a script standing in for `rpicam-vid`), `test_compose_hardening.py`.
+
+**When a camera is plugged in** (not done yet: there is none on the dev Pi):
+```bash
+cd backend
+uv run parking grab --camera cam-ground --source "device:/dev/video0?width=3840&height=2160&fourcc=MJPG" --out ../out/grab.jpg --force
+uv run parking grab --camera cam-ground --source "picamera:0?width=4608&height=2592&focus=0" --out ../out/grab.jpg --force
+```
+It prints the frame's size, or the reason there is none. Then set that URI as `cam-ground`'s `source` in `config/lot.yaml`, start the worker with the matching override file (deployment.md §4.3), unplug the camera for a minute (`connect_failed`, then back by itself), and fill in the *Tested* column of [hardware.md §4.6](../design/hardware.md#46-default-from-2026-10-10-standalone-box-no-access-to-the-lots-cameras-or-network).
 
 ---
 
