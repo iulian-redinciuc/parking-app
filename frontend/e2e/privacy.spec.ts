@@ -12,11 +12,14 @@ for (const colorScheme of ['light', 'dark'] as const) {
       const link = page.getByRole('contentinfo').getByRole('link', { name: 'Privacy' })
       // (scrollIntoView counts a link under the fixed nav as visible: go to the end instead)
       const toEnd = () => page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-      await toEnd()
-      const box = (await link.boundingBox())!
-      expect(box.height).toBeGreaterThanOrEqual(44)
       const nav = (await page.getByRole('navigation', { name: 'Main' }).boundingBox())!
-      expect(box.y + box.height).toBeLessThanOrEqual(nav.y)
+      // (the page still grows while the zone cards load: scroll again until it has settled)
+      await expect(async () => {
+        await toEnd()
+        const box = (await link.boundingBox())!
+        expect(box.height).toBeGreaterThanOrEqual(44)
+        expect(box.y + box.height).toBeLessThanOrEqual(nav.y)
+      }).toPass({ timeout: 5000 })
       await link.click()
 
       expect(new URL(page.url()).hash).toBe('#/privacy')
@@ -29,9 +32,11 @@ for (const colorScheme of ['light', 'dark'] as const) {
       ).toBe(true)
       // the last line can be scrolled clear of the bottom nav
       const last = page.getByText('complain to your data protection authority')
-      await toEnd()
-      const lastBox = (await last.boundingBox())!
-      expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(nav.y)
+      await expect(async () => {
+        await toEnd()
+        const lastBox = (await last.boundingBox())!
+        expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(nav.y)
+      }).toPass({ timeout: 5000 })
     })
 
     test('the Alerts screen links to it', async ({ page }) => {
