@@ -342,7 +342,7 @@ export type CameraState = 'ok' | 'degraded' | 'down' | 'unknown'
 /** One row of `GET /api/admin/cameras` (the latest worker health message). */
 export interface AdminCamera {
   id: string
-  role: 'occupancy' | 'flow'
+  role: 'occupancy' | 'flow' | 'barrier'
   zones: string[]
   state: CameraState
   issue: string | null
@@ -360,7 +360,7 @@ const numOrNull = (x: unknown) => x === null || typeof x === 'number'
 const isCamera = (x: unknown): x is AdminCamera =>
   isObject(x) &&
   typeof x.id === 'string' &&
-  (x.role === 'occupancy' || x.role === 'flow') &&
+  (x.role === 'occupancy' || x.role === 'flow' || x.role === 'barrier') &&
   Array.isArray(x.zones) &&
   STATES.includes(x.state as string) &&
   (x.issue === null || typeof x.issue === 'string') &&
@@ -728,6 +728,7 @@ export interface AdminIssue {
     | 'camera_shifted'
     | 'stale'
     | 'clamps'
+    | 'flow_mismatch'
     | 'disk'
     | 'cpu_temp'
     | 'api_restarted'

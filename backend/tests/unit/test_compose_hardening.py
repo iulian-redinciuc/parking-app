@@ -75,7 +75,7 @@ WORKERS = [
     pytest.param(f, s, id=f"{f}:{s}")
     for f in (*RUNTIME_FILES, "docker-compose.test.yml")
     for s in _services(f)
-    if s.startswith("vision-")
+    if s.startswith("vision-") or s == "barrier"
 ]
 
 
@@ -114,7 +114,7 @@ def test_autoheal_restarts_only_labelled_parking_containers(file):
     assert autoheal["volumes"] == ["/var/run/docker.sock:/var/run/docker.sock"]
     assert autoheal["group_add"][0].startswith("${DOCKER_GID:?")
     labelled = {n for n, s in services.items() if "parking.autoheal" in s.get("labels", {})}
-    assert labelled == {"vision-occupancy", "vision-flow"}
+    assert labelled == {"vision-occupancy", "vision-flow", "barrier"}
 
 
 def test_no_docker_socket_anywhere_else():
@@ -247,3 +247,26 @@ def test_picamera_override_admits_only_camera_device_kinds():
     dockerfile = (DEPLOY / "Dockerfile.picamera").read_text()
     assert "rpicam-apps-lite" in dockerfile and "signed-by=" in dockerfile
     assert dockerfile.rstrip().endswith("USER 1000:1000")
+
+
+# --- a barrier's contacts on the GPIO header (P9.3, barrier.md §5) ---
+
+
+@pytest.mark.parametrize("file", ["docker-compose.yml", "docker-compose.site.yml"])
+def test_barrier_service_is_opt_in_and_small(file):
+    barrier = _services(file)["barrier"]
+    assert barrier["profiles"] == ["barrier"]
+    assert barrier["container_name"] == "parking-barrier"
+    assert barrier["command"] == ["barrier", "--camera", "barrier-ramp"]
+    assert "ports" not in barrier and "devices" not in barrier  # no control server, no GPIO yet
+    assert barrier["deploy"]["resources"]["limits"] == {"cpus": "0.25", "memory": "256M"}
+
+
+def test_barrier_override_passes_one_gpio_chip():
+    services = _services("docker-compose.barrier.yml")
+    assert list(services) == ["barrier"]
+    svc = services["barrier"]
+    chip = "${BARRIER_GPIOCHIP:-/dev/gpiochip0}"
+    assert svc["devices"] == [f"{chip}:{chip}"]
+    assert len(svc["group_add"]) == 1 and svc["group_add"][0].startswith("${GPIO_GID:?")
+    assert set(svc) == {"devices", "group_add"}  # nothing that would undo the lock-down

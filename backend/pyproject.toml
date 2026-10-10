@@ -15,6 +15,7 @@ dependencies = [
 vision = [
   "ultralytics>=8.3", "lap>=0.5", "ncnn>=1.0.20240410", "pnnx>=20250530", "onnxruntime>=1.18",
   "torch>=2.4", "torchvision>=0.19",   # CPU-only wheels, see [tool.uv.sources]
+  "gpiod>=2.2; sys_platform == 'linux'",   # barrier worker, `gpio:` source (libgpiod bundled)
 ]
 openvino = ["openvino>=2024.3"]          # only if an Intel machine is chosen for production
 

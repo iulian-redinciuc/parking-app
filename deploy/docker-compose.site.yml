@@ -2,6 +2,7 @@
 #   cd /opt/parking/deploy                       # .env from scripts/prod-env.sh site
 #   PARKING_VERSION=v0.x.y docker compose -f docker-compose.site.yml up -d
 # Entry/exit camera (Phase 5): add  --profile flow
+# Barrier contacts (P9.3):     add  -f docker-compose.barrier.yml --profile barrier
 # Workers send results to the API over the private VPN (API_INTERNAL_URL=http://<server-vpn-address>:8000)
 # and the API reaches their /control/* at this machine's VPN address: occupancy on port 9000, flow on
 # 9001 (cameras[].control_url in the server's lot.yaml). Nothing is published on the LAN or the internet.
@@ -57,6 +58,13 @@ services:
     profiles: ["flow"]                                         # enabled from Phase 5
     ports: ["${VPN_BIND_IP:?set VPN_BIND_IP to this machine's VPN address}:9001:9000"]
     deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: "${FLOW_MEMORY:-1200M}" } } }
+
+  barrier:                                                     # a barrier's contacts (barrier.md)
+    <<: *worker
+    container_name: parking-barrier
+    command: ["barrier", "--camera", "barrier-ramp"]
+    profiles: ["barrier"]
+    deploy: { resources: { limits: { cpus: "0.25", memory: 256M } } }
 
   # Docker never restarts an unhealthy container by itself. This one does, for the containers
   # labelled parking.autoheal=true only. It talks to the Docker socket, so: pinned, no network.

@@ -1,0 +1,10 @@
+# Opt-in override: a barrier's dry contacts on this machine's GPIO header (`gpio:` source, P9.3).
+# Spec: docs/design/barrier.md §5
+#   barrier source in config/lot.yaml:  gpio:/dev/gpiochip0?in=17&out=27
+#   docker compose -f docker-compose.yml -f docker-compose.barrier.yml --profile barrier up -d        # one machine
+#   docker compose -f docker-compose.site.yml -f docker-compose.barrier.yml --profile barrier up -d   # lot box (T2)
+# The worker keeps the base file's hardening; it only gains this one device and the group that may read it.
+services:
+  barrier:
+    devices: ["${BARRIER_GPIOCHIP:-/dev/gpiochip0}:${BARRIER_GPIOCHIP:-/dev/gpiochip0}"]
+    group_add: ["${GPIO_GID:?set GPIO_GID in .env to the gpio group's id (getent group gpio | cut -d: -f3)}"]

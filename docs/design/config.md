@@ -41,10 +41,12 @@ zones:
       enabled: false
       cron: "0 3 * * *"            # local time
       value: 0
+    # counted_by: cam-ramp         # only with a flow camera AND a barrier: which one moves the count
+    #                              # (default: the barrier); the other is compared with it (barrier.md §4)
 
 cameras:
   - id: cam-ground
-    role: occupancy                # occupancy | flow
+    role: occupancy                # occupancy | flow | barrier
     zones: [ground]                # zones this camera reports on
     source: "file:data/samples/ground-01.jpg"
     # Phase 2:  "folder:data/replay/ground-sim?interval=5&loop=true"   (frames made by `parking simulate-feed`)
@@ -102,6 +104,17 @@ cameras:
       min_track_frames: 5
       motion_min_area_px: 1500     # motion gate: px² at the line file's image_size
 
+  # A barrier controller's contacts instead of (or next to) the flow camera (P9.3, barrier.md)
+  # - id: barrier-ramp
+  #   role: barrier                # no camera: no detector, slots_file, lines_file or control_url
+  #   zones: [underground]         # exactly one, a flow zone
+  #   source: "gpio:/dev/gpiochip0?in=17&out=27"   # or "contacts:<file.csv>" (barrier.md §3)
+  #   barrier:
+  #     mode: pulse                # pulse | pair (barrier.md §2)
+  #     min_gap_ms: 1000           # pulse
+  #     in_direction: a_to_b       # pair: a_to_b | b_to_a
+  #     pair_timeout_s: 30         # pair
+
 api:
   stale_after_s: 60
   sse_ping_s: 15
@@ -116,7 +129,9 @@ api:
 - Validation (pydantic), with the error naming the field:
   - zone and camera IDs are unique and match `^[a-z0-9-]+$`
   - every `cameras[].zones[]` exists in `zones`
-  - `slots` zones have at least one occupancy camera, and `flow` zones exactly one flow camera
+  - `slots` zones have at least one occupancy camera; `flow` zones have a flow camera, a barrier or both, at most one of each
+  - a barrier (`role: barrier`, [barrier.md](barrier.md)) names exactly one zone, a `flow` zone; `counted_by` is only allowed on `flow` zones and must name that zone's flow camera or barrier
+  - occupancy and flow cameras need a `detector`; a barrier has none
   - `capacity` is required for `count` and `flow` zones; for `slots` zones it defaults to the number of slots
   - `map` (a zone's slot map, [slot-map.md](slot-map.md)) is optional and only allowed on `slots` zones; the file may be missing (then the zone has no map)
   - occupancy cameras need `slots_file`, flow cameras need `lines_file` (the file may be missing in Phase 1 before slots are drawn; commands that need it fail with a clear message)
@@ -268,6 +283,7 @@ Git-ignored. One row per count during the drift test (P5.11): ISO time (no offse
 | `VPN_BIND_IP` | empty (dev); T2 production: this machine's own VPN address, `10.77.0.1` on the server, `10.77.0.2` on the lot box | compose (`docker-compose.server.yml` / `docker-compose.site.yml` publish the API / the workers' control ports on it; [deployment.md §9](deployment.md#9-workers-and-api-on-different-machines-t2)) |
 | `DOCKER_GID` | empty; the id of the machine's `docker` group (`getent group docker \| cut -d: -f3`); `prod-env.sh site` fills it in | compose (`parking-autoheal` reads the Docker socket with it, [deployment.md §4.2](deployment.md#42-watchdog-for-stuck-workers-p85); the base and the site file refuse to start without it) |
 | `CAMERA_DEVICE`, `VIDEO_GID` | `/dev/video0`, `44`; the USB camera's device node and the host's `video` group id (`getent group video \| cut -d: -f3`) | compose (only `docker-compose.device.yml` / `docker-compose.picamera.yml`, [deployment.md §4.3](deployment.md#43-a-camera-plugged-into-the-vision-host-p412)) |
+| `BARRIER_GPIOCHIP`, `GPIO_GID` | `/dev/gpiochip0`, empty; the GPIO chip named in the barrier's `gpio:` source and the host's `gpio` group id (`getent group gpio \| cut -d: -f3`) | compose (only `docker-compose.barrier.yml`, which refuses to start without `GPIO_GID`; [barrier.md §5](barrier.md#5-running-it)) |
 | `MEDIA_MAJOR`, `DMA_HEAP_MAJOR` | empty; this kernel's device numbers: `grep -w media /proc/devices \| cut -d' ' -f1`, and the same with `dma_heap` | compose (only `docker-compose.picamera.yml`, which refuses to start without them) |
 | `API_CPUS`, `VISION_CPUS`, `FLOW_CPUS`, `WEB_CPUS` | `1.0`, `1.0`, `1.5`, `1.0` | compose (CPU limit per container, per machine; [deployment.md §4.1](deployment.md#41-hardening-p84)) |
 | `API_MEMORY`, `VISION_MEMORY`, `FLOW_MEMORY`, `WEB_MEMORY` | `512M`, `1200M`, `1200M`, `256M` | compose (memory limit per container, `/tmp` included) |

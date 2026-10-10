@@ -38,7 +38,9 @@
 | direction | text | `in \| out` |
 | track_id | int | |
 | confidence | real | |
-| applied | bool | false if ignored (e.g. clamped at 0 or capacity) |
+| applied | bool | false if ignored (e.g. clamped at 0 or capacity, or not counted) |
+| source | text | `camera \| barrier` (P9.3, [barrier.md](barrier.md)); migration `0007`, existing rows `camera` |
+| counted | bool | false: from the zone's second source (a flow camera next to a barrier, or the other way round), stored for the comparison only, never applied; migration `0007`, existing rows true |
 
 ### `correction`
 | Column | Type | Notes |

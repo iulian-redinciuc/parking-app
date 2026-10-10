@@ -5,7 +5,9 @@ buffer per zone. Every mutating call returns the `Change`s it caused, for the DB
 rows when a count changed, `slot_state` rows when a slot flipped) and the SSE broadcaster:
 
 - `apply_observation(obs)`: smooths the slots/counts, recomputes that camera's zones.
-- `apply_flow_event(msg)`: one line crossing -> the flow zone's `FlowCounter`.
+- `apply_flow_event(msg)`: one line crossing (or one car through a barrier) -> the flow
+  zone's `FlowCounter`. Only the zone's counting source (`LotConfig.flow_counter`) goes here;
+  its other source is only compared with it (barrier.md §4).
 - `apply_health(msg)`: camera state -> confidence (`degraded`) and staleness (`down`).
 - `tick()`: once a second; staleness (`stale_after_s` without data) and trend flips.
 - `replace_slot_file(camera_id, slot_file)`: an admin saved new slots (P7.3).
@@ -206,6 +208,8 @@ class StateStore:
             for z in config.zones
             if z.method == "flow"
         }
+        # flow zone id -> the camera or barrier whose events move its count
+        self._flow_counter = {zone_id: config.flow_counter(zone_id) for zone_id in self.flow}
         self.health: dict[str, CameraHealthMsg] = {}
         # camera id -> clock time of its last fresh data (observation; health for flow cameras)
         self._last_data: dict[str, datetime] = {}
@@ -244,13 +248,22 @@ class StateStore:
                 self._updated_at[zone_id] = now
         return changes + self._diff("observation")
 
-    def flow_zone(self, camera_id: str) -> str:
-        """The `flow` zone a flow camera counts for (lot.yaml allows exactly one per zone)."""
-        camera = self._camera(camera_id, "flow")
+    def flow_zone(self, camera_id: str, source: str | None = None) -> str:
+        """The `flow` zone a flow camera or a barrier counts for. `source` (`camera` |
+        `barrier`, from the event) must match what lot.yaml says the sender is."""
+        camera = self._camera(camera_id)
+        role = {"camera": "flow", "barrier": "barrier"}.get(source or "", camera.role)
+        if camera.role not in ("flow", "barrier") or camera.role != role:
+            kind = "barrier" if role == "barrier" else "flow camera"
+            raise UnknownCameraError(f"unknown {kind} '{camera_id}'")
         zone_id = next((z for z in camera.zones if z in self.flow), None)
         if zone_id is None:
             raise UnknownCameraError(f"flow camera '{camera_id}' has no 'flow' zone")
         return zone_id
+
+    def counts_flow(self, camera_id: str) -> bool:
+        """True if this flow camera or barrier is its zone's counting source."""
+        return self._flow_counter.get(self.flow_zone(camera_id)) == camera_id
 
     def apply_flow_event(self, msg: FlowEventMsg) -> tuple[bool | None, list[Change]]:
         """Apply one crossing: (None = duplicate, False = clamped, True = applied; changes)."""
@@ -268,11 +281,11 @@ class StateStore:
         self.health[camera.id] = msg
         if msg.state != "down":
             self._quality[camera.id] = msg.state
-            if camera.role == "flow":
+            if camera.role in ("flow", "barrier"):
                 now = self.clock.now()
                 self._last_data[camera.id] = now
                 for zone_id in camera.zones:
-                    if self.config.zone(zone_id).method == "flow":
+                    if self._flow_counter.get(zone_id) == camera.id:
                         self._updated_at[zone_id] = self._updated_at[zone_id] or now
         return self._diff("health")
 
@@ -415,9 +428,9 @@ class StateStore:
         return {s.id: s.zone for s in slot_file.slots if s.zone in zones}
 
     def _zone_cameras(self, zone_id: str):
-        method = self.config.zone(zone_id).method
-        role = "flow" if method == "flow" else "occupancy"
-        return [c for c in self.config.cameras if zone_id in c.zones and c.role == role]
+        if zone_id in self._flow_counter:  # only the counting source decides freshness
+            return [self.config.camera(self._flow_counter[zone_id])]
+        return [c for c in self.config.cameras if zone_id in c.zones and c.role == "occupancy"]
 
     def _occupied(self, zone_id: str) -> int:
         method = self.config.zone(zone_id).method

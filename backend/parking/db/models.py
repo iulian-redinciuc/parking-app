@@ -70,7 +70,9 @@ class FlowEvent(SQLModel, table=True):
     direction: str  # in | out
     track_id: int
     confidence: float
-    applied: bool  # false if ignored (clamped at 0 or capacity)
+    applied: bool  # false if ignored (clamped at 0 or capacity, or not counted)
+    source: str = "camera"  # camera | barrier
+    counted: bool = True  # false: from the zone's second source, compared only (barrier.md §4)
 
 
 class Correction(SQLModel, table=True):

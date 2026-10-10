@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from datetime import datetime
 
 from sqlalchemy import func
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from parking.core.fusion import Change, SlotChange, ZoneChange
 from parking.db.models import CameraHealth, Correction, FlowEvent, SlotState, ZoneState
@@ -80,8 +80,11 @@ def known_flow_event_ids(session: Session, event_ids: Iterable[str]) -> set[str]
     return set(session.exec(select(FlowEvent.event_id).where(FlowEvent.event_id.in_(ids))))
 
 
-def add_flow_event(session: Session, msg: FlowEventMsg, zone_id: str, applied: bool) -> None:
-    """One `flow_event` row; `applied=False` when the counter clamped it."""
+def add_flow_event(
+    session: Session, msg: FlowEventMsg, zone_id: str, applied: bool, counted: bool = True
+) -> None:
+    """One `flow_event` row; `applied=False` when the counter clamped it, `counted=False` when
+    it came from the zone's second source (compared only, barrier.md §4)."""
     session.add(
         FlowEvent(
             event_id=msg.event_id,
@@ -92,6 +95,8 @@ def add_flow_event(session: Session, msg: FlowEventMsg, zone_id: str, applied: b
             track_id=msg.track_id,
             confidence=msg.confidence,
             applied=applied,
+            source=msg.source,
+            counted=counted,
         )
     )
 
@@ -124,7 +129,7 @@ def recent_corrections(session: Session, limit: int) -> list[Correction]:
 def correction_counters(
     session: Session, zone_ids: Iterable[str]
 ) -> dict[str, tuple[datetime, int]]:
-    """zone id -> (time of its last correction, `flow_event` rows since), for the flow
+    """zone id -> (time of its last correction, counted `flow_event` rows since), for the flow
     confidence after a restart (data-model.md §2). Zones never corrected are left out."""
     out: dict[str, tuple[datetime, int]] = {}
     for zone_id in zone_ids:
@@ -140,6 +145,7 @@ def correction_counters(
             select(func.count())
             .select_from(FlowEvent)
             .where(FlowEvent.zone_id == zone_id, FlowEvent.ts > last.ts)
+            .where(col(FlowEvent.counted).is_(True))
         ).one()
         out[zone_id] = (last.ts, int(events))
     return out

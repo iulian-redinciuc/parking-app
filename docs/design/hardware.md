@@ -113,6 +113,16 @@ The PoE cameras of §4.5 stay the choice **if** wired access is ever granted. Th
 
 **Permission is still needed** from the lot's owner / building management to film the car park, even from inside (security-privacy.md §4): the points in its favour are that nothing connects to their network, frames are processed in memory and never stored or sent, and only counts leave the box.
 
+### 4.7 Barrier contacts (P9.3)
+
+Only where the lot has a barrier or loop detectors, and its owner allows a connection ([barrier.md](barrier.md)). Nothing to buy for the app itself beyond wire and, if needed, an isolator.
+
+- **What to ask the barrier's installer for:** potential-free (dry) relay contacts that close once per vehicle: one for the entry lane and one for the exit lane (`pulse` mode), or the presence outputs of the two loops of a single lane (`pair` mode). Most controllers and two-channel loop detectors have spare relay outputs for this.
+- **Wiring:** each contact between a GPIO pin of the vision box and a GND pin of the same header; the pin's internal pull-up does the rest (`active=low`, the default). Example: entry contact on GPIO17 (pin 11) and GND (pin 9), exit contact on GPIO27 (pin 13) and GND (pin 14) → `source: "gpio:/dev/gpiochip0?in=17&out=27"`.
+- **Never connect a voltage to the header.** The pins take 3.3 V at most; a barrier's 12/24 V signal destroys the Pi. An output that carries a voltage (or a cable longer than a few metres, or one that runs next to the barrier's motor) goes through an optocoupler module or a small relay, whose output side is again a dry contact.
+- Twisted pair or shielded cable; keep the contacts' cable away from mains. A stuck or chattering relay is handled in software (`debounce_ms`, `min_gap_ms`).
+- Don't use GPIO pins that a HAT on the box already uses (`gpioinfo` shows the lines in use; the worker also says so when a line is busy).
+
 ## 6. Mounting checklist
 - [ ] Camera positions agree with the layout option (A/B/C) chosen in PLAN.md.
 - [ ] Occupancy view covers every ground space, with no space hidden behind a pillar or tree.

@@ -29,7 +29,7 @@ OBSERVATION = {
     "zone_counts": {},
 }  # fmt: skip
 FLOW = {
-    "v": 1, "event_id": "6f1c2a1e-0000", "camera_id": "cam-ramp",
+    "v": 1, "event_id": "6f1c2a1e-0000", "source": "camera", "camera_id": "cam-ramp",
     "ts": "2026-10-07T17:06:01.480Z", "direction": "in", "track_id": 4412,
     "cls": "car", "confidence": 0.77,
 }  # fmt: skip
@@ -114,6 +114,7 @@ def test_pipeline_observation_is_accepted():
         (FlowEventMsg, {**FLOW, "direction": "sideways"}),
         (FlowEventMsg, {**FLOW, "confidence": 1.5}),
         (FlowEventMsg, {**FLOW, "event_id": ""}),
+        (FlowEventMsg, {**FLOW, "source": "loop"}),
         (FlowEventBatch, {"events": []}),
         (FlowEventBatch, {"events": [FLOW] * 101}),
         (CameraHealthMsg, {**HEALTH, "state": "broken"}),

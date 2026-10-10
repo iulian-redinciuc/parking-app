@@ -55,7 +55,8 @@ class IngestStats:
 @dataclass
 class _Pending:
     changes: list[Change] = field(default_factory=list)
-    flow: list[tuple[FlowEventMsg, str, bool]] = field(default_factory=list)
+    # (event, zone id, applied, counted)
+    flow: list[tuple[FlowEventMsg, str, bool, bool]] = field(default_factory=list)
     health: list[CameraHealthMsg] = field(default_factory=list)
     correction: Correction | None = None
 
@@ -127,9 +128,11 @@ class Ingestor:
             await self._commit(_Pending(changes=changes))
 
     async def flow_events(self, batch: FlowEventBatch) -> FlowEventAck:
-        """Apply new events in order; ids seen before (memory or DB) count as duplicates."""
+        """Apply new events in order; ids seen before (memory or DB) count as duplicates.
+        Events of a zone's second source (barrier.md §4) are recorded, not applied."""
         for msg in batch.events:
-            self.store.flow_zone(msg.camera_id)  # unknown camera -> reject the whole batch
+            # unknown camera or barrier -> reject the whole batch
+            self.store.flow_zone(msg.camera_id, msg.source)
         async with self._lock:
             ids = [msg.event_id for msg in batch.events]
             known = await anyio.to_thread.run_sync(self._known_ids, ids)
@@ -140,13 +143,18 @@ class Ingestor:
                     duplicates += 1
                     continue
                 known.add(msg.event_id)
+                zone_id = self.store.flow_zone(msg.camera_id)
+                if not self.store.counts_flow(msg.camera_id):
+                    accepted += 1
+                    pending.flow.append((msg, zone_id, False, False))
+                    continue
                 applied, changes = self.store.apply_flow_event(msg)
                 if applied is None:
                     duplicates += 1
                     continue
                 accepted += 1
                 pending.changes += changes
-                pending.flow.append((msg, self.store.flow_zone(msg.camera_id), applied))
+                pending.flow.append((msg, zone_id, applied, True))
             self.stats.flow_events += accepted
             await self._commit(pending)
         return FlowEventAck(accepted=accepted, duplicates=duplicates)
@@ -237,8 +245,8 @@ class Ingestor:
 
     def _write(self, pending: _Pending) -> None:
         with session_scope(self.engine) as session:
-            for msg, zone_id, applied in pending.flow:
-                repo.add_flow_event(session, msg, zone_id, applied)
+            for msg, zone_id, applied, counted in pending.flow:
+                repo.add_flow_event(session, msg, zone_id, applied, counted)
             repo.record_changes(session, pending.changes)
             for msg in pending.health:
                 repo.upsert_camera_health(session, msg)

@@ -25,10 +25,12 @@ zones:
       enabled: false
       cron: "0 3 * * *"            # local time
       value: 0
+    # counted_by: cam-ramp         # only with a flow camera AND a barrier: which one moves the count
+    #                              # (default: the barrier); the other is compared with it (barrier.md)
 
 cameras:
   - id: cam-ground
-    role: occupancy                # occupancy | flow
+    role: occupancy                # occupancy | flow | barrier
     zones: [ground]                # zones this camera reports on
     source: "file:data/samples/ground-01.jpg"
     # Phase 2:  "folder:data/replay/ground-sim?interval=5&loop=true"   (frames made by `parking simulate-feed`)
@@ -85,6 +87,18 @@ cameras:
     flow:
       min_track_frames: 5
       motion_min_area_px: 1500
+
+  # A barrier controller's dry contacts instead of (or next to) the flow camera: docs/design/barrier.md
+  # - id: barrier-ramp
+  #   role: barrier                # no camera: contacts on the vision box's GPIO header
+  #   zones: [underground]         # exactly one, a flow zone
+  #   source: "gpio:/dev/gpiochip0?in=17&out=27"   # GPIO line per contact; &active=low&bias=pull-up&debounce_ms=30
+  #   # try without hardware:  "contacts:data/replay/barrier.csv?loop=true"   (seconds,input,closed|open)
+  #   barrier:
+  #     mode: pulse                # pulse: each closing of in / out is one car | pair: loops a, b in one lane
+  #     min_gap_ms: 1000           # pulse: closings of one contact closer than this are one car
+  #     in_direction: a_to_b       # pair: a_to_b | b_to_a
+  #     pair_timeout_s: 30         # pair: how long the second loop may take
 
 api:
   stale_after_s: 60

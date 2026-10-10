@@ -93,6 +93,7 @@ For the people running the lot, not the drivers. A logged-in admin turns on **Re
 | `camera_shifted:<camera>` | its latest health issue is `shifted` and it isn't down | at once |
 | `stale:<zone>` | the zone is stale, has had data before, and none of its cameras is down (that's already the camera alert) | 5 min |
 | `clamps:<zone>` | more than 3 clamped entry/exit events (`flow_event.applied = false`) today, lot-local day, counted after the zone's last correction | at once |
+| `flow_mismatch:<zone>` | the zone has a flow camera and a barrier, and their net counts (in − out) over the same period as `clamps` differ by more than 2 cars; not while either of them is down or hasn't reported since the API started ([barrier.md §4](barrier.md#4-one-source-or-two-api)) | 2 min |
 | `disk:<machine>` | the filesystem holding `data/` is **more than 85%** full | 5 min |
 | `cpu_temp:<machine>` | the CPU is at **80 °C or more** (the hottest `/sys/class/thermal/thermal_zone*/temp`; machines without one, like most cloud VMs, never alert) | 5 min |
 | `api_restarted:api` | the API process started less than 2 min ago | at once; no repeat, no "resolved" |

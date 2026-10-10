@@ -156,7 +156,7 @@
       "failed": "That didn't work. Check your connection and try again."
     },
     "admin": "Receive admin alerts",
-    "admin_hint": "On this device: a camera down or shifted, stale data, an entry/exit count that keeps hitting its limit, a full disk, a hot CPU, an API restart, a failed backup. At most one per issue per hour, plus a \"resolved\".",
+    "admin_hint": "On this device: a camera down or shifted, stale data, an entry/exit count that keeps hitting its limit, a camera and a barrier that count differently, a full disk, a hot CPU, an API restart, a failed backup. At most one per issue per hour, plus a \"resolved\".",
     "admin_error": "Couldn't load or save the admin alert setting. Try again.",
     "admin_issues": "Open issues",
     "admin_no_issues": "None right now.",
@@ -165,6 +165,7 @@
       "camera_shifted": "Camera {{subject}} shifted since {{time}}",
       "stale": "{{subject}}: no fresh data since {{time}}",
       "clamps": "{{subject}}: entry/exit count off since {{time}}",
+      "flow_mismatch": "{{subject}}: camera and barrier disagree since {{time}}: {{detail}}",
       "disk": "Disk almost full ({{detail}}) on {{subject}} since {{time}}",
       "cpu_temp": "CPU hot ({{detail}}) on {{subject}} since {{time}}",
       "api_restarted": "The API restarted at {{time}}",
@@ -196,7 +197,8 @@
       "failed": "Couldn't load the cameras. Retrying every 10 s.",
       "role": {
         "occupancy": "occupancy",
-        "flow": "entry/exit"
+        "flow": "entry/exit",
+        "barrier": "barrier"
       },
       "state": {
         "ok": "OK",

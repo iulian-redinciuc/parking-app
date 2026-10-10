@@ -201,7 +201,7 @@ def test_site_compose_has_only_the_workers_on_the_vpn_address():
     compose = _compose("docker-compose.site.yml")
     assert compose["name"] == "parking"
     services = compose["services"]
-    assert set(services) == {"vision-occupancy", "vision-flow", "autoheal"}
+    assert set(services) == {"vision-occupancy", "vision-flow", "barrier", "autoheal"}
     assert services["vision-flow"]["profiles"] == ["flow"]
     for name, host_port in (("vision-occupancy", 9000), ("vision-flow", 9001)):
         (port,) = services[name]["ports"]

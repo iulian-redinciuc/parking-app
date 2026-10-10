@@ -200,6 +200,7 @@ Phones show the new number at once. If the level is empty every night, let the a
 | Did events wait on the lot box? | `ls -l /opt/parking/data/outbox/` (empty when everything was delivered) | They are sent when the link is back; nothing to do |
 | Are the lines still where the cars drive? | `$P lines-check --camera cam-ramp --image data/debug/ramp.jpg --out data/debug/ramp-lines.jpg` after a `$P grab --camera cam-ramp --out data/debug/ramp.jpg --force` | *Admin* → the camera → *Edit counting lines*, *Save* (two machines: copy `config/lines/cam-ramp.json` to the lot box like a slot file, restart `parking-vision-flow`) |
 | How well does it count? | Check the clips, below | |
+| Is there a barrier on the zone too? The alert *…: camera and barrier disagree* names both counts for today ([barrier.md §4](design/barrier.md#4-one-source-or-two-api)) | Which one matches a hand count? `docker logs --since 24h parking-barrier \| grep -c ' IN,'` (and `' OUT,'`) against the camera's log | The camera is off: the rows above. The barrier is off: `LOG_LEVEL=DEBUG` shows every edge of its contacts (a loose wire, a relay that chatters: raise `min_gap_ms` / `debounce_ms` in `lot.yaml`). Then correct the count: that also starts the comparison again |
 
 **Check the clips.** Record an hour, count it by hand, compare:
 

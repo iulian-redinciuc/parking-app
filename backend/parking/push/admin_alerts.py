@@ -8,6 +8,9 @@
 | `stale:<zone>` | the zone is stale, has had data, and none of its cameras is down | 5 min |
 | `clamps:<zone>` | > 3 clamped entry/exit events today (lot-local day, after the zone's
   last correction) | at once |
+| `flow_mismatch:<zone>` | the zone's flow camera and barrier differ by more than 2 cars in
+  their net count (in − out) today (same period as `clamps`); not while either is down or
+  has not reported yet (barrier.md §4) | 2 min |
 | `disk:<machine>` | the disk holding `data/` is more than 85% full | 5 min |
 | `cpu_temp:<machine>` | the CPU is at 80 °C or more (machines that report it) | 5 min |
 | `api_restarted:api` | the API process started less than 2 min ago | at once, no "resolved" |
@@ -57,6 +60,7 @@ IssueKind = Literal[
     "camera_shifted",
     "stale",
     "clamps",
+    "flow_mismatch",
     "disk",
     "cpu_temp",
     "api_restarted",
@@ -69,6 +73,7 @@ GRACE: dict[str, timedelta] = {
     "camera_shifted": timedelta(0),
     "stale": timedelta(minutes=5),
     "clamps": timedelta(0),
+    "flow_mismatch": timedelta(minutes=2),  # a car between the two, events still in an outbox
     "disk": timedelta(minutes=5),
     "cpu_temp": timedelta(minutes=5),
     "api_restarted": timedelta(0),
@@ -77,6 +82,7 @@ GRACE: dict[str, timedelta] = {
 REPEAT = timedelta(hours=1)  # at most one alert per issue per hour
 NO_RESOLVED = frozenset({"api_restarted"})  # an event, not a state: nothing to resolve
 MAX_CLAMPS_PER_DAY = 3
+MAX_FLOW_DIFF = 2  # cars the camera's and the barrier's net count may differ by (Phase 5 target)
 DISK_MAX_PCT = 85.0
 CPU_TEMP_MAX_C = 80.0  # a Raspberry Pi 5 starts throttling here
 RESTART_SHOWN = timedelta(minutes=2)  # how long after its start the API counts as restarted
@@ -168,13 +174,47 @@ class AlertTracker:
         return sorted(out, key=lambda i: (i["since"], i["key"]))
 
 
+@dataclass(frozen=True)
+class FlowTally:
+    """One source's entry/exit events of a zone in the comparison period."""
+
+    camera_id: str
+    source: str  # camera | barrier
+    cars_in: int = 0
+    cars_out: int = 0
+
+    @property
+    def net(self) -> int:
+        return self.cars_in - self.cars_out
+
+    def __str__(self) -> str:
+        return f"{self.source} {self.net:+d} (in {self.cars_in}, out {self.cars_out})"
+
+
+def mismatch_condition(
+    zone_id: str, tallies: Iterable[FlowTally], health: Mapping[str, CameraHealthMsg]
+) -> Condition | None:
+    """`flow_mismatch` if the zone's two sources disagree; None while one of them is down or
+    has never reported (its missing events would be the whole difference)."""
+    a, b = tallies
+    for tally in (a, b):
+        h = health.get(tally.camera_id)
+        if h is None or h.state == "down":
+            return None
+    if abs(a.net - b.net) <= MAX_FLOW_DIFF:
+        return None
+    return Condition("flow_mismatch", zone_id, f"{a}, {b}")
+
+
 def conditions(
     config: LotConfig,
     health: Mapping[str, CameraHealthMsg],
     status: LotStatus,
     clamps: Mapping[str, int],
+    tallies: Mapping[str, tuple[FlowTally, FlowTally]] | None = None,
 ) -> list[Condition]:
-    """What is wrong now, from the latest health per camera, the status and today's clamps."""
+    """What is wrong now, from the latest health per camera, the status, today's clamps and
+    today's events of the zones counted twice (`flow_tallies`)."""
     out = []
     down = set()
     for camera in config.cameras:
@@ -193,6 +233,10 @@ def conditions(
     for zone_id, n in clamps.items():
         if n > MAX_CLAMPS_PER_DAY:
             out.append(Condition("clamps", zone_id, str(n)))
+    for zone_id, pair in (tallies or {}).items():
+        mismatch = mismatch_condition(zone_id, pair, health)
+        if mismatch is not None:
+            out.append(mismatch)
     return out
 
 
@@ -236,28 +280,65 @@ def backup_condition(file: Path, now: datetime) -> Condition | None:
     return Condition("backup_failed", API, message)
 
 
-def clamp_counts(engine: Engine, config: LotConfig, now: datetime) -> dict[str, int]:
-    """Clamped (`applied=false`) flow events per flow zone since the lot-local midnight or the
-    zone's last correction, whichever is later (a correction fixes what the clamps showed)."""
+def _period_start(session, config: LotConfig, zone_id: str, now: datetime) -> datetime:
+    """The lot-local midnight or the zone's last correction, whichever is later."""
     tz = lot_timezone(config)
     midnight = datetime.combine(now.astimezone(tz).date(), time(), tzinfo=tz)
+    fixed = session.exec(select(func.max(Correction.ts)).where(Correction.zone_id == zone_id)).one()
+    return max(midnight, fixed) if fixed is not None else midnight
+
+
+def clamp_counts(engine: Engine, config: LotConfig, now: datetime) -> dict[str, int]:
+    """Clamped (`applied=false`) flow events per flow zone since the lot-local midnight or the
+    zone's last correction, whichever is later (a correction fixes what the clamps showed).
+    Events of a zone's second source are never applied and don't count here."""
     zones = [z.id for z in config.zones if z.method == "flow"]
     if not zones:
         return {}
     out = {}
     with session_scope(engine) as session:
         for zone_id in zones:
-            fixed = session.exec(
-                select(func.max(Correction.ts)).where(Correction.zone_id == zone_id)
-            ).one()
-            start = max(midnight, fixed) if fixed is not None else midnight
             out[zone_id] = session.exec(
                 select(func.count())
                 .select_from(FlowEvent)
                 .where(FlowEvent.zone_id == zone_id)
                 .where(col(FlowEvent.applied).is_(False))
-                .where(FlowEvent.ts >= start)
+                .where(col(FlowEvent.counted).is_(True))
+                .where(FlowEvent.ts >= _period_start(session, config, zone_id, now))
             ).one()
+    return out
+
+
+def flow_tallies(
+    engine: Engine, config: LotConfig, now: datetime
+) -> dict[str, tuple[FlowTally, FlowTally]]:
+    """For every flow zone with both a barrier and a flow camera: each one's events (counted
+    or not, clamped or not) over the same period as `clamp_counts`, the counting source first.
+    A correction starts the comparison again."""
+    zones = [z.id for z in config.zones if z.method == "flow" and config.flow_checker(z.id)]
+    out = {}
+    with session_scope(engine) as session:
+        for zone_id in zones:
+            start = _period_start(session, config, zone_id, now)
+            rows = session.exec(
+                select(FlowEvent.camera_id, FlowEvent.direction, func.count())
+                .where(FlowEvent.zone_id == zone_id)
+                .where(FlowEvent.ts >= start)
+                .group_by(FlowEvent.camera_id, FlowEvent.direction)
+            ).all()
+            seen = {(camera_id, direction): n for camera_id, direction, n in rows}
+            pair = []
+            for camera_id in (config.flow_counter(zone_id), config.flow_checker(zone_id)):
+                role = config.camera(camera_id).role
+                pair.append(
+                    FlowTally(
+                        camera_id,
+                        "barrier" if role == "barrier" else "camera",
+                        seen.get((camera_id, "in"), 0),
+                        seen.get((camera_id, "out"), 0),
+                    )
+                )
+            out[zone_id] = (pair[0], pair[1])
     return out
 
 
@@ -270,8 +351,11 @@ def alert_payload(
     c = notice.condition
     since = local_time(notice.since, tz)
     base = url.split("#")[0]
+    what = "Camera"
     if c.kind in ("camera_down", "camera_shifted"):
         name = c.subject
+        if any(cam.id == c.subject and cam.role == "barrier" for cam in config.cameras):
+            what = "Barrier"
         link = f"{base}#/admin/cameras/{c.subject}"
     elif c.kind in ("disk", "cpu_temp", "api_restarted", "backup_failed"):
         name = "the API server" if c.subject == API else f"camera {c.subject}'s machine"
@@ -282,10 +366,11 @@ def alert_payload(
         link = f"{base}#/admin"
     if notice.resolved:
         title = {
-            "camera_down": f"Camera {name} is back up",
+            "camera_down": f"{what} {name} is back up",
             "camera_shifted": f"Camera {name} is no longer shifted",
             "stale": f"{name}: live data again",
             "clamps": f"{name}: entry/exit count fixed",
+            "flow_mismatch": f"{name}: camera and barrier agree again",
             "disk": f"Disk space is back on {name}",
             "cpu_temp": f"The CPU has cooled down on {name}",
             "api_restarted": "The API is running",
@@ -295,7 +380,7 @@ def alert_payload(
     else:
         title, body = {
             "camera_down": (
-                f"Camera {name} is down",
+                f"{what} {name} is down",
                 f"Since {since}" + (f" ({c.detail.replace('_', ' ')})" if c.detail else ""),
             ),
             "camera_shifted": (
@@ -306,6 +391,10 @@ def alert_payload(
             "clamps": (
                 f"{name}: entry/exit count is off",
                 f"{c.detail} clamped events today. Correct the count",
+            ),
+            "flow_mismatch": (
+                f"{name}: camera and barrier disagree",
+                f"Today: {c.detail}. Check the one that is off, then correct the count",
             ),
             "disk": (f"Disk almost full on {name}", f"{c.detail} used, since {since}"),
             "cpu_temp": (f"The CPU is hot on {name}", f"{c.detail}, since {since}"),
@@ -403,7 +492,8 @@ class AdminAlertMonitor:
         self, health: Mapping[str, CameraHealthMsg], status: LotStatus, now: datetime
     ) -> list[SendResult]:
         clamps = clamp_counts(self.engine, self.config, now)
-        found = conditions(self.config, health, status, clamps)
+        tallies = flow_tallies(self.engine, self.config, now)
+        found = conditions(self.config, health, status, clamps, tallies)
         found += system_conditions(health, self.probe())
         if self.started_at is not None and now - self.started_at < RESTART_SHOWN:
             found.append(Condition("api_restarted", API))

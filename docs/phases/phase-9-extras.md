@@ -27,7 +27,21 @@ Pick in any order once Phase 8 is done. Each item is a small project; write a sh
 
 ## P9.3: Barrier / induction-loop integration
 **Why:** near-perfect entry/exit counts where a barrier exists.
-**Outline:** a small worker reading the barrier controller (dry contact via a GPIO input on the vision box, or the controller's API) → the same `POST /internal/flow-events` with `source: "barrier"`. Use it alone or to cross-check the camera (alert on disagreement).
+**Design note:** [barrier.md](../design/barrier.md).
+**Files:** `backend/parking/workers/contacts.py` (GPIO and replay sources, `pulse` / `pair` decoders), `workers/barrier_worker.py`, `parking worker barrier` (`cli.py`), `config.py` (`role: barrier`, `barrier:`, zone `counted_by`), `messages.py` (`FlowEventMsg.source`), `core/fusion.py`, `api/ingest.py`, `db/models.py` + migration `0007` (`flow_event.source`, `counted`), `push/admin_alerts.py` (`flow_mismatch`); `deploy/docker-compose.barrier.yml` and the `barrier` service; `frontend/src/api/client.ts`, `en.json` (the role and the alert).
+**Steps**
+1. A small worker reads the barrier controller's dry contacts on GPIO inputs of the vision box (`gpio:` source; `contacts:` replays a file for tests) and sends the same `POST /internal/flow-events` with `source: "barrier"`. A controller's network API is not built: none is known ([barrier.md §6](../design/barrier.md#6-not-built-and-why)).
+2. In lot.yaml the barrier is a `cameras` entry with `role: barrier` on a `flow` zone, alone or next to the flow camera.
+3. With both, one counts (the barrier unless `counted_by` says otherwise) and the admin alert `flow_mismatch` fires when their net counts differ by more than 2 cars.
+
+**Done when:** cars through the barrier move the zone's count, and with a flow camera on the same zone a disagreement raises the alert. Checked on the dev Pi with a replayed contact file, camera events sent by hand and two unused GPIO pins (barrier.md §7). **On a real barrier** (when one exists): wire it per [hardware.md §4.7](../design/hardware.md#47-barrier-contacts-p93), then
+
+```bash
+cd deploy && echo "GPIO_GID=$(getent group gpio | cut -d: -f3)" >> .env
+docker compose -f docker-compose.site.yml -f docker-compose.barrier.yml --profile barrier up -d
+LOG_LEVEL=DEBUG docker compose -f docker-compose.site.yml -f docker-compose.barrier.yml --profile barrier \
+  run --rm --no-deps barrier barrier --camera barrier-ramp --print     # drive through once each way: one line per edge and per car
+```
 
 ## P9.4: Fine-tuned detector / licence swap
 **Why:** better accuracy on your specific view, or avoiding AGPL obligations.

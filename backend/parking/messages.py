@@ -31,6 +31,7 @@ ZoneMethod = Literal["slots", "count", "flow"]
 CameraState = Literal["ok", "degraded", "down"]
 CameraIssue = Literal["black", "frozen", "blurry", "shifted", "connect_failed"]
 Direction = Literal["in", "out"]
+FlowSource = Literal["camera", "barrier"]  # what saw the car: a flow camera or a barrier
 # slot types counted separately (`by_type`); `standard` spaces only show in the zone's totals
 SpaceType = Literal["accessible", "ev", "motorcycle", "reserved"]
 SPACE_TYPES: tuple[SpaceType, ...] = ("accessible", "ev", "motorcycle", "reserved")
@@ -63,10 +64,12 @@ class Observation(Message):
 
 
 class FlowEventMsg(Message):
-    """One line crossing from a flow worker. `event_id` makes retries idempotent."""
+    """One line crossing from a flow worker, or one car through a barrier (`source`; then
+    `camera_id` is the barrier's id). `event_id` makes retries idempotent."""
 
     v: Literal[1] = 1
     event_id: str = Field(min_length=1)
+    source: FlowSource = "camera"
     camera_id: str
     ts: UtcDatetime
     direction: Direction

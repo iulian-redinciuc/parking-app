@@ -191,7 +191,7 @@ Why not cookies: the frontend and the API can be on different sites (e.g. the Gi
 
 **Admin alerts** (`parking/api/routes/admin.py` + `parking/push/admin_alerts.py`, P7.8; rules in [notifications.md §5.1](notifications.md#51-admin-alerts-p78-p87)):
 - `PUT /api/admin/alerts` sets `push_subscription.admin_alerts` for the subscription with that `endpoint` (this browser's, from the Alerts screen); unknown keys `422`, unknown endpoint `404`. Re-subscribing the same endpoint (`POST /api/push/subscriptions`) keeps the flag; a new endpoint (the browser renewed it) starts without it.
-- `GET /api/admin/alerts`: `enabled` is that subscription's flag (`false` for no or an unknown `endpoint`), `available` whether push is configured (no VAPID keys = no alerts), `issues` the open ones, oldest first: `kind` `camera_down | camera_shifted | stale | clamps | disk | cpu_temp | api_restarted | backup_failed`, `subject` the camera or zone id (for the machine issues of P8.7: `api` or the camera id of the worker's machine), `detail` the camera issue, the clamp count, `91%`, `82 °C` or the backup's error, `since` when first seen, `active` past its grace period, `last_alert_at` the last alert for that issue (or `null`).
+- `GET /api/admin/alerts`: `enabled` is that subscription's flag (`false` for no or an unknown `endpoint`), `available` whether push is configured (no VAPID keys = no alerts), `issues` the open ones, oldest first: `kind` `camera_down | camera_shifted | stale | clamps | flow_mismatch | disk | cpu_temp | api_restarted | backup_failed`, `subject` the camera or zone id (for the machine issues of P8.7: `api` or the camera id of the worker's machine), `detail` the camera issue, the clamp count, both sources' counts for `flow_mismatch` (`barrier +5 (in 6, out 1), camera +2 (in 3, out 1)`), `91%`, `82 °C` or the backup's error, `since` when first seen, `active` past its grace period, `last_alert_at` the last alert for that issue (or `null`).
 
 ---
 
@@ -206,7 +206,7 @@ Auth: `Authorization: Bearer <WORKER_TOKEN>` (from `.env`). These routes are **n
 | Method | Path | Body | Response | Sent |
 |--------|------|------|----------|------|
 | POST | `/internal/observations` | `observation` | 204 | after each analysed frame (occupancy) |
-| POST | `/internal/flow-events` | `{"events": [flow, …]}` (1–100) | 200 `{"accepted": n, "duplicates": m}` | as soon as events happen (flow) |
+| POST | `/internal/flow-events` | `{"events": [flow, …]}` (1–100) | 200 `{"accepted": n, "duplicates": m}` | as soon as events happen (flow cameras and barriers) |
 | POST | `/internal/health` | `health` | 204 | every 10 s (all workers) |
 
 Delivery rules:
@@ -214,7 +214,7 @@ Delivery rules:
 - **Flow events:** must not be lost. The worker keeps an **outbox** (in memory, plus `data/outbox/<camera>.jsonl` on disk so it survives a worker restart). It retries with backoff (1 → 30 s) and removes events once the API accepts them. `event_id` makes retries safe: duplicates are ignored.
 - **Client** (`parking/workers/api_client.py`, P2.1): 5 s timeout; the outbox file is rewritten atomically after each accepted batch and deleted when empty; on start-up a torn last line (crash mid-write) and repeated `event_id`s are skipped. Every failure (network, 5xx, also 4xx) is retried with backoff, so a misconfigured token never loses events. Print mode writes each payload (flow events as a `{"events": […]}` batch) as one JSON line to stdout and sends nothing.
 - **Payload models:** `parking/messages.py`. Unknown fields are ignored (forward compatibility); timestamps are serialised as UTC with milliseconds and `Z`, and a timestamp without a zone is read as UTC.
-- **API side** (`parking/api/routes/internal.py` → `parking/api/ingest.py`, P2.7): the token is checked first (constant-time; no `WORKER_TOKEN` set = every request 401), then the body is parsed, so a request without the token always gets `401 unauthorized`. A payload that doesn't validate, or names a camera that isn't in lot.yaml with the right role, gets **422** `{"error": {"code": "bad_request", "message", "details"}}`; it's logged and counted in `/healthz` (`ingest.rejected`). Every payload goes through one lock: `StateStore` → DB rows (in a thread; a DB error is logged and counted, the in-memory state is kept) → publish the status. Flow-event duplicates are ids already in memory **or** in `flow_event` (survives restarts); clamped events are stored with `applied=false` and count as accepted.
+- **API side** (`parking/api/routes/internal.py` → `parking/api/ingest.py`, P2.7): the token is checked first (constant-time; no `WORKER_TOKEN` set = every request 401), then the body is parsed, so a request without the token always gets `401 unauthorized`. A payload that doesn't validate, or names a camera that isn't in lot.yaml with the right role, gets **422** `{"error": {"code": "bad_request", "message", "details"}}`; it's logged and counted in `/healthz` (`ingest.rejected`). Every payload goes through one lock: `StateStore` → DB rows (in a thread; a DB error is logged and counted, the in-memory state is kept) → publish the status. Flow-event duplicates are ids already in memory **or** in `flow_event` (survives restarts); clamped events are stored with `applied=false` and count as accepted. A flow event's `source` (`camera`, the default, or `barrier`, P9.3) must match the role of its `camera_id` in lot.yaml, else 422; in a zone with a flow camera **and** a barrier only one of them moves the count, the other's events are accepted and stored with `counted=false` ([barrier.md §4](barrier.md#4-one-source-or-two-api)).
 - **Crashed worker:** there's no "last will" message. The API marks a camera `down` when it hasn't received a health message for 30 s, and its zones become `stale` after `stale_after_s`.
 
 ### 5.2 API → workers (control)
@@ -247,10 +247,11 @@ Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `
 ### flow
 ```json
 {
-  "v": 1, "event_id": "6f1c2a1e-…", "camera_id": "cam-ramp", "ts": "2026-10-07T17:06:01.480Z",
+  "v": 1, "event_id": "6f1c2a1e-…", "source": "camera", "camera_id": "cam-ramp", "ts": "2026-10-07T17:06:01.480Z",
   "direction": "in", "track_id": 4412, "cls": "car", "confidence": 0.77
 }
 ```
+`source` is `camera` (the default when it is left out) or `barrier`: a car through a barrier ([barrier.md](barrier.md)), with the barrier's id as `camera_id`, `cls: "vehicle"`, `confidence: 1.0` and `track_id` = the car's number since the barrier worker started.
 
 ### health (every 10 s)
 ```json

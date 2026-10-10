@@ -99,9 +99,14 @@ class Zone(Strict):
     capacity: int | None = Field(default=None, gt=0)
     reset: ResetCfg | None = None
     map: Path | None = None  # the slot map (docs/design/slot-map.md), `slots` zones only
+    # `flow` zones with a flow camera and a barrier: the one whose events move the count
+    # (default: the barrier); the other one is only compared with it (docs/design/barrier.md)
+    counted_by: Id | None = None
 
     @model_validator(mode="after")
     def _check(self) -> Self:
+        if self.counted_by is not None and self.method != "flow":
+            raise ValueError(f"zone '{self.id}': counted_by is only allowed for 'flow' zones")
         if self.map is not None and self.method != "slots":
             raise ValueError(f"zone '{self.id}': map is only allowed for 'slots' zones")
         if self.method in ("count", "flow") and self.capacity is None:
@@ -203,13 +208,23 @@ class FlowCfg(Strict):
     motion_min_area_px: int = Field(default=1500, ge=0)
 
 
+class BarrierCfg(Strict):
+    """How a barrier's contacts become entries and exits (docs/design/barrier.md §2)."""
+
+    # pulse: every closing of `in` / `out` is one car; pair: two loops `a`, `b` along one lane
+    mode: Literal["pulse", "pair"] = "pulse"
+    min_gap_ms: int = Field(default=1000, ge=0)  # pulse: closings closer than this are one car
+    in_direction: Literal["a_to_b", "b_to_a"] = "a_to_b"  # pair
+    pair_timeout_s: float = Field(default=30, gt=0)  # pair: wait this long for the second loop
+
+
 class Camera(Strict):
     id: Id
-    role: Literal["occupancy", "flow"]
+    role: Literal["occupancy", "flow", "barrier"]
     zones: list[str] = Field(min_length=1)
     source: str
     control_url: str | None = None
-    detector: DetectorCfg
+    detector: DetectorCfg | None = None  # occupancy and flow cameras
     # occupancy cameras
     sample_every_s: float = Field(default=5, gt=0)
     slots_file: Path | None = None
@@ -220,9 +235,17 @@ class Camera(Strict):
     fps: float = Field(default=10, gt=0)
     lines_file: Path | None = None
     flow: FlowCfg = Field(default_factory=FlowCfg)
+    # barriers (a `cameras` entry without a camera: the contacts of a barrier controller)
+    barrier: BarrierCfg = Field(default_factory=BarrierCfg)
 
     @model_validator(mode="after")
     def _check(self) -> Self:
+        if self.role == "barrier":
+            if len(self.zones) != 1:
+                raise ValueError(f"barrier '{self.id}': a barrier counts for exactly one zone")
+            return self
+        if self.detector is None:
+            raise ValueError(f"camera '{self.id}': {self.role} cameras need a detector")
         if self.role == "occupancy" and self.slots_file is None:
             raise ValueError(f"camera '{self.id}': occupancy cameras need slots_file")
         if self.role == "flow" and self.lines_file is None:
@@ -268,12 +291,41 @@ class LotConfig(Strict):
             roles = [c.role for c in self.cameras if zone.id in c.zones]
             if zone.method == "slots" and "occupancy" not in roles:
                 raise ValueError(f"zone '{zone.id}': 'slots' zones need an occupancy camera")
-            if zone.method == "flow" and roles.count("flow") != 1:
+            if zone.method != "flow":
+                if "barrier" in roles:
+                    raise ValueError(f"zone '{zone.id}': a barrier needs a 'flow' zone")
+                continue
+            for role in ("flow", "barrier"):
+                if roles.count(role) > 1:
+                    kind = "flow camera" if role == "flow" else "barrier"
+                    raise ValueError(
+                        f"zone '{zone.id}': 'flow' zones take one {kind} at most, "
+                        f"found {roles.count(role)}"
+                    )
+            sources = self.flow_sources(zone.id)
+            if not sources:
+                raise ValueError(f"zone '{zone.id}': 'flow' zones need a flow camera or a barrier")
+            if zone.counted_by is not None and zone.counted_by not in sources:
                 raise ValueError(
-                    f"zone '{zone.id}': 'flow' zones need exactly one flow camera, "
-                    f"found {roles.count('flow')}"
+                    f"zone '{zone.id}': counted_by '{zone.counted_by}' is not its flow camera "
+                    "or barrier"
                 )
         return self
+
+    def flow_sources(self, zone_id: str) -> list[str]:
+        """The ids of a `flow` zone's barrier and flow camera, the barrier first."""
+        cams = [c for c in self.cameras if zone_id in c.zones and c.role in ("barrier", "flow")]
+        return [c.id for c in sorted(cams, key=lambda c: c.role)]
+
+    def flow_counter(self, zone_id: str) -> str:
+        """The source whose events move a `flow` zone's count: `counted_by`, else the barrier,
+        else the flow camera."""
+        return self.zone(zone_id).counted_by or self.flow_sources(zone_id)[0]
+
+    def flow_checker(self, zone_id: str) -> str | None:
+        """The zone's other source, only compared with the counting one (None = just one)."""
+        counter = self.flow_counter(zone_id)
+        return next((s for s in self.flow_sources(zone_id) if s != counter), None)
 
     def zone(self, zone_id: str) -> Zone:
         return next(z for z in self.zones if z.id == zone_id)
@@ -490,6 +542,9 @@ class Settings(BaseSettings):
     # a camera plugged into the vision host (docker-compose.device.yml / .picamera.yml)
     camera_device: str | None = None
     video_gid: int | None = None
+    # a barrier's contacts on this machine's GPIO header (docker-compose.barrier.yml)
+    barrier_gpiochip: str | None = None
+    gpio_gid: int | None = None
     media_major: int | None = None
     dma_heap_major: int | None = None
     heartbeat_file: Path | None = None  # set by the vision image, not in .env

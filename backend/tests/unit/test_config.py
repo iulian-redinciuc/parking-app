@@ -117,12 +117,66 @@ def test_slots_zone_needs_occupancy_camera(raw):
     invalid(raw, "zone 'ground': 'slots' zones need an occupancy camera")
 
 
-def test_flow_zone_needs_exactly_one_flow_camera(raw):
+def test_flow_zone_needs_one_flow_camera_or_barrier(raw):
     second = dict(raw["cameras"][1], id="cam-ramp-2")
     raw["cameras"].append(second)
-    invalid(raw, "zone 'underground': 'flow' zones need exactly one flow camera, found 2")
+    invalid(raw, "zone 'underground': 'flow' zones take one flow camera at most, found 2")
     raw["cameras"] = raw["cameras"][:1]
-    invalid(raw, "found 0")
+    invalid(raw, "zone 'underground': 'flow' zones need a flow camera or a barrier")
+
+
+BARRIER = {
+    "id": "barrier-ramp",
+    "role": "barrier",
+    "zones": ["underground"],
+    "source": "gpio:/dev/gpiochip0?in=17&out=27",
+}
+
+
+def test_barrier_alone_or_next_to_the_flow_camera(raw):
+    raw["cameras"].append(dict(BARRIER))
+    config = LotConfig.model_validate(raw)
+    barrier = config.camera("barrier-ramp")
+    assert barrier.detector is None and barrier.barrier.mode == "pulse"
+    assert (barrier.barrier.min_gap_ms, barrier.barrier.pair_timeout_s) == (1000, 30)
+    # with both, the barrier counts and the camera is compared with it
+    assert config.flow_sources("underground") == ["barrier-ramp", "cam-ramp"]
+    assert config.flow_counter("underground") == "barrier-ramp"
+    assert config.flow_checker("underground") == "cam-ramp"
+    raw["zones"][1]["counted_by"] = "cam-ramp"
+    config = LotConfig.model_validate(raw)
+    assert config.flow_counter("underground") == "cam-ramp"
+    assert config.flow_checker("underground") == "barrier-ramp"
+    # the barrier alone
+    raw["zones"][1]["counted_by"] = None
+    raw["cameras"] = [raw["cameras"][0], dict(BARRIER)]
+    config = LotConfig.model_validate(raw)
+    assert config.flow_counter("underground") == "barrier-ramp"
+    assert config.flow_checker("underground") is None
+
+
+def test_barrier_rules(raw):
+    raw["cameras"].append(dict(BARRIER, zones=["ground"]))
+    invalid(raw, "zone 'ground': a barrier needs a 'flow' zone")
+    raw["cameras"][2] = dict(BARRIER, zones=["underground", "ground"])
+    invalid(raw, "barrier 'barrier-ramp': a barrier counts for exactly one zone")
+    raw["cameras"][2] = dict(BARRIER)
+    raw["cameras"].append(dict(BARRIER, id="barrier-2"))
+    invalid(raw, "zone 'underground': 'flow' zones take one barrier at most, found 2")
+    raw["cameras"].pop()
+    raw["zones"][1]["counted_by"] = "cam-ground"
+    invalid(raw, "counted_by 'cam-ground' is not its flow camera or barrier")
+    raw["zones"][1]["counted_by"] = None
+    raw["zones"][0]["counted_by"] = "cam-ground"
+    invalid(raw, "zone 'ground': counted_by is only allowed for 'flow' zones")
+    raw["zones"][0].pop("counted_by")
+    raw["cameras"][2]["barrier"] = {"mode": "loops"}
+    invalid(raw, r"cameras\.2\.barrier\.mode")
+
+
+def test_cameras_still_need_a_detector(raw):
+    del raw["cameras"][1]["detector"]
+    invalid(raw, "camera 'cam-ramp': flow cameras need a detector")
 
 
 @pytest.mark.parametrize("method", ["count", "flow"])

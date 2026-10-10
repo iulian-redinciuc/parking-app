@@ -300,6 +300,21 @@ Notes:
 - Without Docker (a quick try on a Pi): `uv run parking grab --camera cam-ground --source "picamera:0?width=4608&height=2592"` from `backend/`, with `rpicam-apps` installed and the user in the `video` group.
 - Not yet run against a real camera (none on the dev Pi): there, the container starts with both overrides, `rpicam-vid` runs inside it and answers `no cameras available`, and the worker logs exactly that and keeps retrying.
 
+### 4.4 A barrier's contacts on the vision host (P9.3)
+
+The barrier worker ([barrier.md](barrier.md)) is the service `barrier` (container `parking-barrier`) in `docker-compose.yml` and `docker-compose.site.yml`, behind the profile `barrier`, so it only exists where it is asked for. It runs the `parking-vision` image (`parking worker barrier --camera barrier-ramp`) with the §4.1 hardening, the §4.2 heartbeat healthcheck and autoheal label, fixed limits (0.25 CPU, 256 MB) and no published port.
+
+Its `gpio:` source needs the GPIO chip inside the container. That is the opt-in override `docker-compose.barrier.yml`, built like the camera overrides of §4.3: it adds one device (`BARRIER_GPIOCHIP`, default `/dev/gpiochip0`, the same path as in the barrier's `source`) and the host's `gpio` group (`GPIO_GID`; the file refuses to start without it), and nothing that loosens the hardening.
+
+```bash
+cd deploy          # /opt/parking/deploy on the lot box
+echo "GPIO_GID=$(getent group gpio | cut -d: -f3)" >> .env
+docker compose -f docker-compose.site.yml -f docker-compose.barrier.yml --profile barrier up -d   # one machine: -f docker-compose.yml
+docker logs -f parking-barrier       # "contacts open (in, out)", then one line per car; or why the contacts can't be opened
+```
+
+Keep the same `-f` files and the profile in every later command. A `contacts:` source (a replayed file) needs neither the override nor `GPIO_GID`. The dev override (`docker-compose.dev.yml`) builds the service's image locally like the other workers'.
+
 ## 5. Public access for the API
 
 Only `/api/*` and `/healthz` may be reachable from the internet. `/internal/*` and the workers' `/control/*` must never be.

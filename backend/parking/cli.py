@@ -1785,6 +1785,42 @@ def worker_flow(
         _fail(str(e))
 
 
+@worker_app.command("barrier")
+def worker_barrier(
+    camera: Annotated[
+        str, typer.Option(help="Barrier id in the config (a cameras entry with role: barrier).")
+    ],
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    print_mode: Annotated[
+        bool,
+        typer.Option(
+            "--print", help="Print flow events and health as JSON lines instead of sending."
+        ),
+    ] = False,
+    max_events: Annotated[int, typer.Option(help="Stop after this many cars (0 = never).")] = 0,
+) -> None:
+    """Run the barrier worker: read the barrier's contacts and send one in/out event per car."""
+    import logging
+
+    from parking.workers.barrier_worker import BarrierWorker
+    from parking.workers.base import WorkerError, load_settings
+
+    if max_events < 0:
+        raise typer.BadParameter("must be >= 0", param_hint="--max-events")
+
+    config = _find_config(config)
+    settings = load_settings(config.resolve().parent.parent)
+    logging.basicConfig(
+        level=settings.log_level.upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    try:
+        worker = BarrierWorker(config, camera, print_mode=print_mode, settings=settings)
+        worker.run(max_events or None)
+    except WorkerError as e:
+        _fail(str(e))
+
+
 @app.command("api")
 def api(
     config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,

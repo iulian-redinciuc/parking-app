@@ -228,6 +228,7 @@ occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
 - `correct(new_value)` sets the value and resets the confidence counters; the actor and note go in the `correction` row the ingestor writes (admin endpoint, or the `reset-<zone>` job at `zones[].reset.cron`, actor `scheduled-reset`).
 - The current value is persisted (latest `zone_state` row), so a restart continues from it.
 - When clamping happens (e.g. OUT at 0), log a `clamped` warning. A frequent clamp means the count is off.
+- The events come from the zone's flow camera or from a **barrier** (P9.3, [barrier.md](barrier.md)). With both, only the counting one (`LotConfig.flow_counter`: `counted_by`, else the barrier) reaches the counter; the other is stored and compared.
 
 ## 8. Fusion, confidence, trend (`parking/core/fusion.py`)
 
@@ -244,7 +245,7 @@ occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
 
 `StateStore(config, clock, slot_files)` implements this (P2.5):
 - `apply_observation(obs)`, `apply_health(msg)`, `tick()` (every second) and `restore(slot_states, zone_counts, updated_at, trend)` each return a list of changes: `SlotChange(ts, camera_id, slot_id, taken)` when a smoothed slot flips (or is first seen), and `ZoneChange(ts, zone_id, occupied, free, level, confidence, stale, trend, count_changed, source)` when anything a client sees about a zone changes. `count_changed` tells the DB layer whether to write a `zone_state` row; `source` is `observation | health | tick | startup`. `status(lang)` builds the `LotStatus` (`has_data` is false until the first observation or restore → `503`).
-- **Stale** = the zone never had data, or one of its cameras reported `down`, or no fresh data from one of its cameras for `stale_after_s`. Fresh data is an observation (occupancy cameras) or a non-`down` health message (flow cameras: no cars crossing is normal). Freshness is measured with the API's clock at receipt, never the worker's `ts`. Zone `updated_at` = receipt time of the latest data.
+- **Stale** = the zone never had data, or one of its cameras reported `down`, or no fresh data from one of its cameras for `stale_after_s`. Fresh data is an observation (occupancy cameras) or a non-`down` health message (flow cameras and barriers: no cars crossing is normal; of a flow zone's two sources only the counting one matters). Freshness is measured with the API's clock at receipt, never the worker's `ts`. Zone `updated_at` = receipt time of the latest data.
 - Confidence uses the last non-`down` health state of the zone's cameras (`ok` until the first health message; any `degraded` camera lowers the zone). Flow confidence is rounded to 2 decimals.
 - Slot readings for slots not in the camera's slot file (or in a zone the camera doesn't cover) are ignored with a warning. `occupied` is clamped to the zone capacity. A count zone seen by several cameras sums their medians.
 - Trend: a per-zone buffer of `(ts, free)` appended whenever `free` changes, kept 20 min; Δfree = free now − free at `now − trend_window_min` (the oldest sample while the history is shorter). `tick()` also reports trend flips.

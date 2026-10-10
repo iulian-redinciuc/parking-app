@@ -7,6 +7,7 @@
 #   docker compose --profile public up -d   ...   docker compose --profile public down
 # Dev phone testing without a domain (quick tunnel, P3.9): scripts/dev-public.sh up | down | url
 # Entry/exit camera (Phase 5): docker compose --profile flow up -d
+# Barrier contacts (P9.3):     docker compose -f docker-compose.yml -f docker-compose.barrier.yml --profile barrier up -d
 name: parking
 
 # Hardening (P8.4, deployment.md §4.1): read-only root filesystem, no capabilities, no privilege gain,
@@ -91,6 +92,20 @@ services:
     networks: [internal, egress]                               # egress: reach the camera
     deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: "${FLOW_MEMORY:-1200M}" } } }
     environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck: *worker-healthcheck
+    labels: { parking.autoheal: "true" }                       # restarted when unhealthy (autoheal)
+
+  barrier:                                                     # a barrier's contacts (barrier.md)
+    <<: *common
+    container_name: parking-barrier
+    image: ghcr.io/iulian-redinciuc/parking-vision:${PARKING_VERSION:-latest}
+    command: ["barrier", "--camera", "barrier-ramp"]
+    profiles: ["barrier"]
+    networks: [internal]                                       # only the API
+    deploy: { resources: { limits: { cpus: "0.25", memory: 256M } } }
+    environment: { API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
     depends_on:
       api: { condition: service_healthy }
     healthcheck: *worker-healthcheck
