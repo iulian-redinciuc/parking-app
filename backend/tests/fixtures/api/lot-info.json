@@ -9,5 +9,6 @@
     { "id": "ground", "name": "Ground", "method": "slots", "capacity": 40 },
     { "id": "underground", "name": "Underground", "method": "flow", "capacity": 60 }
   ],
-  "levels": { "plenty": 0.2, "filling": 0.05 }
+  "levels": { "plenty": 0.2, "filling": 0.05 },
+  "privacy": { "operator": null, "contact": null }
 }

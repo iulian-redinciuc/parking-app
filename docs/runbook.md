@@ -82,6 +82,24 @@ Because `.env` came back with its VAPID keys and tokens, push subscriptions, the
 
 **Restore drill** (do it again after big changes, and once with a real production backup): the commands are in the [phase guide P8.6](phases/phase-8-hardening.md#p86-backups-and-restore); they restore into a scratch folder and start the API without network, so the drill can run on any machine with Docker and rclone without touching a running stack.
 
+## Privacy check
+
+With the quarterly security check ([security-privacy.md §4.1](design/security-privacy.md#41-privacy-deliverables-p89)):
+
+```bash
+docker exec parking-api /app/backend/.venv/bin/parking db retention      # server: "retention: ok", exit 0
+find /opt/parking/data/debug -type f -mmin +$((24*60+10))                # lot box: prints nothing
+grep -E '^(DEBUG_CAPTURE|DEBUG_RETENTION_HOURS)=' /opt/parking/deploy/.env   # lot box: false / 24 unless you are debugging
+```
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| `OVERDUE n row(s)` | `docker logs parking-api 2>&1 \| grep -E 'prune\|maintenance job failed' \| tail` (one `prune: …` line a day, at 04:00 lot time) | By hand: `docker exec parking-api /app/backend/.venv/bin/parking db prune`; if the job never logs, restart the API and look at the error |
+| Old files in `data/debug/` | `docker ps --filter name=parking-vision` (the workers do the pruning, also with capture off) | Start the worker; a longer `DEBUG_RETENTION_HOURS` left from collecting the validation set goes back to 24 |
+| The Privacy screen says "on the signs at the lot" instead of the operator | `curl -s https://<PUBLIC_HOST>/api/lot \| grep -o '"privacy":{[^}]*}'` | Set `PRIVACY_OPERATOR` / `PRIVACY_CONTACT` in the server's `.env`, then `docker compose -f docker-compose.server.yml --profile web up -d` |
+
+When what the system stores changes, the Privacy screen's texts (`frontend/src/i18n/locales/*.json`, `privacy.*`), the table in security-privacy.md §4.1 and the signs change with it.
+
 ## Security check
 
 After every change to the public entry, the firewall, `.env` or the Compose files, and once a quarter ([security-privacy.md §2.1](design/security-privacy.md#21-checking-the-controls-p88)):

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 import {
   getAdminAlerts,
   getAdminToken,
@@ -104,6 +105,12 @@ export default function NotificationsScreen() {
     <section className="flex flex-col gap-4 py-4" aria-busy={view === 'checking'}>
       <h1 className="text-2xl font-bold">{t('screen.alerts')}</h1>
       <p className="text-muted">{t('alerts.intro')}</p>
+      <p className="text-sm text-muted">
+        {t('alerts.privacy_note')}{' '}
+        <Link to="/privacy" className="text-accent underline">
+          {t('alerts.privacy_link')}
+        </Link>
+      </p>
       {IS_MOCK && <p className="text-sm text-muted">{t('alerts.mock_note')}</p>}
 
       {view === 'unsupported' && (

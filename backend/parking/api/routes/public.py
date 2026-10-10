@@ -106,6 +106,8 @@ async def lot(rt: RuntimeDep, lang: LangDep, response: Response) -> dict:
             for z in cfg.zones
         ],
         "levels": {"plenty": cfg.api.levels.plenty, "filling": cfg.api.levels.filling},
+        # who runs the cameras, for the Privacy screen (security-privacy.md §4.1)
+        "privacy": {"operator": s.privacy_operator, "contact": s.privacy_contact},
     }
 
 

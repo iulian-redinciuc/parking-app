@@ -86,6 +86,8 @@ Slot/line editor (`#/admin/cameras/<id>/edit`, `screens/admin/SlotEditor.tsx`, P
 ### 2.5 Privacy (`#/privacy`): Phase 8
 Static text: what is processed, what's stored, location never leaves the phone.
 
+As built (P8.9, `src/screens/PrivacyScreen.tsx`, texts `privacy.*`): one short list per topic: *The cameras at the lot* (counting only, each picture analysed at the lot and discarded, no video, no plates or faces, only numbers leave the lot, the admin's live picture and the reference picture, short-lived debug pictures), *What is stored* (the retention periods of [data-model.md §4](data-model.md#4-retention-and-rollups-apscheduler-jobs-in-the-api)), *Your location* (on the phone only), *Notifications* (what a subscription holds, deleted on turning them off, 30-day log, the browser maker's push service), *On this device* (browser storage; no cookies, analytics or third parties), *Technical logs* (IP address), *Who is responsible* (the operator and contact from `privacy` in `GET /api/lot`, an e-mail address as a `mailto:` link; without them "on the signs at the lot"; the rights). **A change to what the system stores or for how long must change these texts in the same commit** ([security-privacy.md §4.1](security-privacy.md#41-privacy-deliverables-p89)). Reached from the **footer** (`src/components/Footer.tsx`: a *Privacy* link under every screen, above the bottom nav, 44 px high) and from a line under the Alerts screen's intro (*Your location never leaves this phone. How your data is handled*).
+
 ## 3. Live data (`src/api/live.ts` + `useLiveStatus`)
 
 ```ts

@@ -12,7 +12,8 @@ its buckets first, so every job can safely redo the last few minutes/hours.
 
 `prune` deletes rows past the retention periods, but always keeps the newest `zone_state`
 per zone and `slot_state` per slot: they're what the API restores at start-up and the value
-the next minute carries in.
+the next minute carries in. `retention_report` is the check that it really happened: the
+oldest row of every table and how many rows are still there past their period.
 """
 
 from __future__ import annotations
@@ -27,8 +28,10 @@ from sqlmodel import Session, select
 
 from parking.db.models import (
     AdminSession,
+    Correction,
     FlowEvent,
     NotificationLog,
+    PushSubscription,
     SlotState,
     ZoneHour,
     ZoneMinute,
@@ -264,20 +267,97 @@ def backfill(
     return minutes_written, hours_written
 
 
+def _expired(now: datetime, retention: Retention) -> dict[str, tuple]:
+    """table -> (model, time column, the condition for rows past their retention)."""
+    raw = now - retention.raw
+    newest_zone = select(func.max(ZoneState.id)).group_by(ZoneState.zone_id)
+    newest_slot = select(func.max(SlotState.id)).group_by(SlotState.camera_id, SlotState.slot_id)
+    return {
+        "zone_state": (
+            ZoneState,
+            ZoneState.ts,
+            (ZoneState.ts < raw, ZoneState.id.not_in(newest_zone)),
+        ),
+        "slot_state": (
+            SlotState,
+            SlotState.ts,
+            (SlotState.ts < raw, SlotState.id.not_in(newest_slot)),
+        ),
+        "flow_event": (FlowEvent, FlowEvent.ts, (FlowEvent.ts < raw,)),
+        "zone_minute": (
+            ZoneMinute,
+            ZoneMinute.bucket_ts,
+            (ZoneMinute.bucket_ts < now - retention.minute,),
+        ),
+        "notification_log": (
+            NotificationLog,
+            NotificationLog.ts,
+            (NotificationLog.ts < now - retention.log,),
+        ),
+        "admin_session": (AdminSession, AdminSession.expires_at, (AdminSession.expires_at < now,)),
+    }
+
+
 def prune(
     session: Session, now: datetime, retention: Retention = DEFAULT_RETENTION
 ) -> dict[str, int]:
     """Delete rows past `retention` and expired admin sessions; returns rows deleted per
     table. The newest `zone_state` per zone and `slot_state` per slot are always kept."""
-    raw = now - retention.raw
-    newest_zone = select(func.max(ZoneState.id)).group_by(ZoneState.zone_id)
-    newest_slot = select(func.max(SlotState.id)).group_by(SlotState.camera_id, SlotState.slot_id)
-    statements = {
-        "zone_state": delete(ZoneState).where(ZoneState.ts < raw, ZoneState.id.not_in(newest_zone)),
-        "slot_state": delete(SlotState).where(SlotState.ts < raw, SlotState.id.not_in(newest_slot)),
-        "flow_event": delete(FlowEvent).where(FlowEvent.ts < raw),
-        "zone_minute": delete(ZoneMinute).where(ZoneMinute.bucket_ts < now - retention.minute),
-        "notification_log": delete(NotificationLog).where(NotificationLog.ts < now - retention.log),
-        "admin_session": delete(AdminSession).where(AdminSession.expires_at < now),
+    return {
+        table: session.exec(delete(model).where(*where)).rowcount
+        for table, (model, _, where) in _expired(now, retention).items()
     }
-    return {table: session.exec(stmt).rowcount for table, stmt in statements.items()}
+
+
+# the prune job runs once a day, so a row may outlive its period by up to a day
+PRUNE_GRACE = DAY + HOUR
+
+# tables with no retention period, and why (shown by `parking db retention`)
+KEPT = {
+    "zone_hour": (ZoneHour, ZoneHour.bucket_ts, "kept: hourly averages for the stats"),
+    "correction": (Correction, Correction.ts, "kept: audit log of count corrections"),
+    "push_subscription": (
+        PushSubscription,
+        PushSubscription.created_at,
+        "kept until the device unsubscribes or its push address stops working",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class TableRetention:
+    table: str
+    rows: int
+    oldest: datetime | None  # the table's oldest time (admin_session: the earliest expiry)
+    keep: str  # "90 days", "until it expires", or why it is kept
+    overdue: int  # rows the daily prune should have deleted by now
+
+
+def retention_report(
+    session: Session, now: datetime, retention: Retention = DEFAULT_RETENTION
+) -> list[TableRetention]:
+    """What the retention jobs left behind (data-model.md §4): per table its rows, its oldest
+    time and how many rows are past their period by more than `PRUNE_GRACE`. `overdue` > 0
+    means the prune job isn't deleting. The newest `zone_state` per zone and `slot_state` per
+    slot never count: they are kept on purpose, so `oldest` can be older than the period."""
+    keep = {
+        "zone_state": retention.raw,
+        "slot_state": retention.raw,
+        "flow_event": retention.raw,
+        "zone_minute": retention.minute,
+        "notification_log": retention.log,
+    }
+
+    def stats(model, column) -> tuple[int, datetime | None]:
+        return session.exec(select(func.count(), func.min(column)).select_from(model)).one()
+
+    out: list[TableRetention] = []
+    for table, (model, column, where) in _expired(now - PRUNE_GRACE, retention).items():
+        rows, oldest = stats(model, column)
+        overdue = session.exec(select(func.count()).select_from(model).where(*where)).one()
+        period = f"{keep[table] / DAY:g} days" if table in keep else "until it expires"
+        out.append(TableRetention(table, rows, oldest, period, overdue))
+    for table, (model, column, why) in KEPT.items():
+        rows, oldest = stats(model, column)
+        out.append(TableRetention(table, rows, oldest, why, 0))
+    return out

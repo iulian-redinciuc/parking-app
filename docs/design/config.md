@@ -225,6 +225,7 @@ Git-ignored. One row per count during the drift test (P5.11): ISO time (no offse
 | `TZ` | `Europe/Bucharest` | all |
 | `PARKING_CONFIG` | `/app/config/lot.yaml` | all |
 | `LOT_LAT`, `LOT_LON` | `51.5007`, `-0.1246` (example) | API (lot location) |
+| `PRIVACY_OPERATOR`, `PRIVACY_CONTACT` | empty; production: who runs the cameras and how to reach them (an e-mail address or free text), the same as on the signs at the lot | API (`privacy` in `GET /api/lot`, shown on the [Privacy screen](frontend.md#25-privacy-privacy-phase-8)) |
 | `PARKING_DB_URL` | `sqlite:////app/data/db/parking.sqlite` | API |
 | `WORKER_TOKEN` | `openssl rand -hex 32` | API, workers (internal endpoints) |
 | `API_INTERNAL_URL` | `http://api:8000` (same machine) or `http://<api-vpn-address>:8000` (T2) | workers |

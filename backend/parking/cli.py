@@ -1747,6 +1747,49 @@ def db_prune(
         typer.echo(f"{table}: {count} row(s) deleted")
 
 
+@db_app.command("retention")
+def db_retention(
+    raw_days: Annotated[
+        float, typer.Option(min=0, help="Period of slot_state, zone_state, flow_event.")
+    ] = 90,
+    minute_days: Annotated[float, typer.Option(min=0, help="Period of zone_minute.")] = 30,
+    log_days: Annotated[float, typer.Option(min=0, help="Period of notification_log.")] = 30,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    url: DbUrl = None,
+) -> None:
+    """Check that the retention jobs delete: the oldest row of every table and the rows past
+    their period (exit 1 if there are any). Deletes nothing."""
+    from datetime import timedelta
+
+    from parking.core.clock import SystemClock
+    from parking.db.engine import session_scope
+    from parking.db.rollups import Retention, retention_report
+
+    _, engine = _db_engine(config, url)
+    retention = Retention(
+        raw=timedelta(days=raw_days),
+        minute=timedelta(days=minute_days),
+        log=timedelta(days=log_days),
+    )
+    now = SystemClock().now()
+    try:
+        with session_scope(engine) as session:
+            report = retention_report(session, now, retention)
+    finally:
+        engine.dispose()
+    for r in report:
+        if r.oldest is None:
+            oldest = "empty"
+        else:
+            oldest = f"oldest {r.oldest:%Y-%m-%d %H:%M} ({(now - r.oldest).days} d)"
+        verdict = f"OVERDUE {r.overdue} row(s)" if r.overdue else "ok"
+        typer.echo(f"{r.table:18} {r.rows:>8} row(s)  {oldest:32} {r.keep}: {verdict}")
+    overdue = sum(r.overdue for r in report)
+    if overdue:
+        _fail(f"retention: {overdue} row(s) past their period, the prune job isn't deleting")
+    typer.echo("retention: ok, nothing is kept past its period")
+
+
 def _backup_paths(config: Path, url: str | None) -> tuple[Path, Path, Path]:
     """`(database file, config/, data/reference/)` under the app root."""
     from parking.db.backup import sqlite_path

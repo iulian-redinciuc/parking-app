@@ -325,6 +325,116 @@ def test_cli_aggregate_backfill_and_prune(lot, url, engine):
     assert result.exit_code == 0, result.output
 
 
+def test_retention_report_counts_only_rows_the_prune_missed(engine):
+    """P8.9: the report is the proof that the retention jobs delete (security-privacy.md §4.1)."""
+    now = T0 + timedelta(days=200)
+    old = now - timedelta(days=120)
+    with session_scope(engine) as session:
+        # kept on purpose although old: the newest row of its zone / slot
+        session.add(state(old, "underground", 5, capacity=60))
+        session.add(SlotState(ts=old, camera_id="cam", slot_id="B", taken=True))
+        # inside the periods, or past them by less than the daily job's grace
+        session.add(state(now - timedelta(days=90, hours=20), "ground", 1))
+        session.add(state(now - timedelta(days=1), "ground", 2))
+        session.add(
+            NotificationLog(
+                ts=now - timedelta(days=29),
+                subscription_id="s",
+                kind="test",
+                payload={},
+                status="sent",
+            )
+        )
+        session.add(
+            AdminSession(token_hash="a", created_at=now, expires_at=now - timedelta(hours=2))
+        )
+        session.add(
+            Correction(ts=old, zone_id="underground", old_occupied=0, new_occupied=1, actor="x")
+        )
+    with session_scope(engine) as session:
+        report = {r.table: r for r in rollups.retention_report(session, now)}
+    assert [r.overdue for r in report.values()] == [0] * 9
+    assert (report["zone_state"].rows, report["zone_state"].oldest) == (3, old)
+    assert report["zone_state"].keep == "90 days" and report["zone_minute"].keep == "30 days"
+    assert report["admin_session"].keep == "until it expires"
+    assert (report["correction"].rows, report["correction"].overdue) == (1, 0)
+    assert report["flow_event"].oldest is None and report["push_subscription"].rows == 0
+
+    # the same rows a prune would have deleted long ago: every one is reported
+    with session_scope(engine) as session:
+        # (the newest row of a zone / slot is the one with the highest id)
+        session.add(state(old - timedelta(days=1), "ground", 3))
+        session.add(state(now - timedelta(hours=1), "ground", 4))
+        session.add(
+            SlotState(ts=old - timedelta(days=1), camera_id="cam", slot_id="B", taken=False)
+        )
+        session.add(
+            SlotState(ts=now - timedelta(hours=1), camera_id="cam", slot_id="B", taken=True)
+        )
+        session.add(
+            FlowEvent(
+                event_id="e",
+                ts=old,
+                camera_id="cam-ramp",
+                zone_id="underground",
+                direction="in",
+                track_id=1,
+                confidence=0.9,
+                applied=True,
+            )
+        )
+        session.add(
+            ZoneMinute(
+                zone_id="ground",
+                bucket_ts=now - timedelta(days=40),
+                free_avg=1,
+                free_min=1,
+                free_max=1,
+                occupied_avg=1,
+                samples=1,
+            )
+        )
+        session.add(
+            NotificationLog(ts=old, subscription_id="s", kind="test", payload={}, status="sent")
+        )
+        session.add(
+            AdminSession(token_hash="b", created_at=old, expires_at=now - timedelta(days=3))
+        )
+    with session_scope(engine) as session:
+        report = {r.table: r.overdue for r in rollups.retention_report(session, now)}
+        assert report == {
+            "zone_state": 1,
+            "slot_state": 2,  # slot B's first row is no longer its newest
+            "flow_event": 1,
+            "zone_minute": 1,
+            "notification_log": 1,
+            "admin_session": 1,
+            "zone_hour": 0,
+            "correction": 0,
+            "push_subscription": 0,
+        }
+        rollups.prune(session, now)
+    with session_scope(engine) as session:
+        assert sum(r.overdue for r in rollups.retention_report(session, now)) == 0
+
+
+def test_cli_retention_fails_until_pruned(lot, url, engine):
+    now = datetime.now(UTC)
+    with session_scope(engine) as session:
+        session.add(state(now - timedelta(days=100), "ground", 1))
+        session.add(state(now - timedelta(hours=3), "ground", 4))
+    args = ["--config", str(lot / "config" / "lot.yaml"), "--url", url]
+    runner = CliRunner()
+    result = runner.invoke(cli, ["db", "retention", *args])
+    assert result.exit_code == 1, result.output
+    assert "OVERDUE 1 row(s)" in result.output and "1 row(s) past their period" in result.output
+    assert runner.invoke(cli, ["db", "prune", *args]).exit_code == 0
+    result = runner.invoke(cli, ["db", "retention", *args])
+    assert result.exit_code == 0, result.output
+    assert "retention: ok" in result.output and "OVERDUE" not in result.output
+    assert "zone_hour" in result.output and "kept: hourly averages" in result.output
+
+
 def test_api_runs_the_jobs_on_ingested_changes(lot):
     clock = FakeClock(T0)
     settings = Settings(_env_file=None, worker_token=WORKER)

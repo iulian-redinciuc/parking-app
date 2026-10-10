@@ -160,6 +160,14 @@ async def test_lot_info(lot):
                 {"id": "underground", "name": "Underground", "method": "flow", "capacity": 60},
             ],
             "levels": {"plenty": 0.2, "filling": 0.05},
+            "privacy": {"operator": None, "contact": None},
+        }
+    # PRIVACY_OPERATOR / PRIVACY_CONTACT are what the Privacy screen shows
+    app = make_app(lot, privacy_operator="Example SRL", privacy_contact="privacy@example.com")
+    async with client_for(app) as client:
+        assert (await client.get("/api/lot")).json()["privacy"] == {
+            "operator": "Example SRL",
+            "contact": "privacy@example.com",
         }
     # LOT_LAT / LOT_LON from the settings win over lot.yaml
     async with client_for(make_app(lot, lot_lat=51.5, lot_lon=-0.12)) as client:

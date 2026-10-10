@@ -61,7 +61,7 @@ if [ "$ROLE" = server ]; then
     set_var PUBLIC_APP_URL "https://$PUBLIC_HOST/"
     public=
   fi
-  todo="LOT_LAT / LOT_LON, ${public}VAPID_SUBJECT,
+  todo="LOT_LAT / LOT_LON, PRIVACY_OPERATOR / PRIVACY_CONTACT (the Privacy screen, P8.9), ${public}VAPID_SUBJECT,
   ADMIN_PASSWORD_HASH (${cli[*]} admin hash-password; with docker add -it),
   TUNNEL_TOKEN (only for a Cloudflare tunnel instead of parking-web, P8.3),
   API_CPUS / API_MEMORY / WEB_CPUS / WEB_MEMORY after measuring (P8.4 step 2, P8.10)"

@@ -1,8 +1,13 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render as renderDom, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { adminLogin, getAdminAlerts, MOCK_ADMIN_PASSWORD, setAdminToken } from '../api/client'
 import * as push from '../lib/push'
 import NotificationsScreen from './NotificationsScreen'
+
+// the screen links to #/privacy, so it needs a router around it
+const render = (ui: ReactElement) => renderDom(ui, { wrapper: MemoryRouter })
 
 // vitest runs without VITE_API_BASE, so the screen talks to the mock: subscribing only asks for
 // permission and the test notification is shown by the service worker stub.

@@ -267,7 +267,23 @@ nc -vz -w 3 <camera address> 554; nc -vz -w 3 <camera address> 80       # both m
 4. Verify the retention jobs actually delete data (query the oldest rows).
 5. **T3 only:** document that video travels to the cloud machine (encrypted VPN), and how long nothing is kept there.
 
+**Files:** `frontend/src/screens/PrivacyScreen.tsx`, `frontend/src/components/Footer.tsx`, `frontend/e2e/privacy.spec.ts`, `backend/parking/db/rollups.py` (`retention_report`), `parking db retention`, `PRIVACY_OPERATOR` / `PRIVACY_CONTACT` → `privacy` in `GET /api/lot`; what each deliverable is and the sign text: [security-privacy.md §4.1](../design/security-privacy.md#41-privacy-deliverables-p89).
+
+**Commands** (production, after P8.3; needs a release tagged after this task):
+```bash
+# on the server: who runs the cameras, for the Privacy screen
+cd /opt/parking/deploy && nano .env       # PRIVACY_OPERATOR=…  PRIVACY_CONTACT=…
+docker compose -f docker-compose.server.yml --profile web up -d
+curl -s https://<PUBLIC_HOST>/api/lot | grep -o '"privacy":{[^}]*}'
+# step 4, on the server: nothing is kept past its period (exit 1 and OVERDUE lines otherwise)
+docker exec parking-api /app/backend/.venv/bin/parking db retention
+# step 4, on the lot box: no debug capture older than DEBUG_RETENTION_HOURS (prints nothing)
+find /opt/parking/data/debug -type f -mmin +$((24*60+10))
+```
+
 **Done when:** the checklist is complete, the signage is up, and the privacy screen is live.
+
+*Status (P8.9):* steps 3 and 4 are built and tested: the Privacy screen with its two links, and `parking db retention`, checked on a copy of the dev Pi's database (ok as it is; 16 planted rows 95–200 days old reported as overdue, gone after `parking db prune`). Step 5 doesn't apply (T2: no picture leaves the lot; the note for T3 is in security-privacy.md §4.1). Still open, because only the operator can do them: the private notes of step 1 (a draft with the technical facts filled in is on the dev Pi, `out/privacy/gdpr-notes.md`, git-ignored), the signs (step 2), and the screen live on the production URL with the operator's name and contact (P8.3).
 
 ## P8.10: Load test
 **Files:** `scripts/load/sse.py`

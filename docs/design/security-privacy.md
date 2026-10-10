@@ -70,6 +70,40 @@ If the lot is in the EU/EEA (or the UK), filming people and vehicles is personal
 - [ ] **Signage** at the lot: who operates the cameras, purpose, contact.
 - [ ] **Camera views** don't cover neighbouring private property, windows or public streets beyond what's necessary (use privacy masks in the camera settings).
 - [ ] **DPIA** considered: likely needed for systematic monitoring of a publicly accessible area at scale. For a small private lot, document why it isn't.
-- [ ] **App users:** location is processed on the device only. Push subscriptions are pseudonymous (no names or emails). Privacy page in the app explains this.
-- [ ] **Retention** periods ([data-model.md §4](data-model.md#4-retention-and-rollups-apscheduler-jobs-in-the-api)) implemented and verified.
+- [ ] **App users:** location is processed on the device only. Push subscriptions are pseudonymous (no names or emails). Privacy page in the app explains this (§4.1).
+- [ ] **Retention** periods ([data-model.md §4](data-model.md#4-retention-and-rollups-apscheduler-jobs-in-the-api)) implemented and verified (`parking db retention`, §4.1).
 - [ ] **Access:** only you (admin) can see camera images. Document who has admin.
+
+### 4.1 Privacy deliverables (P8.9)
+
+| Deliverable | Where | State |
+|-------------|-------|-------|
+| Privacy screen | `#/privacy` in the app ([frontend.md §2.5](frontend.md#25-privacy-privacy-phase-8)), linked from the footer of every screen and from the Alerts screen. The operator's name and contact come from `PRIVACY_OPERATOR` / `PRIVACY_CONTACT` in the API's `.env` | Built; the two values are set on the production server |
+| Retention check | `parking db retention` ([data-model.md §4](data-model.md#4-retention-and-rollups-apscheduler-jobs-in-the-api)): the oldest row of every table against its period, exit 1 when the prune job isn't deleting. Debug captures: `find data/debug -type f -mmin +$((24*60+10))` on the vision host prints nothing (with the default `DEBUG_RETENTION_HOURS=24`) | Built; run on production after it has been up for more than 90 days, and at each quarterly security check ([runbook](../runbook.md#privacy-check)) |
+| Signage | The text below, printed and put up at each entrance, before the cameras are switched on | The operator does it |
+| Purpose, lawful basis with the balancing note, DPIA decision, who has admin | The operator's own notes, **kept private, not in this repo**. The headings to fill in: purpose; lawful basis and why the interest outweighs the intrusion (what was done to keep it small: this section's checklist); whether a DPIA is needed and why (not); camera positions and what each sees, privacy masks; who has admin access; where the data is (the lot box, the server and its hosting provider with its region, the backup storage) and the retention periods; how a request from a person is answered | The operator does it |
+
+**What the system really keeps** (the Privacy screen says the same; change both together):
+
+| Data | Where | Kept |
+|------|-------|------|
+| Camera frames | Memory of the vision host | Not kept. Never sent to the API (T1/T2) |
+| Reference picture, one per camera (shift detection) | `data/reference/` on the vision host (saved there by the worker, also when asked from the admin page); in the backups only when the API runs on the same machine (T1) | Until replaced |
+| Admin snapshot (the current frame, admin only) | Fetched live from the worker | Not stored |
+| Debug captures (off by default) | `data/debug/` on the vision host | `DEBUG_RETENTION_HOURS` (24 h) |
+| Slot and zone states, flow events (a time and a direction, a track number that means nothing outside the worker's run) | Database | 90 days; minute averages 30 days; hourly averages kept |
+| Push subscription: the browser's push address and keys, notification settings, time zone, language | Database | Until the device unsubscribes, or the push service reports the address gone (or 5 failed sends in a row) |
+| Notification log | Database | 30 days |
+| Admin sessions: token hash, IP address, browser name | Database | Until they expire (7 days), deleted by the next prune |
+| IP addresses of app users | The API's access log (container log, 3 × 10 MB, overwritten); the rate limiter (memory). The production proxy (Caddy) writes no access log | Days at most |
+| Location of app users | The phone only | Never sent |
+
+**T3 only:** if production ever moves to T3, video travels from the cameras to the cloud machine over the encrypted VPN and is analysed there in memory; this table, the screen's *The cameras at the lot* texts and the sign must then say so. The chosen layout is T2, where no picture leaves the lot.
+
+**Sign text** (A4 or larger, at each entrance, in the local language; a camera pictogram on top):
+
+> **Camera in use: counting free parking spaces**
+> The cameras count free and taken spaces. Pictures are analysed on site and discarded: no recording, no number-plate reading, no identification of people.
+> Operator: *name, address*
+> Contact: *e-mail or phone*
+> Details and your rights: *https://<PUBLIC_HOST>/#/privacy*

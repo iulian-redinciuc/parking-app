@@ -93,7 +93,10 @@ export function isLotInfo(x: unknown): x is LotInfo {
     ) &&
     isObj(x.levels) &&
     isRatio(x.levels.plenty) &&
-    isRatio(x.levels.filling)
+    isRatio(x.levels.filling) &&
+    (x.privacy === undefined ||
+      (isObj(x.privacy) &&
+        [x.privacy.operator, x.privacy.contact].every((v) => v === null || isStr(v))))
   )
 }
 

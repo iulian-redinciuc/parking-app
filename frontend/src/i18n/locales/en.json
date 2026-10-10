@@ -19,8 +19,7 @@
     "live": "Live",
     "alerts": "Alerts",
     "stats": "Stats",
-    "privacy": "Privacy",
-    "privacy_note": "What we process and store will be described here."
+    "privacy": "Privacy"
   },
   "count": {
     "free_one": "free space",
@@ -78,6 +77,8 @@
   },
   "alerts": {
     "intro": "Get told how many spaces are free. A web app can't follow your location in the background, so notifications come from reminders you set, or while the app is open.",
+    "privacy_note": "Your location never leaves this phone.",
+    "privacy_link": "How your data is handled",
     "mock_note": "Preview with sample data: notifications are shown by this device only.",
     "unsupported": "This browser can't show notifications. Try Chrome on Android, Safari on iPhone (iOS 16.4 or later, added to the Home Screen) or a desktop browser.",
     "ios_install": "On iPhone, notifications only work in the app added to your Home Screen.",
@@ -328,5 +329,37 @@
     "table_range": "Usual range",
     "table_weekday": "Day",
     "no_value": "–"
+  },
+  "privacy": {
+    "intro": "This app shows how many parking spaces are free. It is built to do that without identifying anyone.",
+    "cameras": "The cameras at the lot",
+    "cameras_1": "The cameras are used for one thing: counting free parking spaces.",
+    "cameras_2": "Each picture is analysed by a computer at the lot and then discarded. No video is recorded.",
+    "cameras_3": "No number plates are read, no faces are recognised, and nobody is followed from one visit to the next.",
+    "cameras_4": "Only numbers leave the lot: which spaces are taken, and when a car drove in or out.",
+    "cameras_5": "The operator can look at the current camera picture to set up and repair the system. One reference picture per camera is kept to notice when a camera has been moved.",
+    "cameras_6": "While fixing a problem or measuring accuracy, the operator may save pictures for a short time. They stay on the computer at the lot and are deleted automatically, normally after 24 hours. A small set of test pictures may be kept longer; it is never published.",
+    "stored": "What is stored",
+    "stored_1": "Whether each space was free or taken and how many spaces were free, with the time of each change: 90 days.",
+    "stored_2": "Cars counted in and out, as a time and a direction only: 90 days.",
+    "stored_3": "Averages per minute: 30 days. Averages per hour are kept for the statistics. These are numbers about the lot, not about people.",
+    "location": "Your location",
+    "location_1": "If you switch on Tell me when I'm near, your phone compares its own position with the lot's. This happens on your phone, and only while the app is open.",
+    "location_2": "Your location is never sent to the server and never stored.",
+    "notifications": "Notifications",
+    "notifications_1": "If you turn notifications on, the server stores the address your browser provides for sending them, your notification settings (zones, reminders, quiet hours, I'm on my way), and your device's time zone and language. No name, e-mail address or phone number.",
+    "notifications_2": "Turning notifications off deletes this at once. It is also deleted when your browser withdraws the address.",
+    "notifications_3": "A log of the notifications sent is kept for 30 days.",
+    "notifications_4": "Notifications travel encrypted through your browser maker's push service (Google, Apple or Mozilla).",
+    "device": "On this device",
+    "device_1": "The app keeps your settings in this browser's storage: your notification settings, whether you allowed location, and hints you dismissed. Clearing the site's data removes them.",
+    "device_2": "No cookies, no advertising, no analytics, and nothing loaded from other companies.",
+    "logs": "Technical logs",
+    "logs_1": "Like any website, the server sees your IP address when the app asks for the numbers. It is used to limit abuse and appears in technical logs that are overwritten after a short time. It is not combined with anything else.",
+    "who": "Who is responsible",
+    "who_operator": "The cameras and this app are operated by {{operator}}.",
+    "who_signs": "The operator's name and contact details are on the signs at the lot.",
+    "who_contact": "Contact:",
+    "who_rights": "You can ask the operator what is stored about you, have it deleted, or object to it. You can also complain to your data protection authority."
   }
 }

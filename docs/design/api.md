@@ -90,9 +90,11 @@ Push routes (`parking/api/routes/push.py`, P6.2): the subscription is found by `
   "timezone": "Europe/Bucharest",
   "zones": [ { "id": "ground", "name": "Ground", "method": "slots", "capacity": 40 },
              { "id": "underground", "name": "Underground", "method": "flow", "capacity": 60 } ],
-  "levels": { "plenty": 0.2, "filling": 0.05 }
+  "levels": { "plenty": 0.2, "filling": 0.05 },
+  "privacy": { "operator": null, "contact": null }
 }
 ```
+`privacy` (P8.9) is who runs the cameras, from `PRIVACY_OPERATOR` / `PRIVACY_CONTACT` in `.env` (`null` when unset); the app's Privacy screen shows it. Clients accept an answer without it.
 
 `Prefs` (notification preferences, all optional):
 ```json

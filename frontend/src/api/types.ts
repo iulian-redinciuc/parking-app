@@ -60,6 +60,8 @@ export interface LotInfo {
   timezone: string
   zones: LotZoneInfo[]
   levels: { plenty: number; filling: number }
+  /** Who runs the cameras (`PRIVACY_OPERATOR` / `PRIVACY_CONTACT`); absent before P8.9. */
+  privacy?: { operator: string | null; contact: string | null }
 }
 
 export type HistoryBucket = 'minute' | 'hour' | 'day'
