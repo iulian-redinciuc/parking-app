@@ -63,14 +63,15 @@ if [ "$ROLE" = server ]; then
   fi
   todo="LOT_LAT / LOT_LON, ${public}VAPID_SUBJECT,
   ADMIN_PASSWORD_HASH (${cli[*]} admin hash-password; with docker add -it),
-  TUNNEL_TOKEN (only for a Cloudflare tunnel instead of parking-web, P8.3)"
+  TUNNEL_TOKEN (only for a Cloudflare tunnel instead of parking-web, P8.3),
+  API_CPUS / API_MEMORY / WEB_CPUS / WEB_MEMORY after measuring (P8.4 step 2, P8.10)"
 else
   [[ "${WORKER_TOKEN:-}" =~ ^[0-9a-f]{64}$ ]] || die "set WORKER_TOKEN to the value in the server's .env (64 hex characters)"
   set_var VPN_BIND_IP "$VPN_SITE_IP"
   set_var WORKER_TOKEN "$WORKER_TOKEN"
   set_var API_INTERNAL_URL "http://$VPN_SERVER_IP:8000"
   todo="LOT_LAT / LOT_LON (same as the server), CAM_GROUND_SNAPSHOT_URL / CAM_GROUND_RTSP_URL,
-  CAM_RAMP_RTSP_URL (Phase 5), VISION_CPUS / FLOW_CPUS after measuring (P8.2 step 5)"
+  CAM_RAMP_RTSP_URL (Phase 5), VISION_CPUS / FLOW_CPUS / VISION_MEMORY / FLOW_MEMORY after measuring (P8.2 step 5)"
 fi
 
 mv -n "$tmp" "$ENV_FILE"

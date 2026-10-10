@@ -16,3 +16,12 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+  # pinned third-party images in the compose files (cloudflared); the app's own images follow PARKING_VERSION
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly

@@ -103,7 +103,15 @@ Base file (abridged):
 ```yaml
 name: parking
 
+x-hardening: &hardening               # §4.1
+  read_only: true
+  tmpfs: ["/tmp:size=64m"]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  user: "1000:1000"
+
 x-common: &common
+  <<: *hardening
   env_file: .env
   restart: unless-stopped
   volumes:
@@ -119,6 +127,7 @@ services:
     image: ghcr.io/iulian-redinciuc/parking-api:${PARKING_VERSION:-latest}
     ports: ["127.0.0.1:${API_HOST_PORT:-8000}:8000"]          # loopback only
     networks: [internal, egress]                               # egress: Web Push
+    deploy: { resources: { limits: { cpus: "${API_CPUS:-1.0}", memory: "${API_MEMORY:-512M}" } } }
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 30s
@@ -133,7 +142,7 @@ services:
     image: ghcr.io/iulian-redinciuc/parking-vision:${PARKING_VERSION:-latest}
     command: ["occupancy", "--camera", "cam-ground"]
     networks: [internal, egress]                               # egress: reach the camera
-    deploy: { resources: { limits: { cpus: "${VISION_CPUS:-1.0}", memory: 1200M } } }
+    deploy: { resources: { limits: { cpus: "${VISION_CPUS:-1.0}", memory: "${VISION_MEMORY:-1200M}" } } }
     environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
     depends_on: { api: { condition: service_healthy } }
     healthcheck:                                               # the /control/* server is up
@@ -151,7 +160,7 @@ services:
     command: ["flow", "--camera", "cam-ramp"]
     profiles: ["flow"]                                         # enabled from Phase 5
     networks: [internal, egress]
-    deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: 1200M } } }
+    deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: "${FLOW_MEMORY:-1200M}" } } }
     environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
     depends_on: { api: { condition: service_healthy } }
     healthcheck:                                               # same as vision-occupancy
@@ -163,18 +172,22 @@ services:
       start_interval: 2s
 
   tunnel:
+    <<: *hardening-tunnel             # §4.1: read-only, no capabilities, uid 65532, limits, `tunnel ready` healthcheck
     container_name: parking-tunnel
-    image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run
-    environment: { TUNNEL_TOKEN: "${TUNNEL_TOKEN}" }
+    image: cloudflare/cloudflared:2026.10.0
+    command: tunnel --no-autoupdate --metrics localhost:20241 run
+    environment: { TUNNEL_TOKEN: "${TUNNEL_TOKEN:-}" }
     restart: unless-stopped
     networks: [internal, egress]
     profiles: ["public"]
+    depends_on:
+      api: { condition: service_healthy }
 
   tunnel-quick:                       # dev only (§5 Option Q)
+    <<: *hardening-tunnel
     container_name: parking-tunnel-quick
     image: cloudflare/cloudflared:2026.10.0
-    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml --url http://api:8000
+    command: tunnel --no-autoupdate --metrics localhost:20241 --config /etc/cloudflared/config.yml --url http://api:8000
     volumes:
       - ./cloudflared-quick.yml:/etc/cloudflared/config.yml:ro
     restart: unless-stopped
@@ -194,7 +207,43 @@ Notes:
 - On one machine, workers reach the API at `http://api:8000/internal/*`, and the API reaches workers at `http://vision-occupancy:9000/control/*`. Both use `WORKER_TOKEN`.
 - Across machines (T2), see §9. `docker-compose.server.yml` and `docker-compose.site.yml` are **standalone** files (not overrides of the base file): the server has `api` + `tunnel`, the lot box has the two workers without the `depends_on: api`. Both refuse to start without a pinned `PARKING_VERSION` and `VPN_BIND_IP`.
 - Workers need a route to the camera IPs. If Docker bridge routing can't reach the camera network, set `network_mode: host` on the vision services only.
-- CPU and memory limits come from `.env`, because they differ per machine.
+- CPU and memory limits come from `.env`, because they differ per machine (§4.1).
+
+### 4.1 Hardening (P8.4)
+
+Every service in every Compose file (base, server, site; the e2e test stack too, so CI notices a write outside the mounts) has:
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| `restart` | `unless-stopped` | Comes back after a crash, a Docker restart and a reboot; stays down only after `docker compose stop` / `down` |
+| `healthcheck` | API: `/healthz`; workers: the `/control/*` port (P8.5 adds the heartbeat); `parking-web`: port 443; tunnels: `cloudflared tunnel --metrics localhost:20241 ready` (connected to Cloudflare's edge) | `depends_on: service_healthy` uses them when the stack is started with `up` |
+| `read_only: true` | root filesystem read-only | The only writable places are the mounts (`config/`, `data/`, for Caddy its two volumes) and `/tmp` |
+| `tmpfs` | `/tmp:size=64m` | In memory: counts towards the service's memory limit, empty after a restart. Holds the Ultralytics settings (`HOME=/tmp`) and SQLite's temporary files. The tunnels write nothing and have none |
+| `cap_drop` | `[ALL]`, nothing added back | No service needs a capability |
+| `security_opt` | `no-new-privileges:true` | setuid binaries and file capabilities can't raise privileges |
+| `user` | `1000:1000` (`parking-*` images, the owner of `config/`, `data/`, `models/`); `65532:65532` (cloudflared's own `nonroot`) | Never root |
+| `deploy.resources.limits` | from `.env`, see below | |
+| `logging` | `json-file`, 3 × 10 MB | The disk can't fill with logs |
+
+**Caddy without root or capabilities** (`parking-web`): the image runs as uid 1000, owns `/data` and `/config` (a new named volume copies that owner) and has the file capability removed from the `caddy` binary (with `cap_drop: [ALL]` it could not be granted). Ports 80/443 are opened through the container's own `net.ipv4.ip_unprivileged_port_start=0` sysctl (Docker's default since 20.10, set explicitly in `docker-compose.server.yml`), which applies only inside that container's network namespace.
+
+**Resource limits** (`.env`, per machine; defaults in `.env.example`):
+
+| Variable | Default | Container | Basis |
+|----------|---------|-----------|-------|
+| `API_CPUS` / `API_MEMORY` | `1.0` / `512M` | `parking-api` | dev Pi: ~115 MB, < 1% CPU with one camera and no clients; re-check under P8.10's 500 SSE clients |
+| `VISION_CPUS` / `VISION_MEMORY` | `1.0` / `1200M` | `parking-vision-occupancy` | dev Pi: ~130 MB with the appearance scorer; a YOLO model in memory needs several hundred MB |
+| `FLOW_CPUS` / `FLOW_MEMORY` | `1.5` / `1200M` | `parking-vision-flow` | P5.10's dev-Pi reference; raise `FLOW_CPUS` to 2 first if fps is short |
+| `WEB_CPUS` / `WEB_MEMORY` | `1.0` / `256M` | `parking-web` | dev Pi: ~15 MB idle |
+| (fixed) | `0.5` / `128M` | tunnels | dev Pi: ~20 MB |
+
+These are the dev-Pi values; they are tuned on the production machines after P8.2's measurements and P8.10's load test, in each machine's `.env` only.
+
+**Pinned images:** production never runs `latest`. `docker-compose.server.yml` / `docker-compose.site.yml` refuse to start without `PARKING_VERSION`, and `prod-env.sh` accepts only a release tag (`v0.x.y`). Third-party images carry an exact version in the Compose files (`cloudflare/cloudflared:2026.10.0`) and in the Dockerfiles (`caddy:2.11-alpine`, `node:22-alpine`, `python:3.12-slim-bookworm`). Dependabot proposes updates weekly: `docker-compose` in `/deploy`, `docker` in `/backend` and `/frontend`, next to `pip`, `npm` and `github-actions`. The base file keeps `${PARKING_VERSION:-latest}` only as the default for a machine without an `.env`; the dev Pi builds its own images.
+
+**Reboot:** `provision.sh` enables the Docker service (and, on T2, orders it after `wg-quick@wg0`, so the VPN address the ports are published on exists first). At boot Docker starts every container that was running, in no particular order and without `depends_on`: the workers retry until the API answers, Caddy answers 502 for `/api/*` until then. Target: live data again within 3 minutes of power-on with no manual step. `deploy/scripts/boot-check.sh server|site [zone …]`, run right after logging in again, waits until every container of the project is running and healthy and (server) `/api/status` has no stale zone, and prints the seconds since boot (fails above `BOOT_LIMIT_S`, default 180). It only reads; it never starts a container.
+
+Measured on the dev Pi (P8.4, not a reboot: the API and the worker processes ended at the same moment and Docker's restart policy brought them back): see PROGRESS.md → Metrics.
 
 ## 5. Public access for the API
 
@@ -335,5 +384,6 @@ Two scripts in `deploy/scripts/`, run on the production machine itself (never on
   - `ufw`: deny inbound; allow SSH; server: also UDP 51820 (VPN) and, with `--public-proxy`, 80/443 for a reverse proxy (§5 Option B; a tunnel needs none); lot box: nothing else;
   - WireGuard: a key pair per machine (`/etc/wireguard/parking.key`, never leaves it); the first run prints the public key, the second run with `--peer-key <other machine's key>` (lot box: also `--endpoint <server address>`) writes `wg0.conf` and enables it;
   - `/opt/parking/{deploy,config,models,data}` (`config`, `data`, `models` owned by uid 1000, the containers' user); `--version v0.x.y` copies that release's `deploy/` and `config/` there without overwriting existing config files.
+- **`boot-check.sh server|site`**: after a reboot, the time until the stack is back by itself ([§4.1](#41-hardening-p84)).
 - **`prod-env.sh server|site`** (`PARKING_VERSION=v0.x.y` required): writes a new `deploy/.env` (mode 600) from `.env.example`, never overwrites one, never prints a secret. `server` generates a fresh `WORKER_TOKEN`, `ADMIN_TOKEN` and VAPID key pair (from the released API image) and, given `PUBLIC_HOST=<hostname>`, sets `PUBLIC_HOST`, `CORS_ORIGINS=https://<hostname>` and `PUBLIC_APP_URL=https://<hostname>/`; `site` takes the server's `WORKER_TOKEN` from the environment and leaves the API's secrets empty. It lists what is still to fill in by hand (lot location, camera URLs, admin password hash, public origins).
 - **Server VM:** any provider's small x86-64 or ARM64 VM that meets [hardware.md §4.3](hardware.md#43-production-api-server-topologies-t2t3), with a public IPv4 address.

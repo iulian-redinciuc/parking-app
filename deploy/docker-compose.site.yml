@@ -8,7 +8,17 @@
 # Published ports bypass ufw: the bind address is the protection.
 name: parking
 
+# Hardening (P8.4, deployment.md §4.1): read-only root filesystem, no capabilities, no privilege gain,
+# not root. /tmp is memory (it counts towards the service's memory limit).
+x-hardening: &hardening
+  read_only: true
+  tmpfs: ["/tmp:size=64m"]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  user: "1000:1000"                                            # the owner of config/, data/, models/
+
 x-worker: &worker
+  <<: *hardening
   image: ghcr.io/iulian-redinciuc/parking-vision:${PARKING_VERSION:?set PARKING_VERSION to a release tag (v0.x.y)}
   env_file: .env
   restart: unless-stopped
@@ -35,7 +45,7 @@ services:
     container_name: parking-vision-occupancy
     command: ["occupancy", "--camera", "cam-ground"]
     ports: ["${VPN_BIND_IP:?set VPN_BIND_IP to this machine's VPN address}:9000:9000"]
-    deploy: { resources: { limits: { cpus: "${VISION_CPUS:-1.0}", memory: 1200M } } }
+    deploy: { resources: { limits: { cpus: "${VISION_CPUS:-1.0}", memory: "${VISION_MEMORY:-1200M}" } } }
 
   vision-flow:
     <<: *worker
@@ -43,7 +53,7 @@ services:
     command: ["flow", "--camera", "cam-ramp"]
     profiles: ["flow"]                                         # enabled from Phase 5
     ports: ["${VPN_BIND_IP:?set VPN_BIND_IP to this machine's VPN address}:9001:9000"]
-    deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: 1200M } } }
+    deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: "${FLOW_MEMORY:-1200M}" } } }
 
 networks:
   egress: {}

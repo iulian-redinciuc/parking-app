@@ -9,6 +9,12 @@ name: parking-e2e
 
 x-common: &common
   image: parking-e2e:latest       # built once by the api service
+  # the production hardening (deployment.md §4.1), so a write outside the mounts fails here first
+  read_only: true
+  tmpfs: ["/tmp:size=64m"]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  user: "1000:1000"
   environment: &env
     WORKER_TOKEN: e2e-token
     PARKING_DB_URL: sqlite:////tmp/parking.sqlite

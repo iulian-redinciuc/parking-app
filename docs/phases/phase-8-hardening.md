@@ -105,6 +105,22 @@ Then on a phone over mobile data: open `https://<PUBLIC_HOST>/`, install it, ena
 3. Pin image tags (e.g. `cloudflare/cloudflared:<version>`, `PARKING_VERSION=v0.x.y`; never `latest` in production). Let Dependabot propose updates.
 4. Docker starts on boot. The stack comes back after a reboot.
 
+Settings, limits and the Caddy details: [deployment.md §4.1](../design/deployment.md#41-hardening-p84). **Files:** the four `deploy/docker-compose*.yml`, `frontend/Dockerfile` (Caddy as uid 1000), `deploy/.env.example` (`*_CPUS` / `*_MEMORY`), `.github/dependabot.yml`, `deploy/scripts/boot-check.sh`.
+
+**Commands** (on each production machine, after P8.2/P8.3; needs a release tagged after this task, because the non-root `parking-web` image and the scripts come with it):
+```bash
+cd /opt/parking/deploy
+docker compose -f docker-compose.server.yml --profile web up -d      # lot box: -f docker-compose.site.yml --profile flow
+docker inspect -f '{{.Name}} ro={{.HostConfig.ReadonlyRootfs}} cap_drop={{.HostConfig.CapDrop}} {{.HostConfig.SecurityOpt}} user={{.Config.User}} {{.HostConfig.RestartPolicy.Name}}' $(docker ps -q --filter name=parking-)
+docker stats --no-stream                                             # step 2: set *_CPUS / *_MEMORY in .env from this (and P8.10)
+systemctl is-enabled docker                                          # step 4: enabled
+
+sudo reboot                                                          # both machines; then log in again and start nothing
+scripts/boot-check.sh site                                           # lot box: "ready <n> s after boot"
+scripts/boot-check.sh server                                         # server: also waits for /api/status without stale zones
+```
+`boot-check.sh server ground` checks only the named zones (before Camera A exists). Then open the app on a phone: live numbers, no *Stale* badge.
+
 **Done when:** after rebooting the production machine(s), the app shows live data again within 3 minutes with no manual steps.
 
 ## P8.5: Watchdog for stuck workers

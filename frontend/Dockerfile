@@ -15,4 +15,10 @@ RUN npm run build
 FROM caddy:2.11-alpine AS web
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /src/frontend/dist /srv
+# Not root (P8.4): uid 1000 owns the certificate and config folders (a new volume copies the owner),
+# and the binary loses its file capability, which can't be granted under cap_drop ALL +
+# no-new-privileges. Ports 80/443 come from the ip_unprivileged_port_start sysctl (Docker's default
+# for containers, also set in docker-compose.server.yml).
+RUN setcap -r /usr/bin/caddy && chown -R 1000:1000 /data /config
+USER 1000:1000
 RUN caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

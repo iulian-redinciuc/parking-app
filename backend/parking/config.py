@@ -473,8 +473,14 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     parking_version: str = "latest"
     vpn_bind_ip: str | None = None
+    api_cpus: float | None = None
+    api_memory: str | None = None
     vision_cpus: float | None = None
+    vision_memory: str | None = None
     flow_cpus: float | None = None
+    flow_memory: str | None = None
+    web_cpus: float | None = None
+    web_memory: str | None = None
 
     @property
     def cors_origin_list(self) -> list[str]:
