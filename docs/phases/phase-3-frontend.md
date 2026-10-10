@@ -99,15 +99,15 @@ Implement the state table in [frontend.md §2.1](../design/frontend.md#21-live-)
 **Done when:** the Pages URL serves the new app (in mock mode) and installs on a phone.
 
 ## P3.9: Make the dev API reachable over HTTPS (for phone testing)
-**Files:** `deploy/docker-compose.yml` (`tunnel-quick` service, `quick` profile), `deploy/scripts/dev-public.sh`, `deploy/.env`
+**Files:** `deploy/docker-compose.yml` (`tunnel-quick` service, `quick` profile), `deploy/cloudflared-quick.yml`, `deploy/scripts/dev-public.sh`, `deploy/.env`
 
 **MVP decision (2026-10-10):** no domain or Cloudflare account yet, so dev phone testing uses a **Cloudflare quick tunnel**: free, no account, a random `https://<words>.trycloudflare.com` address that changes every time the tunnel restarts. The named tunnel with a real domain (Option A in [deployment.md §5](../design/deployment.md#5-public-access-for-the-api), the `tunnel` service) stays for production (P8.3).
 
 **Steps**
-1. Add a `tunnel-quick` service (container `parking-tunnel-quick`, image `cloudflare/cloudflared` pinned, `tunnel --no-autoupdate --url http://api:8000`, profile `quick`, on the app's own networks). Never use or touch the `cloudflared` installed on the Pi host or any other tunnel.
+1. Add a `tunnel-quick` service (container `parking-tunnel-quick`, image `cloudflare/cloudflared` pinned, `tunnel --no-autoupdate --config /etc/cloudflared/config.yml --url http://api:8000`, profile `quick`, on the app's own networks). The mounted `deploy/cloudflared-quick.yml` lets only `/api/*` and `/healthz` through ([deployment.md §5](../design/deployment.md#5-public-access-for-the-api)); check that `/internal/…` answers 404 through the tunnel. Never use or touch the `cloudflared` installed on the Pi host or any other tunnel.
 2. `deploy/scripts/dev-public.sh up | down | url`: `up` starts the dev stack (replay feed) and the quick tunnel, reads the URL from the container log, sets `gh variable set API_BASE --body <url>` and re-runs the Pages workflow; `down` stops the tunnel and sets `API_BASE` back to `mock` and re-runs Pages; `url` prints the current address.
 3. `CORS_ORIGINS=https://iulian-redinciuc.github.io` (already set).
-4. Checks through the tunnel: `curl https://<url>/healthz`; `curl -N https://<url>/api/stream` for > 2 min. Quick tunnels may not carry SSE; if the stream doesn't come through, confirm the app falls back to polling `/api/status` every 10 s (frontend.md §3) and record it in the decision log.
+4. Checks through the tunnel: `curl https://<url>/healthz`; `curl -N https://<url>/api/stream` for > 2 min. Quick tunnels may not carry SSE; if the stream doesn't come through, confirm the app falls back to polling `/api/status` every 10 s (frontend.md §3) and record it in the decision log. As measured (2026-10-10): the stream's headers arrive but no event does, so the app polls (header *Updating*).
 5. Open the Pages preview in headless Chromium with a phone viewport (Playwright, `executablePath` of the system Chromium) and check it shows the dev Pi's live replay numbers (not mock data), connection `live` or `polling`.
 6. **Leave the dev stack and the quick tunnel running** at the end so Iulian can open the preview on his phone, and put the current URL and "re-run `deploy/scripts/dev-public.sh up` after a reboot" in PROGRESS.md's "Try it" line.
 

@@ -26,7 +26,7 @@ The app **does not use, connect to, or modify anything already installed on the 
 | Backend | `uv` venv with Python 3.12 in `backend/`; API and workers run with `parking …`, or `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` (builds ARM64 images locally) |
 | Frontend | `npm run dev` with `VITE_API_BASE=mock` or `http://<pi>:8000` |
 | Camera input | Still images (`file:`), image folders (`folder:`), **recordings from the real cameras** (`video:`). A live camera only when one is reachable for testing |
-| Phone testing | Frontend **preview** on GitHub Pages (§6). The dev API is reachable over HTTPS through the `parking-tunnel` container **only while testing** (`docker compose --profile public up -d`, then `down` afterwards) |
+| Phone testing | Frontend **preview** on GitHub Pages (§6). The dev API is reachable over HTTPS through the `parking-tunnel-quick` container (a Cloudflare quick tunnel, §5 Option Q: no account or domain) **only while testing**: `deploy/scripts/dev-public.sh up`, then `down` afterwards |
 | Data | Test data only. `data/` on the Pi is disposable and not backed up |
 
 ## 2. Docker images (`backend/Dockerfile`, multi-stage)
@@ -170,6 +170,18 @@ services:
     networks: [internal, egress]
     profiles: ["public"]
 
+  tunnel-quick:                       # dev only (§5 Option Q)
+    container_name: parking-tunnel-quick
+    image: cloudflare/cloudflared:2026.10.0
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml --url http://api:8000
+    volumes:
+      - ./cloudflared-quick.yml:/etc/cloudflared/config.yml:ro
+    restart: unless-stopped
+    networks: [internal, egress]
+    profiles: ["quick"]
+    depends_on:
+      api: { condition: service_healthy }
+
 networks:
   internal: { internal: true }
   egress: {}
@@ -197,6 +209,13 @@ Works on any machine, needs no inbound ports, and works behind 4G/CGNAT (good fo
 4. Cache Rule: bypass the cache for `<api-host>/*` (SSE and live data must never be cached).
 
 Use **separate hostnames** for dev testing (e.g. `parking-api-dev.<domain>`) and production.
+
+### Option Q: Cloudflare quick tunnel (dev phone testing only, `parking-tunnel-quick`)
+No account, no domain, no token: cloudflared asks Cloudflare for a random `https://<words>.trycloudflare.com` address. Used on the dev Pi until there is a domain (P3.9); **never for production** (no uptime guarantee, and the address changes every time the tunnel starts).
+- Service `tunnel-quick` (profile `quick`, image pinned). The path rule of Option A is kept with an ingress file, `deploy/cloudflared-quick.yml` (`^/(api/|healthz$)` → `http://api:8000`, everything else → 404), mounted as the container's config; `--url` is still needed to ask for a quick tunnel. Checked through the tunnel: `/healthz` and `/api/status` 200, `/internal/*` and `/docs` 404.
+- `deploy/scripts/dev-public.sh up | down | url`. `up`: dev stack + tunnel (`docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile quick up -d`), reads the address from the container's log (the last one since its current start), waits for `<url>/healthz`, sets the repository variable `API_BASE` to it and runs the Pages workflow (§6), waiting for the run unless `DEV_PUBLIC_WAIT=0`. `down`: removes only the tunnel container, `API_BASE=mock`, Pages again. `url`: prints the current address. Needs `gh` signed in. Run `up` again after a reboot or a tunnel restart: the container comes back by itself but with a **new address**, and the preview keeps calling the old one until it is rebuilt.
+- **Quick tunnels don't carry SSE**: `/api/stream` answers `200 text/event-stream` but no event ever arrives (0 bytes in 150 s, measured in P3.9). The app notices (frontend.md §3: a stream counts as live only after its first event) and polls `/api/status` every 10 s, so the numbers on the phone are up to ~10 s behind and the header says *Updating*. A named tunnel (Option A) or Caddy (Option B) streams normally.
+- The address isn't a secret (it is built into the public preview's JavaScript); what protects the API is the same as in production: the path rule, the tokens and the rate limits.
 
 ### Option B: reverse proxy on a machine with a public IP (T2/T3 server)
 A `parking-caddy` container (Caddy obtains HTTPS certificates automatically):
@@ -249,7 +268,7 @@ jobs:
         uses: actions/deploy-pages@v4
 ```
 One-time switch from "deploy from branch" to Actions: `gh api -X PUT repos/iulian-redinciuc/parking-app/pages -f build_type=workflow`.
-Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-dev.<domain>"` (or `mock`). An unset variable builds in mock mode (an empty `VITE_API_BASE` would otherwise mean a same-origin API, which Pages doesn't have). As built (P3.8): Pages uses `build_type=workflow`, `API_BASE=mock` until P3.9, the old root placeholder `index.html` is gone.
+Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-dev.<domain>"` (or `mock`), then run the workflow (`gh workflow run pages.yml`); with the quick tunnel, `deploy/scripts/dev-public.sh` does both (§5 Option Q). An unset variable builds in mock mode (an empty `VITE_API_BASE` would otherwise mean a same-origin API, which Pages doesn't have). As built (P3.8): Pages uses `build_type=workflow`, `API_BASE=mock` until P3.9, the old root placeholder `index.html` is gone.
 
 ## 7. Backups
 

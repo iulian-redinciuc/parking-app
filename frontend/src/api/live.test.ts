@@ -181,6 +181,7 @@ describe('createLiveFeed', () => {
   it('falls back at once when the stream gives up (CLOSED), not on a normal reconnect', async () => {
     make().start()
     FakeEventSource.last.open()
+    FakeEventSource.last.status(withFree(10))
     FakeEventSource.last.fail(0) // CONNECTING: the browser retries by itself
     expect(feed.getSnapshot().connection).toBe('live')
     FakeEventSource.last.fail(2)
@@ -221,6 +222,7 @@ describe('createLiveFeed', () => {
     expect(feed.getSnapshot().connection).toBe('connecting')
     expect(FakeEventSource.open).toHaveLength(1)
     FakeEventSource.last.open()
+    FakeEventSource.last.emit('ping', '')
     expect(feed.getSnapshot().connection).toBe('live')
   })
 
@@ -242,8 +244,28 @@ describe('createLiveFeed', () => {
       connection: 'connecting',
       error: { code: 'unavailable' },
     })
-    FakeEventSource.last.open() // the stream is up, data will come with the first status
+    FakeEventSource.last.open() // the stream is up, but only an event makes it live
+    expect(feed.getSnapshot().connection).toBe('connecting')
+    FakeEventSource.last.emit('ping', '')
     expect(feed.getSnapshot().connection).toBe('live')
+  })
+
+  it('a stream that opens but never delivers an event (buffering tunnel) keeps polling', async () => {
+    make().start()
+    await vi.advanceTimersByTimeAsync(0)
+    FakeEventSource.last.open()
+    expect(feed.getSnapshot().connection).toBe('connecting')
+    await vi.advanceTimersByTimeAsync(WATCHDOG_MS)
+    expect(feed.getSnapshot().connection).toBe('polling')
+
+    // every SSE retry opens too, and polling must not stop or the header flip to live
+    fetchStatus.mockClear()
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(SSE_RETRY_MS)
+      FakeEventSource.last.open()
+      expect(feed.getSnapshot().connection).toBe('polling')
+    }
+    expect(fetchStatus).toHaveBeenCalledTimes((3 * SSE_RETRY_MS) / POLL_MS)
   })
 
   it('a failed poll shows error and keeps the last status; the next good poll recovers', async () => {

@@ -124,7 +124,7 @@ export function createLiveFeed(options: LiveOptions = {}): LiveFeed {
     watchdog = setTimeout(onSilence, watchdogMs)
   }
 
-  /** Any sign of life from the stream (open, status, ping): it's live again. */
+  /** An event from the stream (status, ping): it's live again. */
   function alive(patch: Partial<LiveState> = {}) {
     armWatchdog()
     stopPolling()
@@ -135,7 +135,11 @@ export function createLiveFeed(options: LiveOptions = {}): LiveFeed {
     closeSse()
     const source = eventSource(apiUrl('/api/stream', lang, base))
     es = source
-    source.onopen = () => alive()
+    // `open` alone proves nothing: a buffering proxy (e.g. a Cloudflare quick tunnel) answers
+    // with the headers and then never delivers an event, so polling goes on until one arrives
+    source.onopen = () => {
+      if (es === source) armWatchdog()
+    }
     source.addEventListener('ping', () => {
       if (es === source) alive({ lastMessageAt: now() })
     })

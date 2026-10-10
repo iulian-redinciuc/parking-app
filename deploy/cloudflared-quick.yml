@@ -1,0 +1,6 @@
+# Ingress rules for the dev quick tunnel (`tunnel-quick` in docker-compose.yml, P3.9).
+# Spec: docs/design/deployment.md §5: only /api/* and /healthz may be reachable from the internet.
+ingress:
+  - path: ^/(api/|healthz$)
+    service: http://api:8000
+  - service: http_status:404

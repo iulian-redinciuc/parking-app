@@ -5,6 +5,7 @@
 # Isolation (deployment.md §1.1): project "parking", its own networks, API on loopback only.
 # Public entry (deployment.md §5 Option A): only while testing,
 #   docker compose --profile public up -d   ...   docker compose --profile public down
+# Dev phone testing without a domain (quick tunnel, P3.9): scripts/dev-public.sh up | down | url
 # Entry/exit camera (Phase 5): docker compose --profile flow up -d
 name: parking
 
@@ -77,6 +78,19 @@ services:
     restart: unless-stopped
     networks: [internal, egress]                               # internal: reach api:8000
     profiles: ["public"]
+
+  tunnel-quick:                                                # dev only: random trycloudflare.com address
+    container_name: parking-tunnel-quick
+    image: cloudflare/cloudflared:2026.10.0
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml --url http://api:8000
+    volumes:
+      - ./cloudflared-quick.yml:/etc/cloudflared/config.yml:ro # only /api/* and /healthz
+    restart: unless-stopped
+    networks: [internal, egress]                               # internal: reach api:8000
+    profiles: ["quick"]
+    depends_on:
+      api: { condition: service_healthy }
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
 
 networks:
   internal: { internal: true }
