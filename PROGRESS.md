@@ -7,7 +7,7 @@
 >
 > The [agent loop](tools/agent-loop/README.md) works through the unticked tasks in order. A task marked `⏸️` is skipped until its need is met: **delete the `⏸️ ` from its line to unblock it** (editing on GitHub works too).
 
-**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Phase 3 is done; Phase 6 is done except P6.8 (real phones); Phase 7 is done; the hardware phases (4, 5) start once the lot hardware chosen in P4.1 is ordered.
+**Current focus:** the **MVP** (Phases 0–3, see [PLAN §6](PLAN.md#mvp)). Phase 3 is done; Phase 6 is done except P6.8 (real phones); Phase 7 is done; the hardware phases (4, 5) start once the lot hardware chosen in P4.1 is ordered; Phase 8 has its release pipeline (`v0.1.0` images in GHCR), the rest waits for the production machines.
 **Build order:** 0 → 1 → 2 → 3 (MVP) → 6 → 7 (no hardware needed) → 4 → 5 → 8 (need the real cameras / production machines) → 9.
 **Last updated:** 2026-10-10
 
@@ -48,7 +48,7 @@
 | 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 3 / 11 | ⏸️ | 2026-10-09 | |
 | 6 | [Notifications](docs/phases/phase-6-notifications.md) | 7 / 8 | 🟡 | 2026-10-09 | |
 | 7 | [Admin + stats](docs/phases/phase-7-admin-stats.md) | 8 / 8 | ✅ | 2026-10-09 | 2026-10-09 |
-| 8 | [Production deployment + hardening](docs/phases/phase-8-hardening.md) | 0 / 13 | ⬜ | | |
+| 8 | [Production deployment + hardening](docs/phases/phase-8-hardening.md) | 1 / 13 | 🟡 | 2026-10-10 | |
 | 9 | [Extras](docs/phases/phase-9-extras.md) | 0 / 6 | ⬜ | | |
 
 ---
@@ -148,8 +148,8 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] ⏸️ **P5.10** Performance on the vision host + accelerator decision (needs: the vision host (Raspberry Pi 5 from P4.1, not ordered yet) set up at the lot, and the busiest Camera A clip (P5.9, blocked on P5.1: Camera A not bought or mounted) to play in real time next to the occupancy worker; the guide says the decision is taken on the vision host, not the dev Pi. Prepared: worst-case reference on the dev Pi (synthetic ramp clip in real time + occupancy worker, 5 min each): NCNN `yolo11n` @ 640 → 8.9 fps median, **7.5 fps** at worst while cars pass, flow 137% of a core, 63 °C; @ 480 → 9.6 / **8.4 fps**, 97%, 61 °C, no throttling. Provisional decision: no AI HAT+; `imgsz=480` first if the vision host misses 8 fps at 640)
 - [ ] ⏸️ **P5.11** Live week drift test (needs: Camera A counting at the ramp on the vision host for 7 days (P5.1/P5.6 blocked: Camera A and the vision host not bought or installed) and Iulian's true count of the underground level once a day, which nobody else can take; a replayed or synthetic feed has no real drift to measure. Prepared: `parking drift-note` / `parking drift-report` (notes CSV, cars/day, PASSED/FAILED/INCOMPLETE verdict), commands in the phase guide)
 
-## Phase 8: Production deployment and hardening ⬜
-- [ ] **P8.1** Release pipeline (multi-arch images to GHCR)
+## Phase 8: Production deployment and hardening 🟡
+- [x] **P8.1** Release pipeline (multi-arch images to GHCR)
 - [ ] **P8.2** Provision production machines + re-measure on production hardware
 - [ ] **P8.3** Production public entry + frontend hosting
 - [ ] **P8.4** Compose hardening
@@ -290,6 +290,9 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-10 | P3.9: the quick tunnel keeps the **`/api/*` + `/healthz` only** rule with an ingress file (`deploy/cloudflared-quick.yml`, mounted as cloudflared's config next to `--url`) instead of the guide's bare `--url http://api:8000`; image pinned to `cloudflare/cloudflared:2026.10.0`; `restart: unless-stopped` (the address changes on a restart, so `dev-public.sh up` is re-run and is idempotent: it only rebuilds Pages when `API_BASE` differs) | deployment.md §5: `/internal/*` must never be reachable from the internet, also on the dev Pi; a bare `--url` forwards every path |
 | 2026-10-10 | P3.9: **quick tunnels don't carry SSE** (headers arrive, 0 bytes of events in 150 s), so phone testing runs on the polling fallback (10 s). The live feed now goes `live` only on a stream **event** (`status`/`ping`), not on `open`; `open` just re-arms the watchdog (frontend.md §3) | With `open` counted as life, each 60 s SSE retry stopped the polling and showed *Live* for 30 s with no data (seen on the preview); a real stream sends its first `status` at once, so nothing is lost there |
 | 2026-10-10 | P5.11 (prepared): drift is measured from **hand notes**, not from the DB: `data/labels/drift-<zone>.csv` (`ts,true_occupied,app_occupied,note`), written by `parking drift-note` (app value read from `/api/status` at that moment, or `--app`) and read by `parking drift-report` (`parking/core/drift.py`). Drift per day = \|last error − first error\| / days (the guide's formula, so a day-0 mismatch isn't counted, only pointed out); verdict PASSED at ≤ 2 cars/day over ≥ 7 days (half a day of slack for the time of the last count), INCOMPLETE below that, exit 0 only for PASSED like `soak.py report`. A correction or scheduled reset during the week isn't detected: the guide says to keep both off. |
+| 2026-10-10 | P8.1: **no CUDA image variant.** The chosen production vision host is a Raspberry Pi 5 (P4.1), so guide step 2 doesn't apply; `release.yml` says so and the variant is added only if an NVIDIA host is picked | Nothing would run it |
+| 2026-10-10 | P8.1: beyond the guide's `release.yml`: the tag must match `backend/pyproject.toml`'s version; `:latest` moves only on full releases (no `-` in the tag); a **verify** job pulls and starts the pushed images on an x86 and an ARM runner (the Done-when's "x86 machine", there is none at home) before the GitHub release is published; *Run workflow* is a no-push dry run; a failed release gets a new tag, tags are never moved. The release notes come from `deploy/scripts/release-notes.sh` (commit subjects since the previous `v*` tag, grouped by phase) | A release that can't be pulled or started on one CPU type should fail in CI, not on the production machine |
+| 2026-10-10 | P8.1: the CI **images** job (testing.md §5 job 5, "later task") builds each CPU type on its **native runner** (`ubuntu-latest`, `ubuntu-24.04-arm`) and runs `parking --version`, instead of one QEMU `--platform linux/amd64,linux/arm64` build; QEMU is used only by the release build, as the guide says | Faster on every backend push, and the image is actually started on both CPU types |
 
 ## Metrics
 
@@ -332,6 +335,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | yolo11n | ncnn | 1280 | 367 | 387 | 587 | 0 |
 | yolo11n-seg | ncnn | 1280 | 520 | 537 | 680 | 0 |
 | appearance scorer | appearance | full frame | 158 | 160 | 142 | - |
+| 2026-10-10 | 8 | Release `v0.1.0` (P8.1) | Release run 10.5 min (build + push with QEMU: api 4.6 min, vision 9 min; pull checks ~1 min per CPU type); on the dev Pi (arm64): `parking-api` 408 MB, `parking-vision` 1.15 GB | — | Both images `linux/amd64` + `linux/arm64`, packages public |
 
 NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occupancy budget (< 2 s); for flow (≥ 8 fps) only NCNN `yolo11n` @ 640 (83 ms) leaves room for tracking. At 62 °C the active cooler isn't a concern.
 
@@ -434,3 +438,4 @@ NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occup
 - P3.9 unblocked: switched to a Cloudflare quick tunnel (no account or domain needed).
 - P3.9: dev API over HTTPS through a quick tunnel. `tunnel-quick` Compose service (`parking-tunnel-quick`, cloudflared 2026.10.0, profile `quick`) with `deploy/cloudflared-quick.yml` (only `/api/*` + `/healthz`), `deploy/scripts/dev-public.sh up | down | url` (stack + tunnel, `API_BASE` variable, Pages run), live feed: `open` no longer counts as live (1 new test, 3 adjusted; frontend 242 passed, eslint + tsc clean). Through the tunnel: `/healthz` + `/api/status` 200 with the Pages CORS origin, `/internal/*` + `/docs` 404, `/api/stream` 0 bytes in 130 s and 150 s (headers only) → polling. Done-when: the Pages preview in headless Chromium (Pixel 7 viewport, 412×839) showed the dev Pi's numbers (72 free = Ground 12/17 + Underground 60/60, same as `/api/status`; 8 polls + 2 stream attempts in 100 s, all 200 through the tunnel); the fixed build against the tunnel stayed on *Updating* from 40 s on (the old one flipped back to *Live* at each retry). Stack + tunnel left running.
 - P5.11: blocked on the hardware and a week of daily counts (no Camera A / vision host at the lot; P5.1/P5.6 blocked). Prepared: `parking/core/drift.py` + `parking drift-note` / `parking drift-report`; vision.md §10, config.md §4, architecture.md §6, testing.md, phase guide. 16 new tests; smoke run on the dev Pi with made-up notes (4 notes over 7 days → 0.71 cars/day, PASSED).
+- P8.1: release pipeline. `.github/workflows/release.yml` (tags `v*`: multi-arch `api` + `vision` to GHCR, `:latest`, pull check on x86 + ARM runners, GitHub release), `deploy/scripts/release-notes.sh` + 3 tests, CI `images` job (both CPU types, native runners); deployment.md §2/§8, testing.md §5, phase guide. Dry run green, then **`v0.1.0` tagged**: both images have `linux/amd64` + `linux/arm64` in GHCR, pulled and started on x86 and ARM runners and (anonymously) on the dev Pi, where the released API image answered `/healthz`; release https://github.com/iulian-redinciuc/parking-app/releases/tag/v0.1.0. Pulled images removed from the dev Pi again.

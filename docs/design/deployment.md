@@ -284,7 +284,7 @@ Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-d
   2. **verify**: on an x86 runner and on an ARM runner, `docker pull` both images, check the architecture, run `parking --version`, and import the ML stack in the vision image.
   3. **release**: publishes the GitHub release with notes from the commit messages since the previous `v*` tag, grouped by the phase in the task ID (`deploy/scripts/release-notes.sh <tag>`; the first release lists the whole history). Pre-release tags are marked as pre-releases.
   *Run workflow* on the Actions page (`workflow_dispatch`) is a dry run: it builds both platforms and pushes nothing.
-- **Pulling:** the packages are linked to this public repo but GHCR creates them **private**; make each one public once (GitHub → profile → Packages → the package → Package settings → Change visibility), or log in on the machine that pulls with a token that has `read:packages` (`docker login ghcr.io -u iulian-redinciuc`).
+- **Pulling:** both packages are **public** (linked to this public repo), so `docker pull` / `docker compose pull` need no login on any machine. `docker buildx imagetools inspect ghcr.io/iulian-redinciuc/parking-api:<tag>` lists the platforms (the extra `unknown/unknown` entries are the build attestations).
 - A failed release is fixed with a new tag (`v0.x.y+1`); tags are never moved.
 - **Deploy to production:**
   ```bash
