@@ -15,6 +15,7 @@
 
 ## Waiting on Iulian
 
+- **Not blocking, but helps a lot:** more real photos from the same window at other times (fuller, emptier, dusk, rain). Send them in the chat or copy them to `data/samples/` on the dev Pi. And for the real installation: **permission** to point a camera at the car park (hardware.md §4.6).
 - **P6.8 (device test matrix):** P3.9 is done (see *Try it* above), so the phones can reach the dev API now: run the checklist in [notifications.md §6.2](docs/design/notifications.md#62-how-to-run-it-on-a-phone) on an Android phone (Chrome) and an iPhone (iOS ≥ 16.4, installed to the home screen, plus once in Safari without installing), and write the OS/browser versions and ✅/❌ into the §6.1 table (or tell the loop the results). Then remove the `⏸️ ` from P6.8. Desktop Chromium is already confirmed.
 - **P4.1 (order the lot hardware):** the choices are made (decision log 2026-10-09, shopping list in [hardware.md §4.5](docs/design/hardware.md#45-chosen-in-p41-to-order)): Camera B **Reolink RLC-811A** (or an equivalent motorized-varifocal PoE camera with RTSP + HTTP snapshot), **Raspberry Pi 5 8 GB** + Active Cooler + 27 W PSU + M.2 HAT+ with a 256 GB NVMe SSD + case, a **4-port PoE switch** (TP-Link TL-SG1005P), outdoor Cat6; optionally Camera A (Reolink RLC-510A) and a UPS. If the lot has no wired internet, also a 4G router + SIM. Order them (or tell the loop to change a choice, e.g. by editing hardware.md §4.5 or the decision log), then remove the `⏸️ ` from P4.1. If the camera can't go at the sample photo's position (≥ 5 m, looking steeply down), note where it can go in open question #4.
 - **P4.2 (install and network):** after P4.1's hardware arrives: mount Camera B per [hardware.md §6](docs/design/hardware.md#6-mounting-checklist) (test snapshot first, every space visible), set up the camera VLAN (camera → internet blocked, vision host → camera allowed), static IP/DHCP reservation, a new strong password, firmware update, cloud/P2P/UPnP off, privacy masks, main stream 2560×1440 H.264 + sub-stream 640×360, WDR on, NTP + timezone (all steps in the [phase guide](docs/phases/phase-4-occupancy-camera.md#p42-install-and-network)). Then put `CAM_GROUND_RTSP_URL` / `CAM_GROUND_SNAPSHOT_URL` in the vision host's `deploy/.env` (or give the loop SSH access to the vision host and the camera's address/credentials privately, never in the repo), and remove the `⏸️ ` from P4.2.
@@ -51,9 +52,9 @@
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) (MVP) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 11 / 11 | ✅ | 2026-10-08 | 2026-10-08 |
-| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 11 / 11 | ✅ | 2026-10-08 | 2026-10-09 |
+| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 11 / 12 | 🟡 | 2026-10-08 | |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) (MVP) | 10 / 10 | ✅ | 2026-10-09 | 2026-10-10 |
-| 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 2 / 11 | ⏸️ | 2026-10-09 | |
+| 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 2 / 12 | ⏸️ | 2026-10-09 | |
 | 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 3 / 11 | ⏸️ | 2026-10-09 | |
 | 6 | [Notifications](docs/phases/phase-6-notifications.md) | 7 / 8 | 🟡 | 2026-10-09 | |
 | 7 | [Admin + stats](docs/phases/phase-7-admin-stats.md) | 8 / 8 | ✅ | 2026-10-09 | 2026-10-09 |
@@ -86,7 +87,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P1.10** Benchmark on the dev Pi
 - [x] **P1.11** Tune and decide
 
-## Phase 2: Backend + simulated live feed ✅
+## Phase 2: Backend + simulated live feed 🟡
 - [x] **P2.1** Message models + worker API client (with flow-event outbox)
 - [x] **P2.2** Frame sources + health checks
 - [x] **P2.3** Occupancy worker
@@ -98,6 +99,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P2.9** REST endpoints, CORS, errors
 - [x] **P2.10** Docker images + Compose
 - [x] **P2.11** End-to-end test
+- [ ] **P2.12** Simulated camera feed from one photo (`parking simulate-feed`: cars arriving and leaving)
 
 ## Phase 3: Mobile web app + public access ✅
 - [x] **P3.1** App shell, routing, theme
@@ -143,6 +145,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [ ] ⏸️ **P4.9** Evaluate and tune (needs: the ~200-frame labelled validation set from the real Camera B (P4.8), which needs 1–2 weeks of captures from the camera at the lot; P4.1–P4.8 are blocked on buying, installing and calibrating it. Tuning on the two sample photos says nothing: they already score 100%. Prepared: `parking evaluate` prints a `target (…): met | missed (…)` verdict overall and at the sweep's best threshold, and the JSON has `meets_target`)
 - [ ] ⏸️ **P4.10** Per-slot classifier (only if needed) (needs: P4.9's verdict on the real Camera B's validation set (whether the appearance scorer misses the target) and ≥ 300 crops labelled from that camera to fine-tune and evaluate on; P4.8/P4.9 are blocked on buying, installing and recording with it. A model trained on the two sample photos would only learn that one scene. Prepared: `occupancy.method: classifier | ensemble`, ONNX inference, `--method`/`--classifier` in `analyze`/`evaluate`, worker support and the training script, smoke-tested end to end on the dev Pi)
 - [ ] ⏸️ **P4.11** 7-day soak test (on the vision host) (needs: the vision host running at the lot with the real Camera B for 7 days, with the app in use and someone glancing at the lot against the app once or twice a day; P4.1–P4.5 are blocked on buying, installing and calibrating it, and P3.9's tunnel hostname for phone testing. A week on the dev Pi's replay folder says nothing about camera reconnects, night/rain or the vision host's temperature. Prepared: `backend/scripts/soak.py sample` (host temperature/throttling, per-container memory/CPU/restarts, camera states, zone staleness, reconnects, one JSON line a minute) and `soak.py report` (the Done-when as a verdict, exit 0 = passed))
+- [ ] **P4.12** Camera plugged into the vision host (`device:` / `picamera:` source for the standalone box)
 
 ## Phase 5: Entry/exit camera + combining levels ⏸️
 - [ ] ⏸️ **P5.1** Mount Camera A, draw lines (needs: Camera A bought (optional item of P4.1's list, e.g. Reolink RLC-510A) and mounted at the ramp side-on to the lane, networked like Camera B (P4.2, also blocked), so a real sub-stream frame exists to draw `line_a`/`line_b` on; lines drawn on an invented view would be useless. Prepared: `parking lines-check --camera cam-ramp` checks the line file and draws ROI/A/B/IN on the reference frame (`out/lines/cam-ramp.jpg`), smoke-tested on the dev Pi)
@@ -189,7 +192,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 1 | Sample image(s): normal, full, empty, night ([what to send](docs/design/hardware.md#1-sample-images-for-phase-1-what-to-send)) | One photo: `data/samples/ground-01.jpg` (1932×2576, portrait, daytime, ground level shot from high up, almost straight down). Two rows of painted perpendicular spaces: left row ~8 spaces fully visible (2 taken), right row cut off at the image edge (3 cars visible). Later a second, full-resolution shot from the same window (`ground-02.jpg`, framing slightly shifted). No full/empty/night/rain shots yet; not needed for the MVP | ✅ enough for the MVP |
 | 2 | **Where will production run?** Topology T1 / T2 / T3 ([deployment.md §3](docs/design/deployment.md#3-production-topologies-to-be-chosen)); power and internet at the lot. Needed before Phase 4 | **T2** (Raspberry Pi 5 at the lot for vision + a small cloud VM for the API), chosen by the agent in P4.1; power and internet at the lot still to be confirmed (a 4G router if there's no wired line) | ✅ decided (P4.1) |
 | 3 | Spaces per level; marked spaces? One ramp? Separate in/out lanes? | Not decided. Working assumption: ground level has marked spaces in two rows (as in the photo); total count, underground level and ramp layout unknown. Phase 1 uses only the ground-level photo | 🟡 assumed |
-| 4 | Camera layout: Option A / B / C ([PLAN §5](PLAN.md#5-key-design-decisions)); existing cameras? | Not decided. Working assumption: Option A, with Camera B over the ground level at roughly the sample photo's position (high, looking down); no existing cameras. P4.1 picked Camera B for this position (≥ 5 m, ≥ 45° down, motorized varifocal so the framing can be fixed on site) | 🟡 assumed |
+| 4 | Camera layout: Option A / B / C ([PLAN §5](PLAN.md#5-key-design-decisions)); existing cameras? | Not decided. Working assumption: Option A, with Camera B over the ground level at roughly the sample photo's position (high, looking down); no existing cameras. P4.1 picked Camera B for this position (≥ 5 m, ≥ 45° down, motorized varifocal so the framing can be fixed on site)  **2026-10-10:** no access to the lot's existing cameras or the building's network, so the default is a standalone box at a window (Pi + its own camera + mobile data, hardware.md §4.6); ground level only at first | 🟡 assumed |
 | 5 | Who are the users (household / staff / public)? | | ⬜ |
 | 6 | Domain on Cloudflare, or Tailscale Funnel? | Not decided, and neither is needed: production uses Caddy on the cloud VM (P8.3). Working assumption: no domain, hostname `<VM IPv4 with dashes>.sslip.io`; a domain's A record can replace it later | 🟡 assumed |
 | 7 | iPhone users needing notifications? | | ⬜ |
@@ -354,6 +357,8 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-10 | P8.8: Dependabot **alerts are off** on the repository (only version updates and secret scanning + push protection are on) and the loop did **not** switch them on; the lockfiles were audited by hand instead (`pip-audit`, `npm audit`) | Changing repository settings isn't the loop's to do unless a guide says so; it is one click for Iulian (Waiting on Iulian) |
 | 2026-10-10 | P8.8: `ADMIN_TOKEN ≥ 32 random bytes` is checked by `security-check.sh` (and produced by `prod-env.sh`), not enforced by the API at start-up; the dev `deploy/.env` was set to mode 600 | A hard failure for a short token would also stop dev and test setups; the dev file was 664 (readable by other local users) |
 | 2026-10-10 | P8.8 stays **blocked** although every scriptable check passed on the dev Pi | The guide says "on the production setup": the port scan, the public entry's 404s, the production `.env` and the camera VLAN can only be checked where they exist |
+| 2026-10-10 | **No access to the lot's existing cameras or the building's network**. Default hardware is now a **standalone box**: a Raspberry Pi with its own camera at a window overlooking the lot, on its own mobile data, sending only counts (hardware.md §4.6). New task P4.12 (`device:` / `picamera:` source). The wired PoE setup of P4.1 stays as the alternative if access is granted; the underground/ramp camera waits for that, so the app may start ground level only. Permission to film is still needed | Owner's information; keeps the app independent of the building's IT |
+| 2026-10-10 | New task **P2.12**: a simulated feed made from the one real photo (cars pasted into and removed from the drawn spaces, random arrivals and departures), with true labels per frame, replayed as the dev camera | Only one photo and no camera yet; the app and the scorer need changing scenes to be tested and demonstrated |
 
 ## Metrics
 
@@ -520,3 +525,4 @@ NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occup
 - fix CI: the P8.9 run was red on a flaky Vitest test from P6.5 (`ProximityBanner`: the random mock feed sometimes starts in an episode without numbers); the test now pins the feed with `?mock=estimated`.
 - P8.10: blocked on the production public entry (P8.2/P8.3 blocked) and real count changes during the run. Done: `scripts/load/sse.py` (500 SSE clients opened 100 a minute under the rate limit, delay = receive − `updated_at` per event and client, `/healthz` stream counters, API memory/CPU from `docker stats` locally or over `--ssh`, verdict + exit code, `--out` JSON) + 16 tests (14 unit, 2 short runs against a real uvicorn); CI lints `scripts/`; testing.md §8, phase guide commands. Dev Pi run through a throwaway Caddy + API (removed afterwards): 500 clients, 10 min, p95 0.129 s, 0 errors, memory flat: PASSED.
 - P8.11: blocked on the production machines, the lot's network and the cameras (P8.2/P8.3, P4, P5), and a person at the lot to pull the plugs. Done: `scripts/resilience/drill.py` (five scenarios, watches `/healthz` / `/api/status` / `/api/admin/alerts`, timeline, verdict + exit code, `--out` JSON) + 19 tests; testing.md §9, phase guide commands, runbook *Power and network drills*; backend 955 passed, 3 skipped, ruff clean. Dev Pi runs on a throwaway two-zone stack: 1 min power cut of everything back live 66 s after the fault was seen, lot box power 36 s, 10 min internet cut live ~10 s after the link returned, 10 min camera cut stale for that zone only with the admin alert after ~3 min, all `PASSED` (figures in Metrics).
+- Plan update: standalone-box hardware default (no access to the lot's cameras/network), new tasks P2.12 (simulated feed from one photo) and P4.12 (plugged-in camera source).

@@ -88,6 +88,21 @@ Topology **T2** ([deployment.md §3](deployment.md#3-production-topologies-to-be
 
 Camera A (flow, Phase 5) can be ordered at the same time to save a trip: a 4 MP PoE fixed-lens camera from the same brand (e.g. Reolink RLC-510A, 4 mm), placed per §2 in P5.1.
 
+### 4.6 Default from 2026-10-10: standalone box (no access to the lot's cameras or network)
+The lot's existing cameras and the building's network can't be used. So the default is one self-contained box at a **window overlooking the lot** (like the spot the sample photo was taken from), replacing the wired PoE camera and switch of §4.5 for the ground level:
+
+| Item | Choice | Why |
+|------|--------|-----|
+| Computer | Raspberry Pi 5 8 GB + Active Cooler + 27 W PSU + SSD (as §4.5) | Runs the vision worker next to the camera; frames never leave it |
+| Camera | **Raspberry Pi Camera Module 3 Wide** (12 MP, autofocus) on the Pi, or a 4K USB webcam; behind glass: lens close to the pane, a dark hood against reflections, no IR | No network camera, no PoE, no cabling through the building (`picamera:` / `device:` source, P4.12) |
+| Internet | A 4G/5G USB modem or small router with a data SIM | Outbound only, a few MB per day (numbers, not video); nothing touches the building's network |
+| Power | One mains socket | |
+| First try | An old phone at the window as a temporary camera (an IP-camera app gives `rtsp:`/`snapshot:` over the phone's own hotspot) | Costs nothing; proves the view before buying |
+
+The PoE cameras of §4.5 stay the choice **if** wired access is ever granted. The underground level (Camera A at the ramp) has no window, so it waits for that access, or the app runs **ground level only** at first.
+
+**Permission is still needed** from the lot's owner / building management to film the car park, even from inside (security-privacy.md §4): the points in its favour are that nothing connects to their network, frames are processed in memory and never stored or sent, and only counts leave the box.
+
 ## 6. Mounting checklist
 - [ ] Camera positions agree with the layout option (A/B/C) chosen in PLAN.md.
 - [ ] Occupancy view covers every ground space, with no space hidden behind a pillar or tree.

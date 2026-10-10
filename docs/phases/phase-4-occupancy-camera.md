@@ -150,6 +150,19 @@ The code, the methods and the training script are in place (prepared while P4.9 
 
 **Done when:** 7 days with no unrecovered outage and no memory growth (`soak.py report` says `verdict: PASSED`, exit 0).
 
+## P4.12: Camera plugged into the vision host (`device:` source)
+**Files:** `backend/parking/vision/sources.py`, `docs/design/config.md` (source formats), `docs/design/hardware.md`, tests
+
+**Why:** the lot's existing cameras and the building's network are **not available** (2026-10-10 decision), so the default hardware is a **standalone box**: a Raspberry Pi with its own camera at a window overlooking the lot and its own mobile internet (hardware.md §4.6). That camera is not a network camera, so it needs its own source.
+
+**Steps**
+1. `device:` source: `device:/dev/video0?width=3840&height=2160&fourcc=MJPG` (USB/UVC webcams and anything V4L2) via OpenCV; and `picamera:0?width=4608&height=2592` for the Raspberry Pi camera modules through `rpicam-still`/`rpicam-vid` (libcamera), since they don't appear as plain V4L2 capture devices. Latest-frame behaviour and reconnects as for `rtsp:`; clear errors when the device is missing or busy.
+2. Tests with a fake capture object (no hardware in CI); a manual check command (`parking grab --camera …` already exists) documented for the real device.
+3. Compose: how the `vision-occupancy` container gets the device (`devices:` entry, `video` group) as an opt-in override file, not in the base file.
+4. hardware.md §4.6 and config.md updated with the formats and the tested cameras.
+
+**Done when:** tests pass and the docs say how to run the worker from a plugged-in camera. (The check on a real camera happens when the box exists; a USB webcam on the dev Pi is enough if one is ever plugged in.)
+
 ---
 
 ## Exit criteria
