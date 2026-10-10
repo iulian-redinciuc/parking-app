@@ -36,7 +36,7 @@ jobs:
           - { target: vision, file: backend/Dockerfile }
           - { target: web, file: frontend/Dockerfile }       # Caddy + the built frontend (P8.3)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Tag matches the backend version
         if: github.ref_type == 'tag'
         run: |
@@ -124,7 +124,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Publish the GitHub release
