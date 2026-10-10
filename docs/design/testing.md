@@ -14,7 +14,7 @@
 | Flow tally (event list + undo, labels CSV read/write) | `tools/flow-tally/tally.test.js` | `node --test` (no dependencies) | ✅ (frontend job) |
 | Frontend E2E | `frontend/e2e/` | Playwright (`iPhone 13`, `Pixel 7`) with `VITE_API_BASE=mock` | ✅ |
 | Quality | `frontend/lighthouserc.cjs` | Lighthouse CI (`@lhci/cli`, mobile preset, 3 runs): performance ≥ 90, a11y ≥ 90. Lighthouse 12 has no PWA category, so installability is asserted by Playwright (`e2e/pwa.spec.ts`, Chromium DevTools) | ✅ every push |
-| Load | `scripts/load/sse.py` | asyncio + httpx, 500 clients | manual, Phase 8 |
+| Load | `scripts/load/sse.py` ([§8](#8-load-test-p810-against-the-public-entry)) | asyncio + httpx, 500 clients | manual, Phase 8 (its logic is unit-tested in CI) |
 | Device checks | — | Real Android + iPhone, [notifications.md §6](notifications.md#6-test-matrix-phase-6) | manual |
 
 ## 2. What must have unit tests
@@ -55,7 +55,7 @@ Every evaluation run writes `out/eval/<set>-<YYYYMMDD-HHMM>.json`. Copy the head
 ## 5. CI (`.github/workflows/ci.yml`)
 
 Jobs:
-1. **backend**: `uv sync --frozen`, `ruff check`, `ruff format --check`, `pytest -m "not slow"`.
+1. **backend**: `uv sync --frozen`, `ruff check`, `ruff format --check` (both also over the repo's `scripts/`), `pytest -m "not slow"`.
 2. **frontend**: `npm ci`, `npm run lint`, `npm run format:check`, `npm run test -- --run`, `npm run build`, then the slot editor checks from the repo root (`eslint tools/slot-editor` with its own config, `prettier --check` with the frontend's config, `node --test tools/slot-editor/editor.test.js`) and the same three for `tools/flow-tally`, `npx playwright install --with-deps chromium webkit`, `npm run e2e` (both projects; in CI 1 retry, `forbidOnly`, `test-results/` uploaded on failure).
 3. **secrets**: gitleaks (`gitleaks/gitleaks-action@v2`, full history checkout).
 4. **e2e** (only if `backend/**` or `deploy/**` changed, via `dorny/paths-filter`): `PARKING_E2E=1 uv run pytest tests/e2e`. The test drives `deploy/docker-compose.test.yml` (project `parking-e2e`) itself: `up -d --build --wait` with a temp replay folder holding `frame-01`, waits on `/api/stream` for its live free count, swaps in `frame-02` (sidecar written first, both via rename) and removes `frame-01`, expects the new count within `3 × interval + 5 s` (`interval 2`, `consistent_readings 3` → 11 s; ~5 s on the dev Pi), then `down -v --rmi all`. Without `PARKING_E2E=1` the test is skipped, so job 1 doesn't need Docker. Locally: `cd backend && PARKING_E2E=1 uv run pytest tests/e2e -v`.
@@ -78,3 +78,18 @@ The vision image is large; the e2e job uses a `FakeDetector` (env `PARKING_FAKE_
 - `python3 backend/scripts/soak.py report FILE [--days 7] [--interval 60] [--mem-growth-mb 25] [--mem-growth-pct 10] [--json]` prints temperature (median/p95/max, throttle flags), reconnects, per-container memory, every outage (container not running, API unreachable, camera not `ok`, zone stale, or no samples for > max(5 × interval, 5 min)) with start/end/minutes, and the verdict. Only items that were fine at least once count: a camera that never reported (`unknown`, e.g. Camera A not installed), its always-stale zone and a container that was never running (`tunnel` without `--profile public`) are listed as "never ok, not counted" (an API that never answered fails the run). Exit 0 = **passed**: the samples span `--days`, nothing is still down at the last sample (no unrecovered outage), and no container's memory grew (median of the last 24 h vs the median of the first 24 h after a 1 h warm-up; growth allowed up to max(25 MB, 10%)). The least-squares slope (MB/day, runs of ≥ 1 day) is printed for information.
 
 The sample file lives in the git-ignored `out/`; it has no images, URLs or secrets.
+
+## 8. Load test (P8.10, against the public entry)
+
+`scripts/load/sse.py` (asyncio + httpx, which the backend already depends on; run with the backend's environment, from **outside** the server):
+
+```bash
+cd backend && uv run python ../scripts/load/sse.py https://<PUBLIC_HOST> --ssh <server> --out ../out/load/run.json
+```
+
+- **Clients:** `--clients` (500) streams on `/api/stream`, each its own connection, reconnecting after 3 s like `EventSource` (every reconnect is an error). They are opened `--connect-rate` (100) a minute: all of them come from one address, and the API allows an address 120 public requests a minute ([api.md §7](api.md#7-cross-cutting)); the script's own `/healthz` reads (6 a minute) use the same budget. So the ramp takes 5 min before the measurement starts; nothing on the server is changed or switched off for the test.
+- **Measurement:** `--duration` (600 s), started once every client has its first event. For each `status` event whose `updated_at` falls inside it, on each client: delay = receive time on the test machine − `updated_at` (the API sets it when the counts change, milliseconds). Both clocks must be synchronised (NTP); the script compares its clock with the server's `Date` header first and refuses to run when they are more than about a second apart. The event a client gets on connecting is the current state and isn't counted.
+- **Counts must change during the run:** the script only listens; it never writes to the API. At least `--min-events` (10) status changes are needed, so run it outside peak hours but while cars still move (not at night).
+- **Server side:** every `--sample` (10 s) `/healthz` (`stream.clients`, `stream.published`, `stream.dropped`) and, with `--docker NAME` (local) or `--ssh HOST` (runs `docker stats` for `parking-api` there), the API container's memory and CPU.
+- **Verdict** (exit 0 = passed, 1 = not, with the reasons): all clients connected; enough status changes; p95 delay < `--p95` (2 s); **no errors**: refused or failed connects (`http_<status>`, `connection`), `disconnected`, `stalled` (nothing for 45 s, i.e. three missed pings), `malformed`, `undelivered` (an event that didn't reach every connected client), `clients_behind` (clients that 5 s after the end still don't have the last event the server published), `dropped_by_server` (`stream.dropped` grew), `healthz`; and **memory stable**: median of the last quarter of the measurement's samples vs the first quarter, growth allowed up to max(`--mem-growth-mb` 16 MB, `--mem-growth-pct` 10%). Without memory samples the run doesn't pass.
+- `--insecure` accepts a test certificate (Caddy's own, `PUBLIC_HOST=localhost`); `--json` / `--out FILE` give the full result (counts, delay p50/p95/p99/max, errors with the first one of each kind, memory, CPU). The result has no secrets; it lives in the git-ignored `out/`.

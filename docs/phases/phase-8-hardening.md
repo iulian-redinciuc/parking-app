@@ -286,11 +286,23 @@ find /opt/parking/data/debug -type f -mmin +$((24*60+10))
 *Status (P8.9):* steps 3 and 4 are built and tested: the Privacy screen with its two links, and `parking db retention`, checked on a copy of the dev Pi's database (ok as it is; 16 planted rows 95–200 days old reported as overdue, gone after `parking db prune`). Step 5 doesn't apply (T2: no picture leaves the lot; the note for T3 is in security-privacy.md §4.1). Still open, because only the operator can do them: the private notes of step 1 (a draft with the technical facts filled in is on the dev Pi, `out/privacy/gdpr-notes.md`, git-ignored), the signs (step 2), and the screen live on the production URL with the operator's name and contact (P8.3).
 
 ## P8.10: Load test
-**Files:** `scripts/load/sse.py`
+**Files:** `scripts/load/sse.py` (what it measures and the verdict's rules: [testing.md §8](../design/testing.md#8-load-test-p810-against-the-public-entry)), `backend/tests/unit/test_load_sse.py`, `backend/tests/integration/test_load_sse.py`
 
 **Steps:** 500 concurrent SSE clients against the **production** public entry for 10 min (outside peak hours), while counts change. Measure the delivery delay (server `updated_at` vs client receive time), API memory and CPU.
 
+As built: the clients are opened 100 a minute (the API's limit of 120 requests a minute per address stays on, and all 500 come from one address), so a run takes about 16 min: 5 min connecting, 10 min measuring. The script only listens: the counts have to change by themselves (at least 10 changes in the 10 min), so pick a quiet time when cars still move, not the night.
+
+**Commands** (from the dev Pi or a laptop, not on the server; after P8.3):
+```bash
+cd ~/workspace/parking-app/backend
+# <server> = the SSH name of the cloud VM: docker stats for parking-api is read there
+uv run python ../scripts/load/sse.py https://<PUBLIC_HOST> --ssh <server> --out ../out/load/production.json
+echo $?                                   # 0 = passed (prints PASSED, or NOT PASSED with the reasons)
+```
+
 **Done when:** p95 delivery < 2 s, no errors, API memory stable.
+
+*Status (P8.10):* the script is built and tested. Still open, because it needs the production public entry (P8.2/P8.3): the run itself. Dev Pi figures are in PROGRESS.md → Metrics; they say the software holds 500 clients, not that the production VM and its network do.
 
 ## P8.11: Power and network resilience
 **Steps**
