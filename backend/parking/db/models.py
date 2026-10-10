@@ -107,6 +107,33 @@ class ZoneHour(_Rollup, table=True):
     __tablename__ = "zone_hour"
 
 
+class WeatherHour(SQLModel, table=True):
+    """One hour of weather at a lot, for the forecast model (forecast.md §3)."""
+
+    __tablename__ = "weather_hour"
+
+    lot_id: str = Field(primary_key=True)
+    bucket_ts: datetime = _ts(primary_key=True)  # start of the hour (UTC)
+    temp_c: float | None = None
+    precip_mm: float | None = None
+
+
+class ForecastModel(SQLModel, table=True):
+    """A zone's forecast model and its last check against the median (forecast.md §5)."""
+
+    __tablename__ = "forecast_model"
+
+    zone_id: str = Field(primary_key=True)  # a zone id or the lot's total pseudo-zone
+    trained_at: datetime = _ts()
+    active: bool  # it beat the median on the held-out weeks: `/api/forecast` uses it
+    rows: int  # hours it could learn from
+    holdout_rows: int
+    mae_model: float | None = None  # mean absolute error on the held-out weeks, in spaces
+    mae_median: float | None = None
+    note: str = ""
+    model: str | None = None  # JSON (features + trees); only when active
+
+
 class CameraHealth(SQLModel, table=True):
     """Latest health per camera; history goes to logs only."""
 

@@ -28,6 +28,8 @@ TABLES = {
     "admin_session",
     "zone_minute",
     "zone_hour",
+    "weather_hour",
+    "forecast_model",
 }
 
 

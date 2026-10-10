@@ -124,7 +124,17 @@ api:
   levels:                          # free / capacity thresholds (see api.md#levels)
     plenty: 0.20
     filling: 0.05
+
+forecast:                          # the forecast model (forecast.md); all optional
+  model: true                      # train nightly; used only while it beats the 8-week median
+  holidays: RO                     # country (ISO 3166-1 alpha-2) whose public holidays count; default none
+  holidays_subdiv: null            # a region of it, where holidays differ by region (e.g. BY in DE)
+  extra_holidays: [2026-12-24]     # the lot's own closed days
+  weather: false                   # hourly temperature and rain from Open-Meteo; sends the lot's
+                                   # coordinates rounded to ~1 km; free for non-commercial use
 ```
+
+`forecast:` (P9.6): an unknown country or subdivision is a config error. With several lots it is shared by all of them, like `api:`.
 
 ### Several lots: `lots:`
 

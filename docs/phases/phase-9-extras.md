@@ -69,4 +69,12 @@ LOG_LEVEL=DEBUG docker compose -f docker-compose.site.yml -f docker-compose.barr
 
 ## P9.6: Smarter forecast
 **Why:** "you'll probably find a space if you arrive at 9:10".
-**Outline:** add calendar features (weekday, hour, holidays, weather from a free API) → a small gradient-boosting model trained nightly on `zone_hour`. Show it only if it beats the median baseline (P7.6) on a held-out month.
+**Design note:** [forecast.md](../design/forecast.md).
+**Files:** `backend/parking/forecast/` (`gbm.py`, `days.py`, `weather.py`, `model.py`), `config.py` (`ForecastCfg`), `db/models.py` + migration `0009` (`weather_hour`, `forecast_model`), `api/jobs.py` (job `forecast`), `api/routes/public.py` (`/api/forecast`), `cli.py` (`parking forecast train` / `status`); `frontend/src/screens/StatsScreen.tsx`, `src/api/types.ts`, `validate.ts`.
+**Steps**
+1. Features per hour: lot-local hour, weekday, month; public holiday / the day before / the day after (the `holidays` package, `forecast.holidays` in lot.yaml); the 8-week median and its spread; temperature and rain from Open-Meteo (`forecast.weather`, off by default).
+2. A small gradient-boosting model per zone (numpy, no new ML dependency) that predicts how far the hour ends up from the median; trained nightly at 03:30 on `zone_hour`.
+3. The check: trained on the hours before the last 4 weeks, compared with the median on those 4 weeks; used only if its mean absolute error is at least 3% lower. The result is in `forecast_model` either way.
+4. `/api/forecast` answers from the model while it is active (`method: "model"`), else the P7.6 median; the Stats card says "Probably ~N free" instead of "Usually ~N free".
+
+**Done when:** `parking forecast status` shows, per zone, the model's and the median's error on the held-out 4 weeks and which one is used, and `/api/forecast` follows it. **Checked on the dev Pi on synthetic history only** (forecast.md §8): the model is used when holidays and rain move the lot and is not used when every week is alike. On the real lot the nightly check decides by itself once there are about 9 weeks of history; nothing to do by hand except setting `forecast.holidays` to the lot's country.

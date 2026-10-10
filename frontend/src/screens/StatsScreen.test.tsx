@@ -40,6 +40,32 @@ describe('StatsScreen', () => {
     )
   })
 
+  it("shows the forecast model's answer and credits the weather source", async () => {
+    const forecast = {
+      zone: 'total',
+      at: '2026-10-10T09:10:00.000Z',
+      free_expected: 23,
+      method: 'model' as const,
+      basis: 'median of last 8 same weekday/hour + model (calendar, holidays, weather)',
+      samples: 8,
+      weather: true,
+    }
+    const spy = vi.spyOn(client, 'getForecast').mockResolvedValue(forecast)
+    const { unmount } = render(<StatsScreen />)
+    expect(await screen.findByText(/^Probably ~23 free at /)).toBeInTheDocument()
+    expect(screen.getByText(/public holidays and the weather forecast$/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Weather data by Open-Meteo.com' })).toHaveAttribute(
+      'href',
+      'https://open-meteo.com/',
+    )
+    unmount()
+    spy.mockResolvedValue({ ...forecast, weather: false })
+    render(<StatsScreen />)
+    expect(await screen.findByText(/^Probably ~23 free at /)).toBeInTheDocument()
+    expect(screen.getByText(/the weekday and public holidays$/)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Open-Meteo/ })).not.toBeInTheDocument()
+  })
+
   it('says when there is not enough history for a forecast', async () => {
     vi.spyOn(client, 'getForecast').mockRejectedValue(
       new ApiRequestError({ code: 'not_enough_data', message: 'x', status: 404 }),

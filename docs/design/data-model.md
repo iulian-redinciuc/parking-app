@@ -66,6 +66,31 @@
 
 Migration `0005` (P7.5), primary key `(zone_id, bucket_ts)`. `total` = the sum of the zones that have a value at that time. A minute before a zone's first `zone_state` row is skipped; one known for part of it averages over that part. The hour row is the mean of its minutes' `free_avg` / `occupied_avg`, the min of their minimums and the max of their maximums.
 
+### `weather_hour` / `forecast_model`: the forecast model (P9.6)
+
+`weather_hour` (one row per lot and hour, from Open-Meteo when `forecast.weather` is on; [forecast.md §3](forecast.md#3-calendar-and-weather)):
+
+| Column | Type | Notes |
+|--------|------|-------|
+| lot_id | text | PK part |
+| bucket_ts | datetime | PK part, start of the hour (UTC); up to 7 days ahead (forecast hours, replaced by measured ones later) |
+| temp_c | real, null | |
+| precip_mm | real, null | |
+
+`forecast_model` (one row per zone and per lot total, rewritten every night; [forecast.md §4](forecast.md#4-the-check-only-if-it-beats-the-median)):
+
+| Column | Type | Notes |
+|--------|------|-------|
+| zone_id | text | PK; a zone id, `total` or `total@<lot id>` |
+| trained_at | datetime | a model older than 3 days is not served |
+| active | bool | it beat the median on the held-out 4 weeks |
+| rows, holdout_rows | int | hours it could learn from / hours held out |
+| mae_model, mae_median | real, null | mean absolute error on the held-out hours, in spaces (null: not enough history) |
+| note | text | why it is or isn't used |
+| model | text, null | JSON: feature names + trees; only when active |
+
+Migration `0009`. Both are kept (no retention period): ~8 800 small rows a year per lot, one row per zone.
+
 ### `push_subscription`
 | Column | Type | Notes |
 |--------|------|-------|
@@ -123,6 +148,7 @@ The occupancy camera sends ~17,000 observations a day but they're **not stored**
 | `aggregate_hours` | hourly at :02 | Roll `zone_minute` → `zone_hour` for the last 3 complete hours |
 | `prune` | daily 04:00 local | Delete `slot_state`, `zone_state`, `flow_event` > 90 days (always keeping the newest `zone_state` per zone and `slot_state` per slot: they're restored at start-up and carried into the next minute); `zone_minute` > 30 days; `notification_log` > 30 days; expired `admin_session`. `zone_hour` and `correction` are kept |
 | `reset-<zone>` | per zone `reset.cron` (lot time), when `reset.enabled` | `Ingestor.correct(zone, reset.value, actor="scheduled-reset", source="reset")`: a `correction` row (note `scheduled reset (<cron>)`) + `zone_state` row, published like an admin correction (P5.7) |
+| `forecast` | daily 03:30 local, when `forecast.model` is on | Refresh `weather_hour` (if `forecast.weather`), then train and check each zone's forecast model and rewrite `forecast_model` ([forecast.md](forecast.md)); `parking forecast train` does the same now |
 | `vacuum` | weekly Sunday 04:30 local | `PRAGMA optimize; VACUUM` (fine at this size) |
 
 The jobs live in `parking/api/jobs.py` (`MaintenanceJobs`, APScheduler, "local" = `lot.timezone`), the maths in `parking/db/rollups.py`. `zone_state` stores a zone's count only when it changes, so each zone is a step function and the minute rollup is time-weighted over it: free 10 for 45 s then 12 for 15 s → 10.5. Building the minutes from `zone_state` (not from memory) means the live job and a rebuild give the same rows, and every job can redo a range (its buckets are deleted first). Minutes missed while the API was down for more than 10 minutes stay empty.

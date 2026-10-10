@@ -225,8 +225,10 @@ def test_forecast_is_the_median_of_the_same_weekday_and_hour(lot, client):
         "zone": "ground",
         "at": "2026-10-09T12:30:00.000Z",
         "free_expected": 12,
+        "method": "median",
         "basis": "median of last 8 same weekday/hour",
         "samples": 5,
+        "weather": False,
     }
 
 

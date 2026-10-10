@@ -355,6 +355,17 @@ docker compose ps && curl -s localhost:8000/api/status | head -c 300
 | Port 8000 is taken | `API_HOST_PORT` in `.env` |
 | `Permission denied` in `data/` from a container | The containers run as uid 1000: the folder must belong to that user (`id -u`) |
 
+## The forecast looks wrong
+
+The Stats card's "Usually ~N free" is the 8-week median; "Probably ~N free" is the forecast model on top of it ([forecast.md](design/forecast.md)). The model checks itself every night at 03:30 and is used only while it beats the median on the last 4 weeks.
+
+| Question | Check | Fix |
+|----------|-------|-----|
+| Which one is in use, and how good is it? | `docker exec parking-api parking forecast status`: per zone the model's and the median's error (spaces) and which is used | Nothing: `median (not enough history …)` is normal for the first ~9 weeks |
+| The model is used but worse than before | `docker exec parking-api parking forecast train` re-runs the check now | To switch it off: `forecast: { model: false }` in `lot.yaml`, restart the API |
+| `weather refresh failed` in `docker logs parking-api` | Can the server reach `api.open-meteo.com`? | Nothing urgent: training goes on with the stored hours; or `weather: false` |
+| Holidays are ignored | `forecast.holidays` in `lot.yaml` is the lot's country code | Set it, restart the API; the next night's training uses it |
+
 ## Alerts
 
 Admin alerts are pushes from the API ([notifications.md §5.1](design/notifications.md#51-admin-alerts-p78-p87)); the open ones are listed in the app under *Alerts → Open issues*. The e-mail from the uptime monitor means the API can't be reached from the internet at all ([deployment.md §11](design/deployment.md#11-monitoring-and-the-external-uptime-check-p87)).

@@ -31,7 +31,10 @@ from parking.api.deps import (
 from parking.api.sse import RETRY_MS, Broadcaster
 from parking.db import history as hist
 from parking.db.engine import session_scope
-from parking.db.rollups import TOTAL
+from parking.db.rollups import TOTAL, floor_hour
+from parking.forecast import model as forecast_model
+from parking.forecast import weather
+from parking.forecast.days import calendar_of
 from parking.messages import LotStatus, format_ts
 from parking.slot_map import MAX_BYTES as MAP_MAX_BYTES
 
@@ -54,6 +57,7 @@ MAP_CACHE_CONTROL = "public, max-age=300"
 MAP_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
 FORECAST_AHEAD = timedelta(minutes=30)
 FORECAST_BASIS = f"median of last {hist.FORECAST_WEEKS} same weekday/hour"
+FORECAST_MODEL_BASIS = f"{FORECAST_BASIS} + model (calendar, holidays, weather)"
 
 router = APIRouter(dependencies=[Depends(public_limit)])
 
@@ -306,22 +310,34 @@ async def forecast(
     zone: Annotated[str, Query(max_length=64, description="A zone id or `total`.")] = TOTAL,
     at: Annotated[datetime | None, Query(description="Default: now + 30 min.")] = None,
 ) -> dict:
-    """The median free count of the same weekday and hour over the last 8 weeks;
+    """The median free count of the same weekday and hour over the last 8 weeks, corrected
+    by the zone's forecast model while that beats the median (forecast.md);
     404 `not_enough_data` with fewer than 3 of those hours in `zone_hour`."""
     capacity = _zone_capacity(rt, zone)
     key = ("forecast", zone, at)
     if (cached := rt.cache.get(key)) is None:
         at_ts = _utc(at) if at else rt.store.clock.now() + FORECAST_AHEAD
         tz = ZoneInfo(rt.config.lot.timezone)
+        cfg = rt.config.forecast
 
-        def load() -> list[float]:
+        def load() -> tuple[int, int | None, bool, bool]:
+            rollup_id = _rollup_id(rt, zone)
             with session_scope(rt.engine) as session:
-                return hist.forecast_values(session, _rollup_id(rt, zone), at_ts, tz)
+                values = hist.forecast_values(session, rollup_id, at_ts, tz)
+                expected = hist.expected_free(values, capacity)
+                if expected is None or not cfg.model:
+                    return len(values), expected, False, False
+                active = forecast_model.load_active(session, rollup_id, rt.store.clock.now())
+                if active is None:
+                    return len(values), expected, False, False
+                cal = calendar_of(cfg)
+                wx = weather.at(session, rt.config.lot.id, floor_hour(at_ts))
+                expected = active.expected_free(at_ts, values, tz, cal, wx, capacity)
+                return len(values), expected, True, active.uses_weather and wx != (None, None)
 
-        values = await anyio.to_thread.run_sync(load)
-        cached = (at_ts, len(values), hist.expected_free(values, capacity))
+        cached = (at_ts, *await anyio.to_thread.run_sync(load))
         rt.cache.put(key, cached)
-    at_ts, samples, expected = cached
+    at_ts, samples, expected, by_model, with_weather = cached
     if expected is None:
         raise ApiError(
             404,
@@ -334,6 +350,8 @@ async def forecast(
         "zone": zone,
         "at": format_ts(at_ts),
         "free_expected": expected,
-        "basis": FORECAST_BASIS,
+        "method": "model" if by_model else "median",
+        "basis": FORECAST_MODEL_BASIS if by_model else FORECAST_BASIS,
         "samples": samples,
+        "weather": with_weather,
     }

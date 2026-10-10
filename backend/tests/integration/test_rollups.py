@@ -353,7 +353,7 @@ def test_retention_report_counts_only_rows_the_prune_missed(engine):
         )
     with session_scope(engine) as session:
         report = {r.table: r for r in rollups.retention_report(session, now)}
-    assert [r.overdue for r in report.values()] == [0] * 9
+    assert [r.overdue for r in report.values()] == [0] * 10
     assert (report["zone_state"].rows, report["zone_state"].oldest) == (3, old)
     assert report["zone_state"].keep == "90 days" and report["zone_minute"].keep == "30 days"
     assert report["admin_session"].keep == "until it expires"
@@ -411,6 +411,7 @@ def test_retention_report_counts_only_rows_the_prune_missed(engine):
             "admin_session": 1,
             "zone_hour": 0,
             "correction": 0,
+            "weather_hour": 0,
             "push_subscription": 0,
         }
         rollups.prune(session, now)

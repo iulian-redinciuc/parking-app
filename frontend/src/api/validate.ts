@@ -163,6 +163,8 @@ export function isForecast(x: unknown): x is Forecast {
     isTs(x.at) &&
     isCount(x.free_expected) &&
     isStr(x.basis) &&
-    isCount(x.samples)
+    isCount(x.samples) &&
+    (x.method === undefined || x.method === 'median' || x.method === 'model') &&
+    (x.weather === undefined || typeof x.weather === 'boolean')
   )
 }

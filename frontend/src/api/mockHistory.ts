@@ -94,7 +94,9 @@ export function mockForecast(
     zone,
     at: new Date(when).toISOString(),
     free_expected: Math.round(free),
+    method: 'median',
     basis: 'median of last 8 same weekday/hour',
     samples: 8,
+    weather: false,
   }
 }

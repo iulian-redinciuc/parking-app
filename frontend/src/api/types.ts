@@ -102,13 +102,17 @@ export interface History {
   points: HistoryPoint[]
 }
 
-/** `GET /api/forecast`: 404 `not_enough_data` with fewer than 3 weeks of data. */
+/** `GET /api/forecast`: 404 `not_enough_data` with fewer than 3 weeks of data. `method` is
+ * `model` while the server's forecast model beats the median (P9.6, forecast.md); `weather`
+ * = that answer used the weather forecast. Both are missing on older servers. */
 export interface Forecast {
   zone: string
   at: string
   free_expected: number
+  method?: 'median' | 'model'
   basis: string
   samples: number
+  weather?: boolean
 }
 
 /** Codes the server sends (api.md §1 error format). */

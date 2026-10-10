@@ -26,7 +26,13 @@ describe('mock history and forecast', () => {
     const at = (iso: string) => mockForecast({ at: iso }, NOW).free_expected
     expect(lotParts(Date.parse('2026-10-08T09:30:00Z'), 'Europe/Bucharest').weekday).toBe(4)
     expect(at('2026-10-08T09:30:00Z')).toBeLessThan(at('2026-10-08T00:30:00Z'))
-    expect(isForecast(mockForecast({}, NOW))).toBe(true)
+    const forecast = mockForecast({}, NOW)
+    expect(isForecast(forecast)).toBe(true)
+    // P9.6: `method` / `weather` are optional (older servers), and checked when present
+    expect(isForecast({ ...forecast, method: undefined, weather: undefined })).toBe(true)
+    expect(isForecast({ ...forecast, method: 'model', weather: true })).toBe(true)
+    expect(isForecast({ ...forecast, method: 'guess' })).toBe(false)
+    expect(isForecast({ ...forecast, weather: 'yes' })).toBe(false)
   })
 
   it('rejects unknown zones and too many buckets like the API', () => {

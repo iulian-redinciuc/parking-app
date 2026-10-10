@@ -19,7 +19,8 @@ import {
 } from '../lib/stats'
 
 // The Stats screen (frontend.md §2.3, P7.7), a lazy chunk with Recharts in a further lazy chunk:
-// the "Usually ~N free at HH:MM" card (`/api/forecast` for now + 30 min), today's free spaces
+// the "Usually ~N free at HH:MM" card (`/api/forecast` for now + 30 min; "Probably ~N" when the
+// server's forecast model answered, P9.6), today's free spaces
 // (`/api/history?bucket=minute`, the last 24 h cut to the lot-local day) over the typical band and
 // the weekday × hour heatmap (both from one `bucket=hour` request over the 8 weeks before this
 // hour). All requests go out together; days and hours are the lot's timezone.
@@ -173,6 +174,8 @@ function StatsBody({ lot, data }: { lot: LotInfo; data: Loaded }) {
     minute: '2-digit',
     timeZone: tz,
   }).format(data.forecast ? Date.parse(data.forecast.at) : data.now + FORECAST_AHEAD_MS)
+  // the server's forecast model answered (only while it beats the median, forecast.md)
+  const byModel = data.forecast?.method === 'model'
   const hasHeatmap = cells.some((row) => row.some((v) => v !== null))
 
   return (
@@ -184,11 +187,32 @@ function StatsBody({ lot, data }: { lot: LotInfo; data: Loaded }) {
         {data.forecast ? (
           <>
             <p className="text-xl font-bold" data-testid="forecast">
-              {t('stats.forecast', { count: data.forecast.free_expected, time: forecastTime })}
+              {t(byModel ? 'stats.forecast_model' : 'stats.forecast', {
+                count: data.forecast.free_expected,
+                time: forecastTime,
+              })}
             </p>
             <p className="text-sm text-muted">
-              {t('stats.forecast_basis', { count: data.forecast.samples })}
+              {byModel
+                ? t(
+                    data.forecast.weather
+                      ? 'stats.forecast_model_basis_weather'
+                      : 'stats.forecast_model_basis',
+                  )
+                : t('stats.forecast_basis', { count: data.forecast.samples })}
             </p>
+            {byModel && data.forecast.weather && (
+              <p className="text-xs text-muted">
+                <a
+                  className="underline"
+                  href="https://open-meteo.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t('stats.forecast_weather_credit')}
+                </a>
+              </p>
+            )}
           </>
         ) : (
           <p data-testid="forecast">{t('stats.forecast_none', { time: forecastTime })}</p>

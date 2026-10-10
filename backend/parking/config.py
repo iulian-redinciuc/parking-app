@@ -6,6 +6,7 @@ Spec: docs/design/config.md (§1 lot.yaml + loader rules, §2 slot file, §3 lin
 
 import os
 import re
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal, Self, get_args
 
@@ -287,12 +288,35 @@ class ApiCfg(Strict):
     levels: Levels = Field(default_factory=Levels)
 
 
+class ForecastCfg(Strict):
+    """The forecast model (docs/design/forecast.md): trained nightly, used by `/api/forecast`
+    only while it beats the 8-week median on the last 4 weeks."""
+
+    model: bool = True
+    holidays: str | None = None  # ISO 3166-1 alpha-2 country, e.g. RO: its public holidays
+    holidays_subdiv: str | None = None  # a region of it, where holidays differ by region
+    extra_holidays: list[date] = Field(default_factory=list)  # the lot's own closed days
+    weather: bool = False  # hourly temperature and rain from Open-Meteo (lot coordinates sent)
+
+    @model_validator(mode="after")
+    def _check_holidays(self) -> Self:
+        if self.holidays is None:
+            if self.holidays_subdiv is not None:
+                raise ValueError("forecast.holidays_subdiv needs forecast.holidays")
+            return self
+        from parking.forecast.days import check_country
+
+        check_country(self.holidays, self.holidays_subdiv)
+        return self
+
+
 class LotConfig(Strict):
     version: Literal[1]
     lot: Lot
     zones: list[Zone] = Field(min_length=1)
     cameras: list[Camera] = Field(default_factory=list)
     api: ApiCfg = Field(default_factory=ApiCfg)
+    forecast: ForecastCfg = Field(default_factory=ForecastCfg)
 
     @model_validator(mode="after")
     def _cross_check(self) -> Self:

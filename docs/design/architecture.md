@@ -104,6 +104,11 @@ backend/
 │   │   ├── repo.py              # read/write helpers
 │   │   ├── rollups.py           # zone_minute / zone_hour rollups, pruning, retention report
 │   │   └── history.py           # /api/history and /api/forecast reads
+│   ├── forecast/                # the forecast model (forecast.md, P9.6)
+│   │   ├── gbm.py               # small gradient-boosted trees in numpy, stored as JSON
+│   │   ├── days.py              # public holidays (holidays package + extra_holidays)
+│   │   ├── weather.py           # Open-Meteo client, weather_hour
+│   │   └── model.py             # features, nightly training, the check against the median, serving
 │   ├── api/
 │   │   ├── app.py               # create_app(): routers, CORS, rate limits, lifespan
 │   │   ├── deps.py              # Runtime (one per lot, multi-lot.md), lot / camera / zone lookups, auth dependencies

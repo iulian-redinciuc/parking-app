@@ -22,6 +22,7 @@ db_app = typer.Typer(help="Database migrations and maintenance.", no_args_is_hel
 push_app = typer.Typer(help="Web Push setup.", no_args_is_help=True)
 admin_app = typer.Typer(help="Admin helpers.", no_args_is_help=True)
 validation_app = typer.Typer(help="Build the validation set (P4.8).", no_args_is_help=True)
+forecast_app = typer.Typer(help="The forecast model (P9.6).", no_args_is_help=True)
 
 app.add_typer(models_app, name="models")
 app.add_typer(worker_app, name="worker")
@@ -29,6 +30,7 @@ app.add_typer(db_app, name="db")
 app.add_typer(push_app, name="push")
 app.add_typer(admin_app, name="admin")
 app.add_typer(validation_app, name="validation")
+app.add_typer(forecast_app, name="forecast")
 
 
 def _version_callback(value: bool) -> None:
@@ -2036,6 +2038,67 @@ def db_aggregate(
     finally:
         engine.dispose()
     typer.echo(f"zone_minute: {minutes} row(s) written, zone_hour: {hours} row(s) written")
+
+
+def _forecast_table(rows) -> None:
+    typer.echo(
+        f"{'zone':<20} {'hours':>6} {'held out':>8} {'MAE model':>9} {'MAE median':>10}  used"
+    )
+    for r in rows:
+        model = "-" if r.mae_model is None else f"{r.mae_model:.2f}"
+        median = "-" if r.mae_median is None else f"{r.mae_median:.2f}"
+        typer.echo(
+            f"{r.zone_id:<20} {r.rows:>6} {r.holdout_rows:>8} {model:>9} {median:>10}  "
+            f"{'model' if r.active else 'median'} ({r.note})"
+        )
+
+
+@forecast_app.command("train")
+def forecast_train(
+    config: Annotated[Path, typer.Option(help="lot.yaml.")] = DEFAULT_CONFIG,
+    url: DbUrl = None,
+) -> None:
+    """Refresh the weather, then train and check the forecast models now (the API does it
+    every night at 03:30). A model is used only if it beats the median on the last 4 weeks."""
+    from parking.api.jobs import MaintenanceJobs
+    from parking.core.clock import SystemClock
+
+    lots, engine = _db_engine(config, url)
+    try:
+        reports = MaintenanceJobs.for_lots(engine, lots, SystemClock()).run_forecast(
+            SystemClock().now()
+        )
+    finally:
+        engine.dispose()
+    if not reports:
+        typer.echo("forecast.model is off in lot.yaml: nothing trained")
+        return
+    _forecast_table(reports)
+
+
+@forecast_app.command("status")
+def forecast_status(
+    config: Annotated[Path, typer.Option(help="lot.yaml.")] = DEFAULT_CONFIG,
+    url: DbUrl = None,
+) -> None:
+    """Show each zone's last training: the model's and the median's error on the held-out
+    4 weeks (mean absolute error, in spaces) and which one `/api/forecast` uses."""
+    from sqlmodel import select
+
+    from parking.db.engine import session_scope
+    from parking.db.models import ForecastModel
+
+    _, engine = _db_engine(config, url)
+    try:
+        with session_scope(engine) as session:
+            rows = session.exec(select(ForecastModel).order_by(ForecastModel.zone_id)).all()
+            if not rows:
+                typer.echo("no forecast model trained yet")
+                return
+            typer.echo(f"last trained: {max(r.trained_at for r in rows):%Y-%m-%d %H:%M} UTC")
+            _forecast_table(rows)
+    finally:
+        engine.dispose()
 
 
 @db_app.command("prune")

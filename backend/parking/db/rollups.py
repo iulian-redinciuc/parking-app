@@ -33,6 +33,7 @@ from parking.db.models import (
     NotificationLog,
     PushSubscription,
     SlotState,
+    WeatherHour,
     ZoneHour,
     ZoneMinute,
     ZoneState,
@@ -335,6 +336,11 @@ PRUNE_GRACE = DAY + HOUR
 KEPT = {
     "zone_hour": (ZoneHour, ZoneHour.bucket_ts, "kept: hourly averages for the stats"),
     "correction": (Correction, Correction.ts, "kept: audit log of count corrections"),
+    "weather_hour": (
+        WeatherHour,
+        WeatherHour.bucket_ts,
+        "kept: hourly weather for the forecast model",
+    ),
     "push_subscription": (
         PushSubscription,
         PushSubscription.created_at,

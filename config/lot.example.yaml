@@ -111,3 +111,10 @@ api:
   levels:                          # free / capacity thresholds (see api.md#levels)
     plenty: 0.20
     filling: 0.05
+
+forecast:                          # the forecast model (docs/design/forecast.md); all optional
+  model: true                      # trained nightly; used only while it beats the 8-week median
+  # holidays: RO                   # the lot's country (ISO code): its public holidays become features
+  # extra_holidays: [2026-12-24]   # the lot's own closed days
+  weather: false                    # hourly temperature and rain from Open-Meteo (sends the lot's
+                                   # coordinates rounded to ~1 km; free for non-commercial use)

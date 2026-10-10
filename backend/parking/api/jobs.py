@@ -8,6 +8,7 @@ the API lifespan, next to the push reminders.
 | `prune` | daily 04:00 lot time | `rollups.prune` with the default retention |
 | `vacuum` | Sunday 04:30 lot time | `PRAGMA optimize; VACUUM` |
 | `reset-<zone>` | the zone's `reset.cron`, lot time | the flow count set to `reset.value` (P5.7) |
+| `forecast` | daily 03:30 lot time | weather refreshed, forecast models retrained (forecast.md) |
 
 Each job's synchronous core (`run_minutes(now)`, ...) runs in a thread; tests call them with
 a fake clock. The minute job starts at second 5 so the ingest writes of the closed minute are
@@ -35,6 +36,9 @@ from parking.core.clock import Clock
 from parking.db import rollups
 from parking.db.engine import session_scope
 from parking.db.models import ZoneMinute
+from parking.forecast import model as forecast_model
+from parking.forecast import weather
+from parking.forecast.days import calendar_of
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +79,7 @@ class MaintenanceJobs:
         self.engine = engine
         lots = [(config, ingestor), *more]
         configs = [c for c, _ in lots]
+        self.configs = configs
         self.zone_ids = [z.id for c in configs for z in c.zones]
         # each lot's total pseudo-zone in the rollups -> its zone ids
         self.totals = {total_key(configs, c.lot.id): [z.id for z in c.zones] for c in configs}
@@ -128,6 +133,37 @@ class MaintenanceJobs:
         vacuum(self.engine)
         log.info("vacuum done")
 
+    def run_forecast(self, now: datetime, weather_client=None) -> list[forecast_model.Report]:
+        """Per lot with `forecast.model`: refresh its weather (if `forecast.weather`), then
+        train and check a model for each zone and the lot's total (forecast.md §5). A failed
+        weather request is logged; training goes on with what is stored."""
+        reports = []
+        for config in self.configs:
+            cfg, lot_id = config.forecast, config.lot.id
+            if not cfg.model:
+                continue
+            total = total_key(self.configs, lot_id)
+            zone_ids = [*self.totals[total], total]
+            if cfg.weather:
+                with session_scope(self.engine) as session:
+                    since = forecast_model.oldest_hour(session, zone_ids)
+                try:
+                    location = config.lot.location
+                    hours = weather.refresh(
+                        self.engine, lot_id, location.lat, location.lon, now, since, weather_client
+                    )
+                    log.info("forecast: %d weather hour(s) stored for lot %s", hours, lot_id)
+                except Exception as e:
+                    log.warning("forecast: weather refresh failed for lot %s: %s", lot_id, e)
+            cal = calendar_of(cfg)
+            tz = lot_timezone(config)
+            with session_scope(self.engine) as session:
+                wx = weather.load(session, lot_id) if cfg.weather else {}
+            for zone_id in zone_ids:
+                with session_scope(self.engine) as session:
+                    reports.append(forecast_model.train(session, zone_id, tz, cal, wx, now))
+        return reports
+
     async def run_reset(self, zone_id: str) -> None:
         """Set the zone's count to its `reset.value` (a `correction` row, published)."""
         value = self.resets[zone_id].value
@@ -149,6 +185,11 @@ class MaintenanceJobs:
                 CronTrigger(day_of_week="sun", hour=4, minute=30, timezone=self.tz),
             ),
         }
+        if any(c.forecast.model for c in self.configs):
+            jobs["forecast"] = (
+                self._job(self.run_forecast),
+                CronTrigger(hour=3, minute=30, timezone=self.tz),
+            )
         for zone_id, reset in self.resets.items():
             if self._ingestors[zone_id] is None:
                 log.warning("no ingestor: the scheduled reset of %s is off", zone_id)
