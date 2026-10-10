@@ -2,7 +2,7 @@
 # Build context = the repo root:  docker build -f backend/Dockerfile --target api .
 #   api:    FastAPI + SQLite, core deps only (no PyTorch)
 #   vision: camera workers with the ML stack (VISION_EXTRAS, e.g. "vision,openvino" on Intel)
-FROM python:3.12-slim-bookworm AS base
+FROM python:3.14-slim-bookworm AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
     UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_PYTHON_DOWNLOADS=never
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 ffmpeg \
