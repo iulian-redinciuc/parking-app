@@ -371,3 +371,6 @@ def test_loop_beats_the_heartbeat_file_and_health_says_when_it_started(lot, tmp_
     msg = w.health_message()
     assert msg.started_at == w.started_at and msg.started_at.tzinfo is not None
     assert json.loads(msg.model_dump_json())["started_at"].endswith("Z")
+    # the machine's numbers for the admin alerts (P8.7): the disk holding data/, the CPU if known
+    assert 0 <= msg.disk_pct <= 100
+    assert msg.cpu_temp_c is None or 0 < msg.cpu_temp_c < 120

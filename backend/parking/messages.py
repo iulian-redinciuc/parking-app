@@ -101,6 +101,10 @@ class CameraHealthMsg(Message):
     gate_active_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
     # when this worker process started; a new value = it was restarted (`restarts` in /healthz)
     started_at: UtcDatetime | None = None
+    # the worker's machine (P8.7 admin alerts): used share of the disk holding `data/`, and the
+    # CPU temperature where the machine reports one
+    disk_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    cpu_temp_c: float | None = None
 
 
 # --- API -> clients (api.md §1) ---

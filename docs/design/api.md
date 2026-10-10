@@ -182,9 +182,9 @@ Why not cookies: the frontend and the API can be on different sites (e.g. the Gi
 - `GET …/corrections?limit=50` (1–200, else `422`): `[{"id", "ts", "zone_id", "zone_name", "old_occupied", "new_occupied", "actor", "note"}]`, newest first; `zone_name` in `?lang=` / `Accept-Language` (the id when the zone has left lot.yaml).
 - After a restart a flow zone's confidence continues from its last correction: `corrected_at` = that row's `ts`, events since = `flow_event` rows of the zone after it.
 
-**Admin alerts** (`parking/api/routes/admin.py` + `parking/push/admin_alerts.py`, P7.8; rules in [notifications.md §5.1](notifications.md#51-admin-alerts-p78)):
+**Admin alerts** (`parking/api/routes/admin.py` + `parking/push/admin_alerts.py`, P7.8; rules in [notifications.md §5.1](notifications.md#51-admin-alerts-p78-p87)):
 - `PUT /api/admin/alerts` sets `push_subscription.admin_alerts` for the subscription with that `endpoint` (this browser's, from the Alerts screen); unknown keys `422`, unknown endpoint `404`. Re-subscribing the same endpoint (`POST /api/push/subscriptions`) keeps the flag; a new endpoint (the browser renewed it) starts without it.
-- `GET /api/admin/alerts`: `enabled` is that subscription's flag (`false` for no or an unknown `endpoint`), `available` whether push is configured (no VAPID keys = no alerts), `issues` the open ones, oldest first: `kind` `camera_down | camera_shifted | stale | clamps`, `subject` the camera or zone id, `detail` the camera issue or the clamp count, `since` when first seen, `active` past its grace period, `last_alert_at` the last alert for that issue (or `null`).
+- `GET /api/admin/alerts`: `enabled` is that subscription's flag (`false` for no or an unknown `endpoint`), `available` whether push is configured (no VAPID keys = no alerts), `issues` the open ones, oldest first: `kind` `camera_down | camera_shifted | stale | clamps | disk | cpu_temp | api_restarted | backup_failed`, `subject` the camera or zone id (for the machine issues of P8.7: `api` or the camera id of the worker's machine), `detail` the camera issue, the clamp count, `91%`, `82 °C` or the backup's error, `since` when first seen, `active` past its grace period, `last_alert_at` the last alert for that issue (or `null`).
 
 ---
 
@@ -252,10 +252,12 @@ Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `
   "state": "ok", "issue": null,
   "fps": 0.2, "last_frame_age_s": 3.1, "inference_ms_avg": 151, "unhealthy_ratio": 0.0,
   "gate_active_ratio": null,
-  "started_at": "2026-10-07T09:00:00.000Z"
+  "started_at": "2026-10-07T09:00:00.000Z",
+  "disk_pct": 41.5, "cpu_temp_c": 58.4
 }
 ```
 `started_at` (P8.5, optional): when this worker process started. A different value than in the camera's previous message means the worker was restarted; the API counts it (`restarts` in `/healthz`). Messages without it are never counted.
+`disk_pct` / `cpu_temp_c` (P8.7, optional, `null` when unknown): the worker's machine, i.e. the used share (0–100) of the filesystem holding its `data/` and the hottest CPU thermal zone in °C. The API only uses them for the `disk` / `cpu_temp` admin alerts ([notifications.md §5.1](notifications.md#51-admin-alerts-p78-p87)); they aren't stored.
 `gate_active_ratio` (flow workers only, P5.6, else `null`): share of the last 10 s of frames the motion gate let through to the detector. A flow worker's `fps` is frames processed per second over the last 10 s and `inference_ms_avg` the mean gate + detector + tracker time of the frames the gate let through (`null` while the ramp is quiet). Its frame-health check runs once a second without the `frozen` check (a quiet ramp looks the same for minutes); no new frame for 5 s is `connect_failed`.
 `state`: `ok | degraded | down`. `issue`: `null | black | frozen | blurry | shifted | connect_failed`. A `shifted` camera (vision.md §6) is `degraded` (unless `down`) and reports `issue: shifted` while its frames are otherwise healthy.
 

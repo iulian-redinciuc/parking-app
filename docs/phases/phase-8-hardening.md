@@ -203,7 +203,29 @@ docker rm -f parking-drill-api && rm -rf /tmp/parking-drill
 1. Admin push alerts (P7.8) cover cameras and staleness. Add: disk > 85%, CPU temperature high (on machines that report it), API restarted, backup failed.
 2. External uptime check: a free monitor (e.g. UptimeRobot / Healthchecks.io) on `https://<api-host>/healthz` every 5 min, emailing you. This catches "the whole machine or its internet is down", which the machine can't report itself.
 
+How it works: [notifications.md §5.1](../design/notifications.md#51-admin-alerts-p78-p87) (the alerts) and [deployment.md §11](../design/deployment.md#11-monitoring-and-the-external-uptime-check-p87) (the two layers). **Files:** `backend/parking/core/system.py` (disk %, CPU temperature), `messages.py` + `workers/base.py` (`disk_pct`, `cpu_temp_c` in the health message), `push/admin_alerts.py` (`disk`, `cpu_temp`, `api_restarted`, `backup_failed`), `deploy/backup.sh` (`data/backups/last-run.json`), the Alerts screen's issue texts, [runbook.md → Alerts](../runbook.md#alerts).
+
+As built: step 1 needs nothing set up beyond *Receive admin alerts* on your phone (Alerts screen, logged in as admin); the lot box's disk and temperature travel in the workers' health messages. Step 2 is an account only you can create; the monitor is a **keyword** monitor so a proxy error page with status 200 doesn't count as up.
+
+**Commands** (production, after P8.3; needs a release tagged after this task on both machines):
+```bash
+# 1. the admin alerts: a restart is the easy one to see (push "Admin: The API restarted" within ~15 s)
+cd /opt/parking/deploy && docker compose -f docker-compose.server.yml restart api
+cat ../data/backups/last-run.json                      # after P8.6: {"ts": …, "status": "ok", "message": ""}
+
+# 2. the external check, once, at https://uptimerobot.com (free account, your e-mail):
+#    + New monitor → Keyword → URL https://<PUBLIC_HOST>/healthz → keyword "status":"ok" → "exists"
+#    → interval 5 minutes → alert contact: your e-mail (down + up)
+curl -s https://<PUBLIC_HOST>/healthz | grep -o '"status":"ok"'      # what the monitor looks for
+
+# 3. the check: stop the API, note the time, wait for the e-mail (< 10 min), start it again
+docker compose -f docker-compose.server.yml stop api; date
+docker compose -f docker-compose.server.yml --profile web up -d      # the "up" e-mail follows
+```
+
 **Done when:** stopping the production API (or cutting its network) produces an external alert email within 10 min.
+
+*Status (P8.7):* step 1 is done and tested (dev Pi; the probe also checked inside the hardened API image). Still open, because they need the production API with its public URL (P8.2/P8.3) and a monitoring account only Iulian can create: the monitor itself and the stop-the-API check.
 
 ## P8.8: Security review
 Go through [security-privacy.md §2](../design/security-privacy.md#2-threats-and-controls) line by line on the **production** setup and tick each control as verified:

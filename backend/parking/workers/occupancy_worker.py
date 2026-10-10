@@ -367,6 +367,7 @@ class OccupancyWorker(Worker):
             inference_ms_avg=round(sum(ms) / len(ms), 1) if ms else None,
             unhealthy_ratio=round(self.health.unhealthy_ratio, 3),
             started_at=self.started_at,
+            **self.system_fields(),
         )
 
     @property

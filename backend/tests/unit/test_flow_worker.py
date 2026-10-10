@@ -269,3 +269,4 @@ def test_loop_beats_the_heartbeat_file(repo, tmp_path):
     w.run(handle_signals=False)
     assert check(path)[0] and path.read_text() == "20\n"
     assert w.health_message().started_at == w.started_at
+    assert w.health_message().disk_pct is not None

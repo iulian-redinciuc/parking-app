@@ -23,11 +23,13 @@ import signal
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from parking.config import Camera, ConfigError, LotConfig, Settings, cli_env, load_config
+from parking.core.system import system_stats
 from parking.messages import CameraHealthMsg
 from parking.workers.api_client import ApiClient
 from parking.workers.control import DEFAULT_PORT, ControlServer
@@ -150,6 +152,11 @@ class Worker:
 
     def health_message(self, final: bool = False) -> CameraHealthMsg:
         raise NotImplementedError
+
+    def system_fields(self) -> dict[str, float | None]:
+        """`disk_pct` / `cpu_temp_c` of this machine for the health message."""
+        data = self.root / "data"
+        return asdict(system_stats(data if data.exists() else self.root))
 
     def snapshot(self, annotated: bool) -> bytes | None:
         return None

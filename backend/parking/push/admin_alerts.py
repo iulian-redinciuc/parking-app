@@ -1,4 +1,4 @@
-"""Admin alerts (notifications.md §5.1, P7.8): pushes to the subscriptions an admin opted in
+"""Admin alerts (notifications.md §5.1, P7.8 + P8.7): pushes to the subscriptions an admin opted in
 (`push_subscription.admin_alerts`) when something needs a look.
 
 | Issue | Condition | Alert after |
@@ -8,7 +8,13 @@
 | `stale:<zone>` | the zone is stale, has had data, and none of its cameras is down | 5 min |
 | `clamps:<zone>` | > 3 clamped entry/exit events today (lot-local day, after the zone's
   last correction) | at once |
+| `disk:<machine>` | the disk holding `data/` is more than 85% full | 5 min |
+| `cpu_temp:<machine>` | the CPU is at 80 °C or more (machines that report it) | 5 min |
+| `api_restarted:api` | the API process started less than 2 min ago | at once, no "resolved" |
+| `backup_failed:api` | the last nightly backup failed, stayed on the machine, or is over
+  26 h old (`data/backups/last-run.json`; nothing without that file) | at once |
 
+`<machine>` is `api` (the API's own) or a camera id (its worker's, from the health messages).
 The times count from when the monitor first saw the condition (it checks every 10 s). An issue
 gets at most one alert per hour (`kind: admin_alert`, `Urgency: high`; while it lasts the hourly
 alert repeats, replacing the last one by its tag), and a "resolved" push (`Urgency: normal`)
@@ -20,11 +26,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
+from pathlib import Path
 from typing import Any, Literal
 
 import anyio
@@ -34,6 +42,7 @@ from sqlmodel import col, select
 from parking.api.jobs import lot_timezone
 from parking.config import LotConfig
 from parking.core.clock import Clock
+from parking.core.system import SystemStats, system_stats
 from parking.db.engine import session_scope
 from parking.db.models import Correction, FlowEvent, PushSubscription
 from parking.messages import CameraHealthMsg, LotStatus
@@ -43,7 +52,16 @@ from parking.push.sender import PushSender, SendResult
 log = logging.getLogger(__name__)
 
 KIND = "admin_alert"
-IssueKind = Literal["camera_down", "camera_shifted", "stale", "clamps"]
+IssueKind = Literal[
+    "camera_down",
+    "camera_shifted",
+    "stale",
+    "clamps",
+    "disk",
+    "cpu_temp",
+    "api_restarted",
+    "backup_failed",
+]
 
 # how long a condition must last before it alerts
 GRACE: dict[str, timedelta] = {
@@ -51,9 +69,20 @@ GRACE: dict[str, timedelta] = {
     "camera_shifted": timedelta(0),
     "stale": timedelta(minutes=5),
     "clamps": timedelta(0),
+    "disk": timedelta(minutes=5),
+    "cpu_temp": timedelta(minutes=5),
+    "api_restarted": timedelta(0),
+    "backup_failed": timedelta(0),
 }
 REPEAT = timedelta(hours=1)  # at most one alert per issue per hour
+NO_RESOLVED = frozenset({"api_restarted"})  # an event, not a state: nothing to resolve
 MAX_CLAMPS_PER_DAY = 3
+DISK_MAX_PCT = 85.0
+CPU_TEMP_MAX_C = 80.0  # a Raspberry Pi 5 starts throttling here
+RESTART_SHOWN = timedelta(minutes=2)  # how long after its start the API counts as restarted
+API = "api"  # the subject of the API machine's own issues
+BACKUP_STATUS = Path("data") / "backups" / "last-run.json"  # written by deploy/backup.sh
+BACKUP_MAX_AGE = timedelta(hours=26)  # nightly, plus slack
 CHECK_S = 10.0
 
 
@@ -103,7 +132,7 @@ class AlertTracker:
         for key, issue in list(self.open.items()):
             if key not in current:
                 del self.open[key]
-                if issue.alerted:
+                if issue.alerted and issue.condition.kind not in NO_RESOLVED:
                     notices.append(Notice(issue.condition, issue.since, now))
         for key, cond in current.items():
             issue = self.open.get(key)
@@ -167,6 +196,46 @@ def conditions(
     return out
 
 
+def system_conditions(health: Mapping[str, CameraHealthMsg], api: SystemStats) -> list[Condition]:
+    """Full disks and hot CPUs: the API's own machine and each worker's (its latest health
+    message; a `down` camera's numbers are old, so they're skipped)."""
+    machines: dict[str, SystemStats] = {API: api}
+    for camera_id, h in health.items():
+        if h.state != "down":
+            machines[camera_id] = SystemStats(h.disk_pct, h.cpu_temp_c)
+    out = []
+    for subject, stats in machines.items():
+        if stats.disk_pct is not None and stats.disk_pct > DISK_MAX_PCT:
+            out.append(Condition("disk", subject, f"{stats.disk_pct:.0f}%"))
+        if stats.cpu_temp_c is not None and stats.cpu_temp_c >= CPU_TEMP_MAX_C:
+            out.append(Condition("cpu_temp", subject, f"{stats.cpu_temp_c:.0f} °C"))
+    return out
+
+
+def backup_condition(file: Path, now: datetime) -> Condition | None:
+    """The outcome `deploy/backup.sh` left of its last run (deployment.md §7): a failed run, an
+    archive that stayed on the machine, or no run for over a day. No file = no backups set up
+    on this machine (the dev stack), which is not an alert."""
+    try:
+        text = file.read_text()
+    except OSError:
+        return None
+    try:
+        last = json.loads(text)
+        ts, status = datetime.fromisoformat(last["ts"]), last["status"]
+        ts = ts if ts.tzinfo else ts.replace(tzinfo=UTC)
+        message = str(last.get("message") or "")
+    except (ValueError, KeyError, TypeError):
+        return Condition("backup_failed", API, "the status file can't be read")
+    if status == "ok":
+        if now - ts <= BACKUP_MAX_AGE:
+            return None
+        return Condition("backup_failed", API, "no backup since the last good one")
+    if not message and status == "local_only":
+        message = "not copied off the machine"
+    return Condition("backup_failed", API, message)
+
+
 def clamp_counts(engine: Engine, config: LotConfig, now: datetime) -> dict[str, int]:
     """Clamped (`applied=false`) flow events per flow zone since the lot-local midnight or the
     zone's last correction, whichever is later (a correction fixes what the clamps showed)."""
@@ -204,6 +273,9 @@ def alert_payload(
     if c.kind in ("camera_down", "camera_shifted"):
         name = c.subject
         link = f"{base}#/admin/cameras/{c.subject}"
+    elif c.kind in ("disk", "cpu_temp", "api_restarted", "backup_failed"):
+        name = "the API server" if c.subject == API else f"camera {c.subject}'s machine"
+        link = f"{base}#/admin"
     else:
         zone = next((z for z in config.zones if z.id == c.subject), None)
         name = zone.display_name(lang) if zone else c.subject
@@ -214,6 +286,10 @@ def alert_payload(
             "camera_shifted": f"Camera {name} is no longer shifted",
             "stale": f"{name}: live data again",
             "clamps": f"{name}: entry/exit count fixed",
+            "disk": f"Disk space is back on {name}",
+            "cpu_temp": f"The CPU has cooled down on {name}",
+            "api_restarted": "The API is running",
+            "backup_failed": "The backup works again",
         }[c.kind]
         body = f"Resolved: {since}–{local_time(notice.resolved_at, tz)}"
     else:
@@ -230,6 +306,16 @@ def alert_payload(
             "clamps": (
                 f"{name}: entry/exit count is off",
                 f"{c.detail} clamped events today. Correct the count",
+            ),
+            "disk": (f"Disk almost full on {name}", f"{c.detail} used, since {since}"),
+            "cpu_temp": (f"The CPU is hot on {name}", f"{c.detail}, since {since}"),
+            "api_restarted": (
+                "The API restarted",
+                f"At {since}. Nothing to do if that was you",
+            ),
+            "backup_failed": (
+                "The backup failed",
+                f"Since {since}" + (f": {c.detail}" if c.detail else ""),
             ),
         }[c.kind]
     return {
@@ -266,6 +352,7 @@ class AdminAlertMonitor:
         url: str,
         store,
         lock: asyncio.Lock | None = None,
+        root: Path | None = None,
     ):
         self.engine = engine
         self.sender = sender
@@ -274,6 +361,14 @@ class AdminAlertMonitor:
         self.url = url
         self.store = store  # the StateStore: latest health per camera + the status
         self.tracker = AlertTracker()
+        # the API's own machine (P8.7); without `root` (the app root) none of it is checked
+        self.root = root
+        self.started_at: datetime | None = clock.now() if root is not None else None
+        self.probe: Callable[[], SystemStats] = (
+            (lambda: system_stats(root / "data" if (root / "data").exists() else root))
+            if root is not None
+            else SystemStats
+        )
         self._lock = lock or asyncio.Lock()
         self._task: asyncio.Task | None = None
 
@@ -308,7 +403,15 @@ class AdminAlertMonitor:
         self, health: Mapping[str, CameraHealthMsg], status: LotStatus, now: datetime
     ) -> list[SendResult]:
         clamps = clamp_counts(self.engine, self.config, now)
-        notices = self.tracker.update(conditions(self.config, health, status, clamps), now)
+        found = conditions(self.config, health, status, clamps)
+        found += system_conditions(health, self.probe())
+        if self.started_at is not None and now - self.started_at < RESTART_SHOWN:
+            found.append(Condition("api_restarted", API))
+        if self.root is not None:
+            backup = backup_condition(self.root / BACKUP_STATUS, now)
+            if backup is not None:
+                found.append(backup)
+        notices = self.tracker.update(found, now)
         if not notices:
             return []
         subs = admin_subscriptions(self.engine)

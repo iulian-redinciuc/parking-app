@@ -4,8 +4,9 @@ with a `FakeClock`; `webpush` is faked."""
 
 import base64
 import contextlib
+import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -13,6 +14,7 @@ import pytest
 from parking.api.app import create_app
 from parking.config import Settings
 from parking.core.clock import FakeClock
+from parking.core.system import SystemStats
 from parking.messages import format_ts
 from parking.push.sender import generate_vapid_keys
 from tests.integration.test_on_my_way import (
@@ -40,7 +42,9 @@ def lot(tmp_path):
 
 
 @contextlib.asynccontextmanager
-async def running(lot, webpush, clock, vapid=True):
+async def running(lot, webpush, clock, vapid=True, machine=None):
+    """`machine`: the API machine's `SystemStats` (P8.7); None = the machine checks are off (no
+    restart alert, a healthy machine), as the P7.8 tests expect."""
     keys = {"vapid_public_key": PUBLIC, "vapid_private_key": PRIVATE} if vapid else {}
     settings = Settings(
         _env_file=None,
@@ -62,7 +66,12 @@ async def running(lot, webpush, clock, vapid=True):
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=transport, base_url="http://test") as client,
     ):
-        yield client, app.state.runtime
+        rt = app.state.runtime
+        if rt.alerts is not None:
+            if machine is None:
+                rt.alerts.started_at = None
+            rt.alerts.probe = lambda: machine or SystemStats()
+        yield client, rt
 
 
 async def subscribe(client, endpoint, admin=False):
@@ -255,6 +264,83 @@ async def test_clamps_alert_on_the_fourth_and_resolve_after_a_correction(lot):
         assert admin_pushes(webpush)[-1][1]["title"] == (
             "Admin: Underground: entry/exit count fixed"
         )
+
+
+async def test_api_restart_alerts_once_without_a_resolved(lot):
+    webpush, clock = FakeWebpush(), FakeClock(T0)
+    async with running(lot, webpush, clock, machine=SystemStats(40.0, 50.0)) as (client, rt):
+        await subscribe(client, ADMIN_ENDPOINT, admin=True)
+        await checks(rt, clock, 10)
+        [(_, alert)] = admin_pushes(webpush)
+        assert alert["title"] == "Admin: The API restarted"
+        assert alert["body"] == "At 17:05. Nothing to do if that was you"
+        assert alert["tag"] == "admin-api_restarted:api" and alert["url"] == "#/admin"
+        await checks(rt, clock, 600)
+        assert len(admin_pushes(webpush)) == 1  # no repeat, no "resolved"
+        r = await client.get("/api/admin/alerts", headers=ADMIN)
+        assert r.json()["issues"] == []
+
+
+async def test_full_disk_and_hot_cpu_on_the_api_machine_and_a_workers(lot):
+    webpush, clock = FakeWebpush(), FakeClock(T0)
+    machine = SystemStats(disk_pct=91.4, cpu_temp_c=None)  # a cloud VM: no temperature
+    async with running(lot, webpush, clock, machine=machine) as (client, rt):
+        rt.alerts.started_at = None
+        await subscribe(client, ADMIN_ENDPOINT, admin=True)
+        body = {"v": 1, "camera_id": "cam-ground", "ts": format_ts(clock.now()), "state": "ok"}
+        body |= {"disk_pct": 85.0, "cpu_temp_c": 82.3}  # the lot box: disk at the limit is fine
+        r = await client.post("/internal/health", json=body, headers=AUTH)
+        assert r.status_code == 204, r.text
+        await checks(rt, clock, 290)
+        assert admin_pushes(webpush) == []
+        await checks(rt, clock, 20)
+        pushes = {p["tag"]: p for _, p in admin_pushes(webpush)}
+        assert set(pushes) == {"admin-disk:api", "admin-cpu_temp:cam-ground"}
+        assert pushes["admin-disk:api"]["title"] == "Admin: Disk almost full on the API server"
+        assert pushes["admin-disk:api"]["body"] == "91% used, since 17:05"
+        hot = pushes["admin-cpu_temp:cam-ground"]
+        assert hot["title"] == "Admin: The CPU is hot on camera cam-ground's machine"
+        assert hot["body"] == "82 °C, since 17:05"
+        # the disk was cleaned up; the worker's machine cooled down
+        rt.alerts.probe = lambda: SystemStats(60.0, None)
+        body |= {"ts": format_ts(clock.now()), "cpu_temp_c": 61.0}
+        await client.post("/internal/health", json=body, headers=AUTH)
+        await rt.alerts.check()
+        titles = [p["title"] for _, p in admin_pushes(webpush)[2:]]
+        assert sorted(titles) == [
+            "Admin: Disk space is back on the API server",
+            "Admin: The CPU has cooled down on camera cam-ground's machine",
+        ]
+
+
+async def test_backup_failed_alerts_until_a_good_run(lot):
+    webpush, clock = FakeWebpush(), FakeClock(T0)
+    last_run = lot / "data" / "backups" / "last-run.json"
+    last_run.parent.mkdir(parents=True, exist_ok=True)
+
+    def ran(status, message="", hours_ago=0.0):
+        ts = format_ts(clock.now() - timedelta(hours=hours_ago))
+        last_run.write_text(json.dumps({"ts": ts, "status": status, "message": message}))
+
+    async with running(lot, webpush, clock) as (client, rt):
+        await subscribe(client, ADMIN_ENDPOINT, admin=True)
+        await checks(rt, clock, 60)  # no status file: backups aren't set up here
+        ran("ok", hours_ago=20)
+        await checks(rt, clock, 60)
+        assert admin_pushes(webpush) == []
+        ran("local_only", 'not copied off this machine (no remote "parking-backup")')
+        await checks(rt, clock, 10)
+        [(_, alert)] = admin_pushes(webpush)
+        assert alert["title"] == "Admin: The backup failed"
+        assert alert["body"] == (
+            'Since 17:07: not copied off this machine (no remote "parking-backup")'
+        )
+        ran("ok")
+        await checks(rt, clock, 10)
+        assert admin_pushes(webpush)[-1][1]["title"] == "Admin: The backup works again"
+        # the cron job stopped: the last good run is over 26 h old
+        await checks(rt, clock, 27 * 3600, every=600)
+        assert admin_pushes(webpush)[-1][1]["body"].endswith("no backup since the last good one")
 
 
 async def test_alerts_routes(lot):

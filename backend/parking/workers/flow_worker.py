@@ -346,6 +346,7 @@ class FlowWorker(Worker):
             ),
             unhealthy_ratio=round(self.health.unhealthy_ratio, 3),
             started_at=self.started_at,
+            **self.system_fields(),
             **self.window_stats(now),
         )
 

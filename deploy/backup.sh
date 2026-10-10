@@ -11,6 +11,8 @@
 # The remote is the rclone remote "parking-backup" in deploy/rclone.conf (git-ignored, mode 600). It
 # must be of type crypt: the archive holds the config and the lot's coordinates, .env holds the secrets.
 # Exit codes: 0 done · 1 failed · 3 the local archive was written but NOT copied off this machine.
+# A run leaves its outcome in data/backups/last-run.json; the API turns a bad or missing one into the
+# "backup failed" admin alert (docs/design/notifications.md §5.1).
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -26,7 +28,8 @@ ENV_NAME=${BACKUP_ENV_NAME:-$(hostname)}
 BACKUPS=$ROOT/data/backups
 CLI=/app/backend/.venv/bin/parking
 
-die() { echo "backup: $*" >&2; exit 1; }
+MSG=
+die() { MSG=$*; echo "backup: $*" >&2; exit 1; }
 rc() { "$RCLONE" --config "$RCLONE_CONF" "$@"; }
 
 # Fails unless the remote exists and encrypts.
@@ -42,13 +45,26 @@ remote_ready() {
 local_archives() { find "$BACKUPS" -maxdepth 1 -name 'parking-*.tar.gz' -printf '%f\n' 2>/dev/null | sort; }
 remote_archives() { rc lsf --files-only --include 'parking-*.tar.gz' "$REMOTE:backups" 2>/dev/null | sort; }
 
+# The run's outcome for the API: {"ts", "status": ok | local_only | failed, "message"}.
+record() {
+  local status=failed tmp
+  case "$1" in 0) status=ok ;; 3) status=local_only ;; esac
+  # only where the API container has made the folder (it must stay the container user's)
+  [ -d "$BACKUPS" ] && tmp=$(mktemp "$BACKUPS/.last-run.XXXXXX" 2>/dev/null) || return 0
+  printf '{"ts": "%s", "status": "%s", "message": "%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$status" \
+    "$(printf %s "$MSG" | tr -d '\n\t' | sed 's/\\/\\\\/g; s/"/\\"/g')" >"$tmp" &&
+    chmod 644 "$tmp" && mv "$tmp" "$BACKUPS/last-run.json" || rm -f "$tmp"
+}
+
 cmd_run() {
+  trap 'record $?' EXIT
   docker exec "$API" "$CLI" backup --out /app/data/backups || die "the local backup failed"
   local newest why
   newest=$(local_archives | tail -n 1)
   [ -n "$newest" ] || die "no archive in $BACKUPS"
 
   if ! why=$(remote_ready); then
+    MSG="not copied off this machine ($why)"
     echo "backup: NOT copied off this machine ($why)" >&2
     exit 3
   fi

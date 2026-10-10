@@ -82,7 +82,7 @@ As built (P6.7): rules in `parking/push/rules.py`, jobs in `parking/push/schedul
 - **Almost full** (`almost_full_zones`, `AlmostFullNotifier`): an ingest hook next to the on-my-way one. A watched zone (`prefs.zones`, all when unset) counts when its level gets **worse** into `almost_full` or `full` (`filling → almost_full`, `almost_full → full`, `plenty → full`; getting better, an unchanged level, a stale zone or the start-up restore don't). The 2 h cooldown is the last `almost_full` row with status `sent` in `notification_log`, so a quiet-hours skip doesn't start it. `Urgency: high`, `kind: almost_full`, the normal status payload.
 - Neither touches `last_sent_free` / `last_sent_level` (the on-my-way "last push"). The two hooks and the reminder job share one lock, so their DB updates never race; prefs are JSON, so the subscriptions are filtered in Python (fine for hundreds).
 
-### 5.1 Admin alerts (P7.8)
+### 5.1 Admin alerts (P7.8, P8.7)
 
 For the people running the lot, not the drivers. A logged-in admin turns on **Receive admin alerts** on the Alerts screen of a device with push enabled; that sets `push_subscription.admin_alerts` ([api.md §4](api.md#4-admin-endpoints)). `AdminAlertMonitor` (`parking/push/admin_alerts.py`) runs in the API every 10 s when push is configured, behind the same lock as the other push dispatches:
 
@@ -92,10 +92,16 @@ For the people running the lot, not the drivers. A logged-in admin turns on **Re
 | `camera_shifted:<camera>` | its latest health issue is `shifted` and it isn't down | at once |
 | `stale:<zone>` | the zone is stale, has had data before, and none of its cameras is down (that's already the camera alert) | 5 min |
 | `clamps:<zone>` | more than 3 clamped entry/exit events (`flow_event.applied = false`) today, lot-local day, counted after the zone's last correction | at once |
+| `disk:<machine>` | the filesystem holding `data/` is **more than 85%** full | 5 min |
+| `cpu_temp:<machine>` | the CPU is at **80 °C or more** (the hottest `/sys/class/thermal/thermal_zone*/temp`; machines without one, like most cloud VMs, never alert) | 5 min |
+| `api_restarted:api` | the API process started less than 2 min ago | at once; no repeat, no "resolved" |
+| `backup_failed:api` | the last run of `deploy/backup.sh` failed (`failed`), left the archive on the machine (`local_only`), or the last good run is over 26 h old | at once |
+
+The machine issues (P8.7): `<machine>` is `api` for the API's own machine (measured by the monitor, `parking/core/system.py`) or a **camera id** for its worker's machine, from `disk_pct` / `cpu_temp_c` in the worker's health messages ([api.md §5.1](api.md#51-payloads)); a `down` camera's numbers are old and are skipped. Two workers on one machine both report it, so a full disk there alerts once per camera. `backup_failed` reads `data/backups/last-run.json`, which `backup.sh` writes after every run ([deployment.md §7](deployment.md#7-backups)); without that file (no backups set up: the dev stack) there is no alert. `api_restarted` goes out after every start, including an update you did yourself: an unexpected one means a crash, an out-of-memory kill or a reboot. Like every admin alert it needs push to be configured and the API to be up: a machine that is off or offline can't report itself, that is the external uptime check's job ([deployment.md §11](deployment.md#11-monitoring-and-the-external-uptime-check-p87)).
 
 - The grace time counts from the first check that saw the condition, continuously; it clearing resets it.
 - **One alert per issue per hour:** `kind: admin_alert`, `Urgency: high`. While the issue lasts the alert repeats hourly (same tag, so it replaces the last one); an issue that clears and comes back within the hour of its last alert waits for that hour.
-- **Resolved:** when an issue that got an alert clears, one push "…is back up / live data again / count fixed" with the time span, `Urgency: normal`, same tag. An issue that cleared before its alert sends nothing.
+- **Resolved:** when an issue that got an alert clears, one push "…is back up / live data again / count fixed / disk space is back / the backup works again" with the time span, `Urgency: normal`, same tag. An issue that cleared before its alert sends nothing.
 - Quiet hours and the drivers' prefs don't apply. Text is English; zone names follow the subscription's `lang`, times its `tz`.
 - The state is in memory (per API process): after a restart an issue still there alerts again. Every attempt is a `notification_log` row like any push.
 - A camera unplugged reaches the API as `down` after `stale_after_s` (60 s) plus up to one 10 s heartbeat, so the alert lands ~3 min after the unplug.

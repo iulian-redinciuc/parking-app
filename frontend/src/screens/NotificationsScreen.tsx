@@ -404,7 +404,11 @@ function AdminAlertsSetting() {
             <ul className="list-disc pl-5">
               {issues.map((i) => (
                 <li key={i.key}>
-                  {t(`alerts.admin_issue.${i.kind}`, { subject: i.subject, time: time(i.since) })}
+                  {t(`alerts.admin_issue.${i.kind}`, {
+                    subject: i.subject,
+                    detail: i.detail ?? '',
+                    time: time(i.since),
+                  })}
                 </li>
               ))}
             </ul>

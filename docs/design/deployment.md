@@ -371,7 +371,9 @@ Not in the archive: `.env` (the containers never see the file; it goes to the re
 3. The script **refuses to upload unless the remote's type is `crypt`** (file names and contents encrypted before they leave the machine).
 4. Archives older than 60 days are deleted on the remote (`BACKUP_REMOTE_DAYS`). Uploads are `rclone copy`, never `sync`: a wiped local folder can't wipe the remote.
 
-Exit codes: `0` done, `1` failed, `3` the local archive exists but was **not** copied off the machine (no rclone, no `rclone.conf`, no such remote, or not `crypt`). The "backup failed" alert is P8.7.
+Exit codes: `0` done, `1` failed, `3` the local archive exists but was **not** copied off the machine (no rclone, no `rclone.conf`, no such remote, or not `crypt`).
+
+**Outcome file:** every run (not `list` / `env` / `restore`) ends by writing `data/backups/last-run.json`, `{"ts": "<UTC>", "status": "ok" | "local_only" | "failed", "message": "<the error line>"}` (atomically; only if the folder exists, so it stays the container user's). The API reads it for the **"backup failed" admin alert**: a status other than `ok`, or a last good run over 26 h old ([notifications.md §5.1](notifications.md#51-admin-alerts-p78-p87)).
 
 **The remote** is two entries in `rclone.conf`: the storage itself (any rclone backend: S3-compatible object storage, SFTP to another machine, …) and `parking-backup`, a `crypt` remote on top of it. Commands: [phase guide P8.6](../phases/phase-8-hardening.md#p86-backups-and-restore). **Keep a copy of `rclone.conf` outside the machine** (password manager): without its two crypt passwords the backups can't be read.
 
@@ -437,3 +439,21 @@ Two scripts in `deploy/scripts/`, run on the production machine itself (never on
 - **`boot-check.sh server|site`**: after a reboot, the time until the stack is back by itself ([§4.1](#41-hardening-p84)).
 - **`prod-env.sh server|site`** (`PARKING_VERSION=v0.x.y` required): writes a new `deploy/.env` (mode 600) from `.env.example`, never overwrites one, never prints a secret. `server` generates a fresh `WORKER_TOKEN`, `ADMIN_TOKEN` and VAPID key pair (from the released API image) and, given `PUBLIC_HOST=<hostname>`, sets `PUBLIC_HOST`, `CORS_ORIGINS=https://<hostname>` and `PUBLIC_APP_URL=https://<hostname>/`; `site` takes the server's `WORKER_TOKEN` from the environment and leaves the API's secrets empty. It lists what is still to fill in by hand (lot location, camera URLs, admin password hash, public origins).
 - **Server VM:** any provider's small x86-64 or ARM64 VM that meets [hardware.md §4.3](hardware.md#43-production-api-server-topologies-t2t3), with a public IPv4 address.
+
+## 11. Monitoring and the external uptime check (P8.7)
+
+Two layers, because a machine that is off or offline can't say so itself:
+
+| Layer | Catches | How it reaches you |
+|-------|---------|--------------------|
+| **Admin alerts** from the API ([notifications.md §5.1](notifications.md#51-admin-alerts-p78-p87)) | a camera down or shifted, stale data, a drifting count, a disk over 85% (API machine and lot box), a hot CPU (≥ 80 °C, the lot box), an API restart, a failed or missing nightly backup | Web Push to the devices where an admin turned on *Receive admin alerts* |
+| **External uptime check** | the whole server, its internet connection, Caddy or the API being down: everything the first layer needs to work | E-mail from a monitoring service outside our machines |
+
+**The external check** is a free monitor (working choice: **UptimeRobot**; Healthchecks.io or any other HTTP monitor does the same) set up in its web console, nothing to install:
+- type **keyword**, URL `https://<PUBLIC_HOST>/healthz`, keyword `"status":"ok"` must **exist**, interval **5 min**, alert contact = your e-mail (down and up);
+- it goes through the same public entry as the phones (DNS, certificate, Caddy, API), so it tests what users see. `/healthz` answers 200 while the API is alive even with cameras down (those are the admin alerts' job), and its 120/min rate limit is far above one request per 5 min;
+- expected time from the API going down to the e-mail: one interval plus the service's re-check, **under 10 min**;
+- the lot box has no public address and isn't checked from outside: when it or its line is down, the API reports `camera_down` after 2 min.
+
+The account, the monitor and the e-mail address live outside the repo; nothing about them is in `.env`.
+

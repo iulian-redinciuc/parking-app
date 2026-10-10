@@ -142,7 +142,7 @@ def create_app(
             scheduler = PushScheduler(
                 engine, sender, config, clk, url, lambda: _current(store), lock
             )
-            alerts = AdminAlertMonitor(engine, sender, config, clk, url, store, lock)
+            alerts = AdminAlertMonitor(engine, sender, config, clk, url, store, lock, root)
 
             def hook(old, new):
                 notifier.status_changed(old, new)

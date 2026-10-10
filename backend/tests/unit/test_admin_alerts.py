@@ -1,10 +1,20 @@
 """P7.8: the admin alert rules (notifications.md §5.1) without the API."""
 
+import json
 from datetime import UTC, datetime, timedelta
 
 from parking.config import LotConfig
+from parking.core.system import SystemStats, cpu_temp_c, disk_pct, system_stats
 from parking.messages import CameraHealthMsg, LotStatus
-from parking.push.admin_alerts import AlertTracker, Condition, Notice, alert_payload, conditions
+from parking.push.admin_alerts import (
+    AlertTracker,
+    Condition,
+    Notice,
+    alert_payload,
+    backup_condition,
+    conditions,
+    system_conditions,
+)
 
 T0 = datetime(2026, 10, 9, 14, 5, tzinfo=UTC)
 DOWN = Condition("camera_down", "cam-ground", "connect_failed")
@@ -141,3 +151,77 @@ def test_payloads():
     assert done["body"] == "Resolved: 14:05–14:17"
     assert done["url"] == "https://parking.example/#/admin"
     assert done["resolved"] is True
+
+
+# --- P8.7: the machines and the backup ---
+
+
+def test_restart_alert_has_no_resolved():
+    t = AlertTracker()
+    restarted = Condition("api_restarted", "api")
+    assert t.update([restarted], at(0)) == [Notice(restarted, at(0))]
+    assert t.update([], at(2)) == []
+    assert t.issues(at(2)) == []
+
+
+def test_system_conditions():
+    def worker(camera, state="ok", **fields):
+        return CameraHealthMsg(camera_id=camera, ts=T0, state=state, **fields)
+
+    health = {
+        "cam-ground": worker("cam-ground", disk_pct=85.1, cpu_temp_c=79.9),
+        "cam-ramp": worker("cam-ramp", "down", disk_pct=99.0, cpu_temp_c=90.0),  # old numbers
+    }
+    found = system_conditions(health, SystemStats(disk_pct=85.0, cpu_temp_c=80.0))
+    assert [(c.key, c.detail) for c in found] == [
+        ("cpu_temp:api", "80 °C"),
+        ("disk:cam-ground", "85%"),
+    ]
+    assert system_conditions({"cam-ground": worker("cam-ground")}, SystemStats()) == []
+
+
+def test_backup_condition(tmp_path):
+    file = tmp_path / "last-run.json"
+    assert backup_condition(file, T0) is None  # backups not set up
+
+    def ran(status, message="", ts="2026-10-09T01:30:07Z"):
+        file.write_text(json.dumps({"ts": ts, "status": status, "message": message}))
+        return backup_condition(file, T0)
+
+    assert ran("ok") is None  # 12.5 h ago
+    assert ran("ok", ts="2026-10-08T01:30:07Z").detail == "no backup since the last good one"
+    assert ran("failed", "the upload failed") == Condition(
+        "backup_failed", "api", "the upload failed"
+    )
+    assert ran("local_only").detail == "not copied off the machine"
+    file.write_text("{half")
+    assert backup_condition(file, T0).detail == "the status file can't be read"
+
+
+def test_system_stats(tmp_path):
+    assert 0 <= disk_pct(tmp_path) <= 100
+    assert disk_pct(tmp_path / "missing") is None
+    assert cpu_temp_c(tmp_path) is None  # a machine without thermal zones
+    for zone, value in (("thermal_zone0", "53450\n"), ("thermal_zone1", "61200\n")):
+        (tmp_path / zone).mkdir()
+        (tmp_path / zone / "temp").write_text(value)
+    (tmp_path / "thermal_zone2").mkdir()
+    (tmp_path / "thermal_zone2" / "temp").write_text("n/a")
+    assert cpu_temp_c(tmp_path) == 61.2
+    assert system_stats(tmp_path, tmp_path).cpu_temp_c == 61.2
+
+
+def test_machine_payloads():
+    url = "https://parking.example/#/"
+    disk = Condition("disk", "cam-ground", "91%")
+    alert = alert_payload(Notice(disk, at(0)), CONFIG, url)
+    assert alert["title"] == "Admin: Disk almost full on camera cam-ground's machine"
+    assert alert["body"] == "91% used, since 14:05"
+    assert alert["tag"] == "admin-disk:cam-ground"
+    assert alert["url"] == "https://parking.example/#/admin"
+    done = alert_payload(Notice(Condition("backup_failed", "api"), at(0), at(5)), CONFIG, url)
+    assert done["title"] == "Admin: The backup works again"
+    assert (
+        alert_payload(Notice(Condition("backup_failed", "api"), at(0)), CONFIG, url)["body"]
+        == "Since 14:05"
+    )

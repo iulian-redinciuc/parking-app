@@ -697,7 +697,15 @@ export async function getCorrections(limit = 50, options?: RequestOptions): Prom
 /** One open issue of `GET /api/admin/alerts` (notifications.md §5.1). */
 export interface AdminIssue {
   key: string
-  kind: 'camera_down' | 'camera_shifted' | 'stale' | 'clamps'
+  kind:
+    | 'camera_down'
+    | 'camera_shifted'
+    | 'stale'
+    | 'clamps'
+    | 'disk'
+    | 'cpu_temp'
+    | 'api_restarted'
+    | 'backup_failed'
   subject: string
   detail: string | null
   since: string

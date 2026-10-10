@@ -2,7 +2,19 @@
 
 What to do when the running system misbehaves: symptoms → checks (commands) → fix. Production paths are used (`/opt/parking`, [deployment.md §10](design/deployment.md#10-provisioning-the-production-machines-t2)); "server" is the API machine, "lot box" the vision host.
 
-> Started in P8.6 with backups and restore. The other sections (stale camera, drifting count, tunnel down, full disk, updates, secret rotation, …) are written in [P8.12](phases/phase-8-hardening.md#p812-runbook-and-readme).
+> Started in P8.6 with backups and restore; the alerts table is from P8.7. The other sections (stale camera, drifting count, tunnel down, full disk, updates, secret rotation, …) are written in [P8.12](phases/phase-8-hardening.md#p812-runbook-and-readme).
+
+## Alerts
+
+Admin alerts are pushes from the API ([notifications.md §5.1](design/notifications.md#51-admin-alerts-p78-p87)); the open ones are listed in the app under *Alerts → Open issues*. The e-mail from the uptime monitor means the API can't be reached from the internet at all ([deployment.md §11](design/deployment.md#11-monitoring-and-the-external-uptime-check-p87)).
+
+| Alert | Check (on the machine named in the alert: the server, or the lot box for "camera …'s machine") | Fix |
+|-------|-------|-----|
+| *Disk almost full* (> 85%) | `df -h /opt/parking`; `du -sh /opt/parking/data/*`; `docker system df` | Old images: `docker image prune -a` (only on the production machines, they run nothing else). Lot box: `data/debug/` and `data/recordings/` can be deleted. Server: old `parking.sqlite.before-restore-*` files in `data/db/` |
+| *The CPU is hot* (≥ 80 °C) | `vcgencmd measure_temp; vcgencmd get_throttled` (Pi); `docker stats --no-stream` | Fan running and case vents free? Out of the sun? If a worker pins the CPU, lower its `interval`/`imgsz` in `lot.yaml` or `VISION_CPUS` in `.env` |
+| *The API restarted* | Nothing if you just updated or rebooted. Otherwise `docker inspect -f '{{.State.OOMKilled}} {{.RestartCount}}' parking-api`; `docker logs --since 30m parking-api`; `uptime` (did the machine reboot?) | Out of memory: raise `API_MEMORY` in `.env`. A crash: the traceback is in the log |
+| *The backup failed* | The reason is in the alert and in `cat /opt/parking/data/backups/last-run.json`; then the table under [Backups](#backups) | Fix it and run `./backup.sh`: a good run clears the alert |
+| Uptime monitor e-mail (down) | From your own connection: `curl -sS https://<host>/healthz`. Then SSH in: `docker compose -f docker-compose.server.yml ps`, `docker logs --tail 50 parking-web`. No SSH either: the provider's console/status page | Start what is down (`docker compose -f docker-compose.server.yml --profile web up -d`); a VM that is off is started in the provider's console |
 
 ## Backups
 

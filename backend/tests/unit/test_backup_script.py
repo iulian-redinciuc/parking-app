@@ -3,9 +3,11 @@
 With a real rclone (on PATH or `RCLONE_BIN`) one test also goes through an actual crypt remote.
 """
 
+import json
 import os
 import shutil
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -111,6 +113,34 @@ def test_nightly_run_uploads_archive_and_env(box):
     assert "--backup-dir parking-backup:env-old/" in log  # a replaced .env is kept
     assert "rclone delete --min-age 60d --include parking-*.tar.gz parking-backup:backups" in log
     assert f"{ARCHIVE} and .env copied to parking-backup (encrypted)" in r.stdout
+
+
+def _last_run(env: dict[str, str]) -> dict:
+    return json.loads((Path(env["BACKUP_ROOT"]) / "data" / "backups" / "last-run.json").read_text())
+
+
+def test_run_leaves_its_outcome_for_the_backup_failed_alert(box):
+    """`data/backups/last-run.json` (notifications.md §5.1): ok, local_only or failed."""
+    assert _run(box).returncode == 0
+    last = _last_run(box)
+    assert last["status"] == "ok" and last["message"] == ""
+    assert abs(datetime.now(UTC) - datetime.fromisoformat(last["ts"])) < timedelta(minutes=1)
+    assert _run(box | {"FAKE_REMOTE_TYPE": ""}).returncode == 3
+    assert _last_run(box) | {"ts": ""} == {
+        "ts": "",
+        "status": "local_only",
+        "message": f'not copied off this machine (no remote "parking-backup" in '
+        f"{box['BACKUP_RCLONE_CONFIG']})",
+    }
+    assert _run(box | {"FAKE_UPLOAD_FAILS": "1"}).returncode == 1
+    assert _last_run(box)["status"] == "failed"
+    assert _last_run(box)["message"] == "the upload failed"
+    assert _run(box | {"FAKE_BACKUP_FAILS": "1"}).returncode == 1
+    assert _last_run(box)["message"] == "the local backup failed"
+    # list / env / restore are not runs
+    before = _last_run(box)
+    _run(box, "list")
+    assert _last_run(box) == before
 
 
 @pytest.mark.parametrize(
