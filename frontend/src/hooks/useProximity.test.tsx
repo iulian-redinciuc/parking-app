@@ -1,5 +1,5 @@
 import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import ProximityBanner from '../components/ProximityBanner'
 import { PROXIMITY_COOLDOWN_MS } from '../lib/geo'
 import { PREFS_EVENT } from '../lib/push'
@@ -160,6 +160,12 @@ describe('useProximity', () => {
 })
 
 describe('ProximityBanner', () => {
+  // The banner reads the app's shared mock feed, made on first use: `?mock=estimated` gives it
+  // fixed numbers (the last zone estimated) instead of a random start, which once in a while is
+  // an episode without any numbers.
+  beforeAll(() => window.history.replaceState({}, '', '/?mock=estimated'))
+  afterAll(() => window.history.replaceState({}, '', '/'))
+
   it('shows the banner and a local notification once the lot is near', async () => {
     const g = fakeGeolocation()
     const reg = { scope: 'http://localhost/', showNotification: vi.fn(async () => undefined) }
