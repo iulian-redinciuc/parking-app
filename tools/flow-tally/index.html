@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flow tally</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        font:
+          14px system-ui,
+          sans-serif;
+        background: #0b1120;
+        color: #e5e7eb;
+      }
+      body {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        grid-template-columns: 1fr 320px;
+      }
+      header {
+        grid-column: 1 / 3;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        padding: 6px 8px;
+        background: #1f2937;
+      }
+      main {
+        min-height: 0;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #000;
+      }
+      video {
+        max-width: 100%;
+        max-height: 100%;
+      }
+      aside {
+        overflow: auto;
+        padding: 8px 10px;
+        background: #111827;
+        border-left: 1px solid #374151;
+      }
+      footer {
+        grid-column: 1 / 3;
+        padding: 4px 8px;
+        background: #1f2937;
+        min-height: 1.8em;
+      }
+      button,
+      label.button {
+        font: inherit;
+        color: inherit;
+        background: #374151;
+        border: 1px solid #4b5563;
+        border-radius: 4px;
+        padding: 3px 9px;
+        cursor: pointer;
+      }
+      button[aria-pressed='true'] {
+        background: #2563eb;
+        border-color: #3b82f6;
+      }
+      input[type='file'] {
+        display: none;
+      }
+      .counts {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        margin-bottom: 10px;
+        text-align: center;
+      }
+      .counts div {
+        background: #1f2937;
+        border-radius: 4px;
+        padding: 6px 0;
+      }
+      .counts b {
+        display: block;
+        font-size: 22px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      td {
+        padding: 2px 3px;
+        border-bottom: 1px solid #1f2937;
+      }
+      td.time {
+        cursor: pointer;
+        text-decoration: underline dotted;
+        white-space: nowrap;
+      }
+      td.in {
+        color: #4ade80;
+      }
+      td.out {
+        color: #f87171;
+      }
+      td input {
+        width: 100%;
+        font: inherit;
+        color: inherit;
+        background: transparent;
+        border: 1px solid #374151;
+        border-radius: 3px;
+        padding: 1px 3px;
+      }
+      tr.last td {
+        background: #1e3a5f;
+      }
+      kbd {
+        background: #374151;
+        border-radius: 3px;
+        padding: 0 4px;
+      }
+      .flash {
+        animation: flash 0.4s;
+      }
+      @keyframes flash {
+        from {
+          background: #2563eb;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <label class="button">Open video<input id="video-file" type="file" accept="video/*" /></label>
+      <label class="button"
+        >Import CSV<input id="csv-file" type="file" accept=".csv,text/csv"
+      /></label>
+      <button id="export">Export CSV</button>
+      <span>Speed</span>
+      <span id="speeds"></span>
+      <button id="clear">Clear</button>
+      <span id="clip"></span>
+    </header>
+    <main><video id="video" controls muted playsinline></video></main>
+    <aside>
+      <div class="counts">
+        <div id="n-in" title="press I">IN<b>0</b></div>
+        <div id="n-out" title="press O">OUT<b>0</b></div>
+        <div id="n-net" title="in − out">NET<b>0</b></div>
+      </div>
+      <table>
+        <tbody id="events"></tbody>
+      </table>
+    </aside>
+    <footer id="status">
+      Open a video, play it and press <kbd>I</kbd> when a car crosses in, <kbd>O</kbd> when one
+      crosses out, <kbd>U</kbd> to undo · <kbd>Space</kbd> play/pause · <kbd>1</kbd>–<kbd>4</kbd>
+      speed · <kbd>←</kbd> <kbd>→</kbd> 2 s back/forward (<kbd>Shift</kbd> 10 s)
+    </footer>
+    <script type="module">
+      import { createTally, csvName, formatTime, parseCsv, SPEEDS, toCsv } from './tally.js'
+
+      const $ = (id) => document.getElementById(id)
+      const video = $('video')
+      const status = (msg) => ($('status').textContent = msg)
+      let tally = createTally()
+      let lastId = null
+      let videoName = ''
+      let objectUrl = null
+
+      const storeKey = () => `flow-tally:${videoName}`
+      function save() {
+        if (videoName) localStorage.setItem(storeKey(), JSON.stringify(tally.events))
+      }
+
+      function render() {
+        const n = tally.counts()
+        $('n-in').querySelector('b').textContent = n.in
+        $('n-out').querySelector('b').textContent = n.out
+        $('n-net').querySelector('b').textContent = n.net > 0 ? `+${n.net}` : n.net
+        const body = $('events')
+        body.replaceChildren()
+        for (const ev of tally.sorted()) {
+          const tr = document.createElement('tr')
+          if (ev.id === lastId) tr.className = 'last'
+          const time = document.createElement('td')
+          time.className = 'time'
+          time.textContent = formatTime(ev.t)
+          time.title = `${ev.t.toFixed(1)} s, click to jump 2 s before`
+          time.onclick = () => (video.currentTime = Math.max(0, ev.t - 2))
+          const dir = document.createElement('td')
+          dir.className = ev.direction
+          dir.textContent = ev.direction.toUpperCase()
+          const note = document.createElement('td')
+          const input = document.createElement('input')
+          input.value = ev.note
+          input.placeholder = 'note'
+          input.onchange = () => {
+            tally.setNote(ev.id, input.value.trim())
+            save()
+          }
+          note.append(input)
+          const del = document.createElement('td')
+          const btn = document.createElement('button')
+          btn.textContent = '×'
+          btn.title = 'Delete'
+          btn.onclick = () => {
+            tally.remove(ev.id)
+            save()
+            render()
+          }
+          del.append(btn)
+          tr.append(time, dir, note, del)
+          body.append(tr)
+        }
+        body.querySelector('tr.last')?.scrollIntoView({ block: 'nearest' })
+      }
+
+      function mark(direction) {
+        if (!video.src) return status('Open a video first')
+        const ev = tally.add(video.currentTime, direction)
+        lastId = ev.id
+        save()
+        render()
+        const box = $(direction === 'in' ? 'n-in' : 'n-out')
+        box.classList.remove('flash')
+        void box.offsetWidth // restart the animation
+        box.classList.add('flash')
+        status(`${direction.toUpperCase()} at ${formatTime(ev.t)}`)
+      }
+
+      function setSpeed(s) {
+        video.playbackRate = video.defaultPlaybackRate = s
+        for (const b of $('speeds').children) b.setAttribute('aria-pressed', b.dataset.speed == s)
+      }
+      for (const s of SPEEDS) {
+        const b = document.createElement('button')
+        b.textContent = `${s}×`
+        b.dataset.speed = s
+        b.onclick = () => setSpeed(s)
+        $('speeds').append(b, ' ')
+      }
+      setSpeed(1)
+
+      $('video-file').onchange = (e) => {
+        const file = e.target.files[0]
+        if (!file) return
+        if (objectUrl) URL.revokeObjectURL(objectUrl)
+        objectUrl = URL.createObjectURL(file) // the clip never leaves the browser
+        video.src = objectUrl
+        videoName = file.name
+        $('clip').textContent = file.name
+        const saved = localStorage.getItem(storeKey())
+        tally = createTally(saved ? JSON.parse(saved) : [])
+        lastId = null
+        render()
+        status(
+          saved
+            ? `${file.name}: restored ${tally.events.length} event(s) from this browser`
+            : `${file.name}: press I / O as cars cross`,
+        )
+        e.target.value = ''
+      }
+
+      $('csv-file').onchange = async (e) => {
+        const file = e.target.files[0]
+        if (!file) return
+        try {
+          const events = parseCsv(await file.text(), file.name)
+          if (tally.events.length && !confirm(`Replace the ${tally.events.length} event(s)?`))
+            return
+          tally = createTally(events)
+          lastId = null
+          save()
+          render()
+          status(`${file.name}: ${events.length} event(s) imported`)
+        } catch (err) {
+          status(err.message)
+        } finally {
+          e.target.value = ''
+        }
+      }
+
+      $('export').onclick = () => {
+        const name = csvName(videoName)
+        const blob = new Blob([toCsv(tally.events)], { type: 'text/csv' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = name
+        a.click()
+        URL.revokeObjectURL(a.href)
+        status(`Exported ${tally.events.length} event(s) → save as data/labels/${name}`)
+      }
+
+      $('clear').onclick = () => {
+        if (tally.events.length && !confirm('Delete all events?')) return
+        tally.clear()
+        save()
+        render()
+      }
+
+      // capture: before the video's own controls handle Space and the arrows
+      document.addEventListener(
+        'keydown',
+        (e) => {
+          if (e.target instanceof HTMLInputElement || e.ctrlKey || e.metaKey || e.altKey) return
+          const key = e.key.toLowerCase()
+          if (key === 'i') mark('in')
+          else if (key === 'o') mark('out')
+          else if (key === 'u') {
+            const ev = tally.undo()
+            lastId = null
+            save()
+            render()
+            status(
+              ev ? `Undid ${ev.direction.toUpperCase()} at ${formatTime(ev.t)}` : 'Nothing to undo',
+            )
+          } else if (key === ' ') video.paused ? video.play() : video.pause()
+          else if (SPEEDS.includes(Number(key))) setSpeed(Number(key))
+          else if (key === 'arrowleft' || key === 'arrowright') {
+            const step = (e.shiftKey ? 10 : 2) * (key === 'arrowleft' ? -1 : 1)
+            video.currentTime = Math.max(0, video.currentTime + step)
+          } else return
+          e.preventDefault()
+        },
+        true,
+      )
+    </script>
+  </body>
+</html>

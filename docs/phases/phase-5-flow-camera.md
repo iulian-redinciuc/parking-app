@@ -125,7 +125,7 @@ docker compose run --rm vision-flow flow --camera cam-ramp --print --control-por
 **Done when:** the underground card shows ≈ after enough events without a correction, and a correction removes it.
 
 ## P5.9: Test clips and flow evaluation
-**Files:** `tools/flow-tally/index.html`, `parking/vision/evaluate.py` (flow part), CLI `evaluate-flow`
+**Files:** `tools/flow-tally/` (`index.html` + `tally.js`, see its README), `parking/vision/evaluate.py` (flow part), CLI `evaluate-flow`
 
 **Steps**
 1. Record three 1-hour clips: weekday rush hour, night, and a quiet period (`parking record`).

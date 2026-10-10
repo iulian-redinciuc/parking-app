@@ -11,6 +11,7 @@
 | End-to-end (replay feed → worker → API → SSE) | `backend/tests/e2e/` + `deploy/docker-compose.test.yml` | pytest + docker compose | ✅ on PRs touching backend |
 | Frontend unit/component | `frontend/src/**/*.test.tsx` | Vitest, Testing Library | ✅ |
 | Slot editor (pure helpers: geometry, ids, file formats, labels) | `tools/slot-editor/editor.test.js` | `node --test` (no dependencies) | ✅ (frontend job) |
+| Flow tally (event list + undo, labels CSV read/write) | `tools/flow-tally/tally.test.js` | `node --test` (no dependencies) | ✅ (frontend job) |
 | Frontend E2E | `frontend/e2e/` | Playwright (`iPhone 13`, `Pixel 7`) with `VITE_API_BASE=mock` | ✅ |
 | Quality | `frontend/lighthouserc.cjs` | Lighthouse CI (`@lhci/cli`, mobile preset, 3 runs): performance ≥ 90, a11y ≥ 90. Lighthouse 12 has no PWA category, so installability is asserted by Playwright (`e2e/pwa.spec.ts`, Chromium DevTools) | ✅ every push |
 | Load | `scripts/load/sse.py` | asyncio + httpx, 500 clients | manual, Phase 8 |
@@ -54,7 +55,7 @@ Every evaluation run writes `out/eval/<set>-<YYYYMMDD-HHMM>.json`. Copy the head
 
 Jobs:
 1. **backend**: `uv sync --frozen`, `ruff check`, `ruff format --check`, `pytest -m "not slow"`.
-2. **frontend**: `npm ci`, `npm run lint`, `npm run format:check`, `npm run test -- --run`, `npm run build`, then the slot editor checks from the repo root (`eslint tools/slot-editor` with its own config, `prettier --check` with the frontend's config, `node --test tools/slot-editor/editor.test.js`), `npx playwright install --with-deps chromium webkit`, `npm run e2e` (both projects; in CI 1 retry, `forbidOnly`, `test-results/` uploaded on failure).
+2. **frontend**: `npm ci`, `npm run lint`, `npm run format:check`, `npm run test -- --run`, `npm run build`, then the slot editor checks from the repo root (`eslint tools/slot-editor` with its own config, `prettier --check` with the frontend's config, `node --test tools/slot-editor/editor.test.js`) and the same three for `tools/flow-tally`, `npx playwright install --with-deps chromium webkit`, `npm run e2e` (both projects; in CI 1 retry, `forbidOnly`, `test-results/` uploaded on failure).
 3. **secrets**: gitleaks (`gitleaks/gitleaks-action@v2`, full history checkout).
 4. **e2e** (only if `backend/**` or `deploy/**` changed, via `dorny/paths-filter`): `PARKING_E2E=1 uv run pytest tests/e2e`. The test drives `deploy/docker-compose.test.yml` (project `parking-e2e`) itself: `up -d --build --wait` with a temp replay folder holding `frame-01`, waits on `/api/stream` for its live free count, swaps in `frame-02` (sidecar written first, both via rename) and removes `frame-01`, expects the new count within `3 × interval + 5 s` (`interval 2`, `consistent_readings 3` → 11 s; ~5 s on the dev Pi), then `down -v --rmi all`. Without `PARKING_E2E=1` the test is skipped, so job 1 doesn't need Docker. Locally: `cd backend && PARKING_E2E=1 uv run pytest tests/e2e -v`.
 5. **images** (later task; only if `backend/**` changed): `docker buildx build --platform linux/amd64,linux/arm64` for both targets, without pushing. This catches "works on the Pi, breaks on x86" (and the reverse) early. Pushing images happens only on release tags ([deployment.md §8](deployment.md#8-releases-and-updating)).

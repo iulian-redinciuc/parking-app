@@ -1,14 +1,20 @@
-"""Occupancy evaluation against ground-truth labels (docs/design/vision.md §10).
+"""Occupancy and flow evaluation against ground-truth labels (docs/design/vision.md §10).
 
 "Positive" is **free**: saying free when a slot is taken sends someone to a full lot, so
 free-precision is the number to watch. Slots labelled `unsure` are left out of every metric.
 Detections are cached per image so a threshold sweep only reruns the scoring. With
 `occupancy.method: appearance` there are no detections: each image's slot scores are
 computed once and a sweep only re-thresholds them (no cache needed).
+
+Flow (P5.9): `run_flow` plays a clip through the flow pipeline (gate → tracker → two-line
+counter) and `match_flow` compares the counted events with a tally CSV (config.md §4): same
+direction within ±`FLOW_MATCH_S`, closest pairs first; TP/FP/FN, event accuracy and net error.
 """
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -451,3 +457,250 @@ def sweep_table(rows: Sequence[tuple[float, Summary]], best: float) -> list[str]
             f"{pct(s.free_recall):>9} {num(s.mean_count_error):>10}{mark}"
         )
     return lines
+
+
+# --- flow (per clip) ---
+
+FLOW_MATCH_S = 2.0  # a counted event matches a tallied one of the same direction this close
+TARGET_EVENT_ACCURACY = 0.98  # the flow target (P5.9), per clip
+FLOW_CSV_HEADER = ("video_time_s", "direction", "note")
+
+
+@dataclass(frozen=True)
+class FlowLabel:
+    """One crossing at `t` seconds into the clip (tallied, or counted by the pipeline)."""
+
+    t: float
+    direction: str  # in | out
+    note: str = ""
+
+
+def parse_flow_labels(text: str, name: str = "labels") -> list[FlowLabel]:
+    """Read a flow labels CSV (config.md §4): header `video_time_s,direction[,note]`, then one
+    row per crossing; blank lines are skipped. Sorted by time."""
+    rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
+    rows = [r for r in rows if any(c.strip() for c in r)]
+    if not rows:
+        raise ValueError(f"{name}: empty file (header video_time_s,direction,note expected)")
+    head = tuple(c.strip() for c in rows[0])
+    if head not in (FLOW_CSV_HEADER, FLOW_CSV_HEADER[:2]):
+        want, got = ",".join(FLOW_CSV_HEADER), ",".join(head)
+        raise ValueError(f"{name}: header must be {want}, got {got}")
+    out = []
+    for n, row in enumerate(rows[1:], start=2):
+        if len(row) > len(head) or len(row) < 2:
+            raise ValueError(f"{name} line {n}: expected {len(head)} columns, got {len(row)}")
+        try:
+            t = float(row[0])
+        except ValueError:
+            raise ValueError(f"{name} line {n}: video_time_s {row[0]!r} is not a number") from None
+        if not math.isfinite(t) or t < 0:
+            raise ValueError(f"{name} line {n}: video_time_s must be >= 0")
+        direction = row[1].strip().lower()
+        if direction not in ("in", "out"):
+            raise ValueError(f"{name} line {n}: direction must be in or out, got {row[1]!r}")
+        out.append(FlowLabel(t, direction, row[2].strip() if len(row) > 2 else ""))
+    return sorted(out, key=lambda e: e.t)
+
+
+def load_flow_labels(path: Path) -> list[FlowLabel]:
+    return parse_flow_labels(path.read_text(encoding="utf-8"), path.name)
+
+
+def flow_labels_csv(events: Iterable[FlowLabel]) -> str:
+    """The same CSV format, e.g. the pipeline's events for the tally tool's _Import CSV_."""
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(FLOW_CSV_HEADER)
+    for e in sorted(events, key=lambda e: e.t):
+        w.writerow([f"{e.t:.1f}", e.direction, e.note])
+    return buf.getvalue()
+
+
+@dataclass(frozen=True)
+class FlowEval:
+    matches: tuple[tuple[FlowLabel, FlowLabel], ...]  # (truth, predicted)
+    false_pos: tuple[FlowLabel, ...]  # counted, not in the tally (extra counts)
+    missed: tuple[FlowLabel, ...]  # tallied, not counted
+    true_in: int
+    true_out: int
+    pred_in: int
+    pred_out: int
+
+    @property
+    def tp(self) -> int:
+        return len(self.matches)
+
+    @property
+    def fp(self) -> int:
+        return len(self.false_pos)
+
+    @property
+    def fn(self) -> int:
+        return len(self.missed)
+
+    @property
+    def accuracy(self) -> float | None:
+        return _ratio(self.tp, self.tp + self.fp + self.fn)
+
+    @property
+    def net_error(self) -> int:
+        """(pred in − pred out) − (true in − true out): what makes the zone count drift."""
+        return (self.pred_in - self.pred_out) - (self.true_in - self.true_out)
+
+    @property
+    def mean_offset(self) -> float | None:
+        """Mean predicted − tallied time of the matches (the tally lags a little, usually)."""
+        if not self.matches:
+            return None
+        return sum(p.t - t.t for t, p in self.matches) / len(self.matches)
+
+    @property
+    def meets_target(self) -> bool | None:
+        acc = self.accuracy
+        return None if acc is None else acc >= TARGET_EVENT_ACCURACY
+
+    def to_dict(self) -> dict[str, Any]:
+        def ev(e: FlowLabel) -> dict[str, Any]:
+            return {"t": round(e.t, 2), "direction": e.direction, "note": e.note}
+
+        mo = self.mean_offset
+        return {
+            "tp": self.tp,
+            "fp": self.fp,
+            "fn": self.fn,
+            "event_accuracy": self.accuracy,
+            "net_error": self.net_error,
+            "true": {"in": self.true_in, "out": self.true_out},
+            "predicted": {"in": self.pred_in, "out": self.pred_out},
+            "mean_offset_s": None if mo is None else round(mo, 2),
+            "meets_target": self.meets_target,
+            "false_positives": [ev(e) for e in self.false_pos],
+            "missed": [ev(e) for e in self.missed],
+            "matches": [
+                {"truth_t": round(t.t, 2), "pred_t": round(p.t, 2), "direction": t.direction}
+                for t, p in self.matches
+            ],
+        }
+
+
+def match_flow(
+    predicted: Sequence[FlowLabel], truth: Sequence[FlowLabel], tolerance: float = FLOW_MATCH_S
+) -> FlowEval:
+    """Pair predicted with tallied events of the same direction within ±`tolerance` s.
+
+    Greedy by time difference: the closest pair is taken first (ties: the earlier truth, then
+    the earlier prediction); each event is used at most once.
+    """
+    pairs = sorted(
+        (abs(p.t - t.t), ti, pi)
+        for ti, t in enumerate(truth)
+        for pi, p in enumerate(predicted)
+        if p.direction == t.direction and abs(p.t - t.t) <= tolerance
+    )
+    used_t: set[int] = set()
+    used_p: set[int] = set()
+    matched: list[tuple[int, int]] = []
+    for _, ti, pi in pairs:
+        if ti in used_t or pi in used_p:
+            continue
+        used_t.add(ti)
+        used_p.add(pi)
+        matched.append((ti, pi))
+    matched.sort()
+
+    def n(events: Sequence[FlowLabel], d: str) -> int:
+        return sum(e.direction == d for e in events)
+
+    return FlowEval(
+        matches=tuple((truth[ti], predicted[pi]) for ti, pi in matched),
+        false_pos=tuple(p for i, p in enumerate(predicted) if i not in used_p),
+        missed=tuple(t for i, t in enumerate(truth) if i not in used_t),
+        true_in=n(truth, "in"),
+        true_out=n(truth, "out"),
+        pred_in=n(predicted, "in"),
+        pred_out=n(predicted, "out"),
+    )
+
+
+@dataclass(frozen=True)
+class FlowRun:
+    """The pipeline's counted events over a clip, plus how the run went."""
+
+    events: list[FlowLabel]
+    frames: int
+    active_frames: int
+    seconds: float
+    track_ms_avg: float
+    tracks: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "frames": self.frames,
+            "active_frames": self.active_frames,
+            "seconds": round(self.seconds, 2),
+            "track_ms_avg": round(self.track_ms_avg, 1),
+            "tracks": self.tracks,
+        }
+
+
+def run_flow(
+    src: Any,
+    gate: Any,
+    tracker: Any,
+    counter: Any,
+    seconds: float = math.inf,
+    on_frame: Callable[[np.ndarray, float, bool, list[Detection], list[FlowLabel]], None]
+    | None = None,
+) -> FlowRun:
+    """Gate → tracker → two-line counter over every new frame of `src` (as the flow worker
+    does); each counted event's `t` is its frame's time from the first frame, in seconds.
+    `on_frame(image, elapsed_s, active, tracks, new_events)` is called per frame."""
+    from parking.vision.tracking import run_tracking
+
+    events: list[FlowLabel] = []
+
+    def step(image: np.ndarray, elapsed: float, active: bool, tracks: list[Detection]) -> None:
+        h, w = image.shape[:2]
+        new = [
+            FlowLabel(e.ts, e.direction, f"#{e.track_id} {e.cls} {e.conf:.2f}")
+            for e in counter.update(tracks, elapsed, (w, h))
+        ]
+        events.extend(new)
+        if on_frame is not None:
+            on_frame(image, elapsed, active, tracks, new)
+
+    stats = run_tracking(src, gate, tracker, seconds, on_frame=step)
+    return FlowRun(
+        events,
+        stats.frames,
+        stats.active_frames,
+        stats.seconds,
+        stats.track_ms_avg,
+        len(stats.spans),
+    )
+
+
+def _times(events: Sequence[FlowLabel]) -> str:
+    parts = [f"{e.t:.1f} s {e.direction}" + (f" ({e.note})" if e.note else "") for e in events]
+    return ", ".join(parts) if parts else "none"
+
+
+def flow_lines(r: FlowEval) -> list[str]:
+    """The terminal report for one clip."""
+    sign = f"{r.net_error:+d}" if r.net_error else "0"
+    mo = r.mean_offset
+    goal = f"event accuracy >= {TARGET_EVENT_ACCURACY * 100:.0f}%"
+    if r.meets_target is None:
+        verdict = f"target ({goal}): n/a (no events in the tally or the run)"
+    else:
+        verdict = f"target ({goal}): {'met' if r.meets_target else 'missed'}"
+    return [
+        f"truth      in {r.true_in:4d}  out {r.true_out:4d}",
+        f"predicted  in {r.pred_in:4d}  out {r.pred_out:4d}",
+        f"TP {r.tp}  FP {r.fp}  FN {r.fn}  event accuracy {pct(r.accuracy)}  net error {sign}"
+        + ("" if mo is None else f"  (counted {mo:+.1f} s after the tally on average)"),
+        verdict,
+        f"extra counts (FP): {_times(r.false_pos)}",
+        f"missed (FN): {_times(r.missed)}",
+    ]

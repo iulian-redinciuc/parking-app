@@ -74,6 +74,12 @@ jobs:
           frontend/node_modules/.bin/eslint tools/slot-editor
           frontend/node_modules/.bin/prettier --config frontend/.prettierrc.json --check tools/slot-editor
           node --test tools/slot-editor/editor.test.js
+      - name: Flow tally (lint, format, unit tests)
+        working-directory: .
+        run: |
+          frontend/node_modules/.bin/eslint tools/flow-tally
+          frontend/node_modules/.bin/prettier --config frontend/.prettierrc.json --check tools/flow-tally
+          node --test tools/flow-tally/tally.test.js
       - run: npx playwright install --with-deps chromium webkit
       - run: npm run e2e
       - uses: actions/upload-artifact@v4

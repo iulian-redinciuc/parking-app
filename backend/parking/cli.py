@@ -1017,6 +1017,160 @@ def track_check(
         typer.echo(f"debug video -> {debug_video}")
 
 
+@app.command("evaluate-flow")
+def evaluate_flow(
+    video: Annotated[Path, typer.Option(help="The clip, e.g. data/recordings/x.mp4.")],
+    camera: Annotated[str, typer.Option(help="Flow camera id in the config, e.g. cam-ramp.")],
+    truth: Annotated[
+        Path | None,
+        typer.Option(help="Tally CSV (config.md §4); default data/labels/<clip name>.csv."),
+    ] = None,
+    lines_file: Annotated[
+        Path | None, typer.Option("--lines", help="Line file instead of the camera's (tuning).")
+    ] = None,
+    conf: Annotated[
+        float | None, typer.Option(help="Detector confidence instead of the camera's (tuning).")
+    ] = None,
+    min_track_frames: Annotated[
+        int | None, typer.Option(help="flow.min_track_frames instead of the camera's (tuning).")
+    ] = None,
+    tolerance: Annotated[
+        float, typer.Option(help="Match window in seconds (vision.md §10).")
+    ] = 2.0,
+    realtime: Annotated[
+        bool,
+        typer.Option(
+            help="Play at the clip's speed and drop frames when slow, like a live camera."
+        ),
+    ] = False,
+    debug_video: Annotated[
+        Path | None,
+        typer.Option(
+            help="Write the annotated frames (lines, tracks, running IN/OUT) to this MP4."
+        ),
+    ] = None,
+    out: Annotated[Path, typer.Option(help="Report folder.")] = Path("out/eval"),
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    as_json: Annotated[bool, typer.Option("--json", help="Print the report as JSON.")] = False,
+) -> None:
+    """Run the full flow pipeline on a clip and compare its events with a tally (P5.9).
+
+    Prints TP/FP/FN, event accuracy and net error; writes out/eval/flow-<clip>-<date>.json and
+    the counted events as out/eval/flow-<clip>-pred.csv (open it in tools/flow-tally to review).
+    """
+    from datetime import date
+
+    from parking.config import ConfigError, load_lines
+    from parking.vision import evaluate as ev
+    from parking.vision.flow import TwoLineCounter
+    from parking.vision.motion import MotionGate
+    from parking.vision.sources import VideoFileSource
+    from parking.vision.tracking import UltralyticsTracker, VehicleTracker, draw_tracks
+
+    if tolerance <= 0:
+        raise typer.BadParameter("must be > 0", param_hint="--tolerance")
+    if conf is not None and not 0 < conf < 1:
+        raise typer.BadParameter("must be between 0 and 1", param_hint="--conf")
+    if min_track_frames is not None and min_track_frames < 1:
+        raise typer.BadParameter("must be >= 1", param_hint="--min-track-frames")
+    _, cam, root = _camera(config, camera)
+    if cam.role != "flow":
+        _fail(f"camera '{camera}' is an {cam.role} camera; evaluate-flow needs a flow camera")
+    video = _resolve(video, root)
+    if not video.is_file():
+        _fail(f"clip {video} not found")
+    truth = _resolve(truth, root) if truth else root / "data" / "labels" / f"{video.stem}.csv"
+    try:
+        tally = ev.load_flow_labels(truth)
+    except (OSError, ValueError) as e:
+        _fail(f"tally {truth}: {e}")
+    lines_path = _resolve(lines_file or Path(cam.lines_file), root)
+    try:
+        lines = load_lines(lines_path)
+    except (ConfigError, ValueError, OSError) as e:
+        _fail(f"line file {lines_path}: {e}")
+    if lines.camera_id != cam.id:
+        typer.echo(f"warning: {lines_path.name} is for '{lines.camera_id}', not '{cam.id}'")
+    det = cam.detector.model_copy(update={"conf": conf} if conf is not None else {})
+    mtf = min_track_frames or cam.flow.min_track_frames
+    model = _resolve(Path(det.model), root)
+    if not model.exists():
+        _fail(f"model {model} not found; run `parking models export` first")
+    tracker = VehicleTracker(
+        UltralyticsTracker(str(model), det.imgsz, det.conf, det.classes), lines
+    )
+    gate = MotionGate(cam.flow.motion_min_area_px, lines)
+    counter = TwoLineCounter(lines, mtf)
+    src = VideoFileSource(video, realtime=realtime)
+    writer = [None]
+    counts = {"in": 0, "out": 0}
+
+    def write(image, elapsed: float, active: bool, tracks, new) -> None:
+        for e in new:
+            counts[e.direction] += 1
+        if debug_video is None:
+            return
+        import cv2
+
+        if writer[0] is None:
+            debug_video.parent.mkdir(parents=True, exist_ok=True)
+            size = (image.shape[1], image.shape[0])
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            writer[0] = cv2.VideoWriter(str(debug_video), fourcc, src.native_fps or 10, size)
+            if not writer[0].isOpened():
+                _fail(f"can't write {debug_video}")
+        banner = (
+            f"{elapsed:6.1f} s  {'ACTIVE' if active else 'idle'}  "
+            f"IN {counts['in']}  OUT {counts['out']}"
+        )
+        writer[0].write(draw_tracks(image, tracks, lines, banner))
+
+    try:
+        run = ev.run_flow(src, gate, tracker, counter, on_frame=write)
+    finally:
+        src.close()
+        if writer[0] is not None:
+            writer[0].release()
+    if not run.frames:
+        _fail(f"no frames in {video}")
+    result = ev.match_flow(run.events, tally, tolerance)
+    settings = {
+        "conf": det.conf,
+        "imgsz": det.imgsz,
+        "min_track_frames": mtf,
+        "motion_min_area_px": cam.flow.motion_min_area_px,
+        "lines": str(lines_path),
+        "tolerance_s": tolerance,
+        "realtime": realtime,
+    }
+    report = {
+        "clip": video.name,
+        "camera_id": cam.id,
+        "truth": str(truth),
+        "date": date.today().isoformat(),
+        "settings": settings,
+        "run": run.to_dict() | {"dropped": src.dropped},
+        **result.to_dict(),
+    }
+    out.mkdir(parents=True, exist_ok=True)
+    json_path = out / f"flow-{video.stem}-{report['date']}.json"
+    json_path.write_text(json.dumps(report, indent=2) + "\n")
+    csv_path = out / f"flow-{video.stem}-pred.csv"
+    csv_path.write_text(ev.flow_labels_csv(run.events))
+    if as_json:
+        typer.echo(json.dumps(report))
+        return
+    typer.echo(
+        f"{video.name}: {run.frames} frames over {run.seconds:.0f} s, {run.active_frames} gated in "
+        f"({run.track_ms_avg:.0f} ms each), {run.tracks} track(s); conf {det.conf:g}, "
+        f"min_track_frames {mtf}" + (f", {src.dropped} frame(s) dropped" if realtime else "")
+    )
+    typer.echo("\n".join(ev.flow_lines(result)))
+    typer.echo(f"report -> {json_path}; counted events -> {csv_path}")
+    if debug_video is not None and writer[0] is not None:
+        typer.echo(f"debug video -> {debug_video}")
+
+
 @app.command("lines-check")
 def lines_check(
     camera: Annotated[str, typer.Option(help="Flow camera id in the config, e.g. cam-ramp.")],

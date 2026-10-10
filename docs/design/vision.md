@@ -283,6 +283,10 @@ Replaces the MVP appearance scorer (§2.1) for top-down views once the real came
 ### Flow metrics (per clip)
 - Match predicted events to truth events with the same direction within **±2 s** (greedy, by time).
 - Report **TP, FP (extra counts), FN (missed)**, event accuracy = TP / (TP + FP + FN), and **net error** = (pred in − pred out) − (true in − true out). Net error is what causes drift.
+- **Matching** (`match_flow`): all same-direction pairs within the window, closest first (ties: earlier truth, then earlier prediction), each event used once. "Greedy by time" on its own could pair a count with an earlier tally entry it doesn't belong to; closest-first avoids that.
+- **Target** (P5.9): event accuracy ≥ **98%** per clip (`TARGET_EVENT_ACCURACY`); `meets_target` is null when the clip has no events in the tally or the run.
+- `parking evaluate-flow --video CLIP --camera ID [--truth CSV]` (default truth `data/labels/<clip stem>.csv`) plays the clip **frame by frame** (`video:` with `realtime=false`; `--realtime` drops frames like a slow live host would) through `MotionGate` → `VehicleTracker` → `TwoLineCounter` (`run_flow`), with the camera's `detector`, `flow` and line file. Event times are seconds from the first frame (the tally's `video_time_s`). Tuning overrides: `--conf`, `--min-track-frames`, `--lines FILE`; `--tolerance` changes the ±2 s window.
+- Terminal: the run (frames, gated frames, ms per gated frame, tracks, settings), truth/predicted in/out, `TP FP FN event accuracy net error` and the mean offset of the matches, the target verdict, then every extra count and every missed event with its time (and note) to look up in the clip. Files: `out/eval/flow-<clip>-<YYYY-MM-DD>.json` (settings, run, metrics, matches, FP/FN lists) and `out/eval/flow-<clip>-pred.csv` (the counted events in the labels format, note = `#<track> <cls> <conf>`), which the tally tool can import to step through the counts. `--debug-video` writes the annotated frames with the running IN/OUT.
 
 ## 11. Runtimes and performance
 
