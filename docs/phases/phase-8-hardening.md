@@ -155,7 +155,48 @@ curl -s localhost:8000/healthz                                 # on the API mach
 4. Also back up the production `.env` (VAPID keys!) to the encrypted remote.
 5. **Restore drill:** on a spare machine (the dev Pi works), restore and start; check `/api/status` and history.
 
+Format, rotation, the nightly job and the restore: [deployment.md §7](../design/deployment.md#7-backups). **Files:** `backend/parking/db/backup.py`, `parking backup` / `parking restore` (`cli.py`), `deploy/backup.sh` (`run` | `list` | `env` | `restore`), `deploy/scripts/provision.sh` (server: `cron`, `rclone`, `/etc/cron.d/parking-backup`), `.gitignore` (`deploy/rclone.conf`), [runbook.md](../runbook.md).
+
+As built: rotation is part of `parking backup`; the cron job runs `deploy/backup.sh` on the host (it needs `docker` and `rclone`, which the hardened API container has neither of); the `.env` goes to the remote as its own file, not into the archive; archive times are UTC, the cron time is the machine's clock.
+
+**Commands** (on the API machine, after P8.2; needs a release tagged after this task). Step 1 is once per machine; pick **one** storage (object storage or another machine):
+```bash
+cd /opt/parking/deploy
+sudo bash scripts/provision.sh server            # again: installs cron + rclone and /etc/cron.d/parking-backup
+umask 077; touch rclone.conf
+RC="rclone --config rclone.conf"
+# 1a. S3-compatible object storage (Backblaze B2, Hetzner Object Storage, Cloudflare R2, ...): a private bucket + a key for it
+$RC config create parking-store s3 provider=Other endpoint=<endpoint> access_key_id=<id> secret_access_key=<key>
+STORE=parking-store:<bucket>/parking
+# 1b. or another machine / a storage box over SFTP (an SSH key for it in ~/.ssh)
+$RC config create parking-store sftp host=<host> user=<user> key_file=~/.ssh/id_ed25519
+STORE=parking-store:parking
+# then the encrypted remote on top of it, with new random passwords
+$RC config create parking-backup crypt remote=$STORE password="$(openssl rand -base64 32)" password2="$(openssl rand -base64 32)" --obscure
+$RC listremotes --long                           # parking-backup: crypt
+# copy rclone.conf into your password manager NOW: without it the backups can't be read
+
+./backup.sh                                      # archive + .env -> the remote; exit 0
+./backup.sh list
+journalctl -t parking-backup --since yesterday   # the nightly runs (03:30)
+```
+**Restore drill** on a spare machine with Docker and rclone (the dev Pi: a scratch folder, not the repo's `data/`), given only `rclone.conf` — the same steps as [runbook.md → Restore from backup](../runbook.md#restore-from-backup):
+```bash
+mkdir -p /tmp/parking-drill/deploy && cd /tmp/parking-drill/deploy       # rclone.conf goes here
+B=<path to>/deploy/backup.sh
+export BACKUP_ROOT=/tmp/parking-drill BACKUP_ENV_FILE=$PWD/.env BACKUP_RCLONE_CONFIG=$PWD/rclone.conf \
+       BACKUP_API_CONTAINER=parking-drill-api BACKUP_IMAGE=ghcr.io/iulian-redinciuc/parking-api:v0.x.y
+$B list && $B env && $B restore
+docker run -d --name parking-drill-api --network none --read-only --tmpfs /tmp --user 1000:1000 --env-file .env \
+  -v /tmp/parking-drill/config:/app/config -v /tmp/parking-drill/data:/app/data $BACKUP_IMAGE
+Q='import urllib.request as u; print(u.urlopen("http://localhost:8000/api/status").read()[:300]); print(u.urlopen("http://localhost:8000/api/history?zone=total&bucket=hour").read()[:300])'
+docker exec parking-drill-api python -c "$Q"      # the counts at backup time (stale: true) and the history points
+docker rm -f parking-drill-api && rm -rf /tmp/parking-drill
+```
+
 **Done when:** the restore drill succeeds, and is documented in the runbook.
+
+*Status (P8.6):* the drill passed on the dev Pi with a backup of the **dev** stack through a `crypt` remote on a local folder (numbers in PROGRESS.md → Metrics). Still open, because they need the production API machine (P8.2) and a storage destination only Iulian can provide: the cron entry on that machine, the real off-machine remote, the production `.env` on it, and the drill with a production backup.
 
 ## P8.7: Monitoring and alerts
 **Steps**

@@ -8,6 +8,7 @@ Start with [../PLAN.md](../PLAN.md) for the big picture. Track status in [../PRO
 |--------|--------------|-------------|
 | `design/` | **Specs**: the single source of truth for contracts, formats, algorithms and decisions | You need to know *what exactly* to build (payload shapes, file formats, thresholds) |
 | `phases/` | **Step-by-step guides**, one per phase, split into numbered tasks | You're implementing. Pick the next unticked task in PROGRESS.md and open its phase file |
+| [`runbook.md`](runbook.md) | **Runbook**: symptoms → checks → fix for the running system (started in P8.6 with backups and restore; completed in P8.12) | Something is broken in production |
 
 Phase guides **link to** the design specs instead of repeating them. If a spec and a phase guide disagree, the spec wins. Fix the guide.
 

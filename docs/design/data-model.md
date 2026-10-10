@@ -127,4 +127,4 @@ The jobs live in `parking/api/jobs.py` (`MaintenanceJobs`, APScheduler, "local" 
 CLI: `parking db aggregate` runs the minute and hour jobs once; `--backfill` deletes both tables and rebuilds them from all of `zone_state` (minutes only within the 30-day retention, hours for all of it; the last value is carried up to now). `parking db prune [--raw-days 90] [--minute-days 30] [--log-days 30] [--vacuum]` prunes with those periods.
 
 ## 5. Backups
-`parking backup` uses SQLite's **online backup API** (`sqlite3.Connection.backup`), so it's safe while the API runs. It writes `parking-YYYYMMDD.sqlite` and a tarball of `config/`. See [deployment.md](deployment.md#7-backups).
+`parking backup` uses SQLite's **online backup API** (`sqlite3.Connection.backup`), so it's safe while the API runs. It writes one `parking-YYYYMMDD-HHMM.tar.gz` (UTC) holding the database, `config/`, the reference images and a manifest with checksums; `parking restore` puts one back. Format, rotation, off-machine copy and restore: [deployment.md §7](deployment.md#7-backups).

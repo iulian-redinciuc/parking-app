@@ -1,0 +1,71 @@
+# Runbook
+
+What to do when the running system misbehaves: symptoms → checks (commands) → fix. Production paths are used (`/opt/parking`, [deployment.md §10](design/deployment.md#10-provisioning-the-production-machines-t2)); "server" is the API machine, "lot box" the vision host.
+
+> Started in P8.6 with backups and restore. The other sections (stale camera, drifting count, tunnel down, full disk, updates, secret rotation, …) are written in [P8.12](phases/phase-8-hardening.md#p812-runbook-and-readme).
+
+## Backups
+
+How they work: [deployment.md §7](design/deployment.md#7-backups). Every night at 03:30 the server writes `data/backups/parking-YYYYMMDD-HHMM.tar.gz` (database, `config/`, reference images; 14 daily + 8 weekly kept) and copies it and `deploy/.env` to the encrypted rclone remote `parking-backup`.
+
+**Check that they run**
+```bash
+cd /opt/parking/deploy
+journalctl -t parking-backup --since "2 days ago"     # "... and .env copied to parking-backup (encrypted)"
+./backup.sh list                                      # today's archive here AND on the remote
+```
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| Nothing in the journal | `cat /etc/cron.d/parking-backup`; `systemctl is-active cron` | `sudo bash scripts/provision.sh server` (writes the cron entry, installs cron and rclone) |
+| `NOT copied off this machine (…)` (exit 3) | The reason is in the brackets: no rclone, no `rclone.conf`, no remote `parking-backup`, or it isn't `crypt` | Set up the remote: [phase guide P8.6](phases/phase-8-hardening.md#p86-backups-and-restore), or put your copy of `rclone.conf` back into `deploy/` (mode 600) |
+| `the local backup failed` | `docker ps --filter name=parking-api`; `df -h /opt/parking`; run `docker exec parking-api /app/backend/.venv/bin/parking backup --out /app/data/backups` to see the error | Start the API; free disk space; `database integrity check failed` → restore the last good archive (below) |
+| `the upload failed` | `rclone --config rclone.conf lsd parking-backup:` | Storage full, key expired or network down: fix it at the storage provider, then run `./backup.sh` |
+
+**A backup by hand** (before an update or a risky change): `./backup.sh`.
+
+`rclone.conf` holds the storage credentials and the two encryption passwords. **A copy must exist outside the server** (password manager). Without it the remote can't be read by anyone, including you.
+
+## Restore from backup
+
+Use it when the database is damaged or lost, a bad change has to be undone, or the server is being replaced. Everything since the archive was made is lost (at most a day): history rows, new push subscriptions, admin corrections. Live counts recover by themselves as soon as the workers deliver again.
+
+**On the same server** (database damaged, undo a change):
+```bash
+cd /opt/parking/deploy
+./backup.sh list                                  # pick an archive; without a name the newest is used
+docker stop parking-api                           # the restore refuses while the API runs
+./backup.sh restore parking-YYYYMMDD-HHMM.tar.gz  # fetches it from the remote if it isn't in data/backups/
+docker compose -f docker-compose.server.yml --profile web up -d
+```
+
+**On a new server** (the old one is gone):
+```bash
+# 1. provision it like the first one (phase guide P8.2 / P8.3): Docker, firewall, VPN, /opt/parking, cron, rclone
+sudo bash provision.sh server --version v0.x.y --peer-key <site key> --public-proxy
+cd /opt/parking/deploy
+# 2. rclone.conf from your password manager -> /opt/parking/deploy/rclone.conf, then:
+chmod 600 rclone.conf
+./backup.sh list
+./backup.sh env                                   # writes .env (name one if the remote has several)
+./backup.sh restore                               # the newest archive; uses the release pinned in .env
+# 3. start and check
+docker compose -f docker-compose.server.yml --profile web up -d
+curl -fsS http://127.0.0.1:8000/healthz
+curl -fsS http://127.0.0.1:8000/api/status | head -c 300       # the counts at backup time, "stale": true until the workers deliver
+curl -fsS "http://127.0.0.1:8000/api/history?zone=total&bucket=hour" | head -c 300
+scripts/boot-check.sh server                      # waits until no zone is stale
+```
+Because `.env` came back with its VAPID keys and tokens, push subscriptions, the admin login and the lot box's `WORKER_TOKEN` keep working. What changes with a new machine: its WireGuard key (run `provision.sh site --peer-key <new server key> --endpoint <new address>` on the lot box) and, with a new public address, the DNS record or the `<IP>.sslip.io` name in `PUBLIC_HOST`, `CORS_ORIGINS` and `PUBLIC_APP_URL`.
+
+**What the restore keeps:** the database it replaces is renamed to `data/db/parking.sqlite.before-restore-<time>`, a replaced config file that differed is kept as `<file>.bak`. To undo a restore: stop the API, move that database back (delete `parking.sqlite-wal` / `-shm` next to it first), start the API. Delete the `before-restore` files once the result is confirmed.
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| `restore failed: checksum mismatch` / `can't read` | The archive is damaged | `./backup.sh restore <an older archive>`; delete the damaged file from `data/backups/` so it's fetched again from the remote |
+| `parking-api is running: stop it first` | — | `docker stop parking-api` |
+| `Permission denied` in `data/` | `ls -ld /opt/parking/data /opt/parking/config` | They must belong to uid 1000 (the containers' user): `sudo chown -R 1000:1000 /opt/parking/data /opt/parking/config` |
+| The API doesn't start after a restore: `Can't locate revision` in `docker logs parking-api` | The archive comes from a **newer** release than the one running | Set `PARKING_VERSION` in `.env` to the release that made it (`app_version` in the archive's `manifest.json`) or newer, then `up -d` again |
+| Counts stay stale after the restore | `scripts/boot-check.sh server`; on the lot box `docker compose -f docker-compose.site.yml ps` | The workers can't reach the API: VPN (`ping 10.77.0.1` from the lot box), `WORKER_TOKEN` equal on both machines |
+
+**Restore drill** (do it again after big changes, and once with a real production backup): the commands are in the [phase guide P8.6](phases/phase-8-hardening.md#p86-backups-and-restore); they restore into a scratch folder and start the API without network, so the drill can run on any machine with Docker and rclone without touching a running stack.

@@ -350,10 +350,38 @@ Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-d
 
 ## 7. Backups
 
-- **Production only.** The dev Pi holds test data.
-- Nightly: `docker compose exec api parking backup --out /app/data/backups` (host cron or a small `backup` service in the same compose project).
-- Keep 14 daily + 8 weekly copies, and copy them **off the production machine** (object storage or another machine via `rclone`, encrypted).
-- **Restore drill** in Phase 8, onto a spare machine (the dev Pi works).
+**Production only** (the dev Pi holds test data), on the **API machine** (the server in T2): it has the database, the `config/` the admin editor writes, and the `.env` with the VAPID keys. The lot box holds nothing that can't be recreated (a copy of `lot.yaml`, exported models, `prod-env.sh site` + the camera URLs). How to restore: [runbook.md](../runbook.md#restore-from-backup).
+
+**The archive** (`parking backup --out DIR`, `parking/db/backup.py`): `parking-YYYYMMDD-HHMM.tar.gz`, time in **UTC**, written atomically (a second run in the same minute replaces the first).
+
+| Entry | Content |
+|-------|---------|
+| `manifest.json` | `format` (1), `created`, `app_version`, `db_revision` (Alembic), `files`: `{path: {size, sha256}}` |
+| `db/parking.sqlite` | The database, copied with SQLite's online backup API (safe while the API runs) and checked with `PRAGMA integrity_check` before it's packed |
+| `config/…` | `lot.yaml`, slot and line files (not the editor's `*.bak`) |
+| `reference/…` | `data/reference/` (the slot reference images), when present. Real camera images: one more reason the remote is encrypted |
+
+Not in the archive: `.env` (the containers never see the file; it goes to the remote separately), `models/` (reproducible), debug captures, recordings, validation sets and labels.
+
+**Rotation** (same command, after writing; `--keep-daily 14 --keep-weekly 8`, `--no-rotate`): the newest archive of each of the last 14 days that have one stays, plus the newest of each of the last 8 ISO weeks. Counted in days/weeks *with* a backup, so a stopped cron never rotates the last copies away. Other files in the folder are never touched.
+
+**Nightly job** (`deploy/backup.sh`, host cron `/etc/cron.d/parking-backup` at **03:30** on the machine's clock, installed by `provision.sh server` with `cron` and `rclone`; output in `journalctl -t parking-backup`):
+1. `docker exec parking-api /app/backend/.venv/bin/parking backup --out /app/data/backups` → `data/backups/` on the host.
+2. Off-machine copy with `rclone` to the remote **`parking-backup`** in `deploy/rclone.conf` (git-ignored, mode 600): archives to `backups/`, the `.env` to `env/<hostname>.env`; a `.env` that changed leaves its previous version under `env-old/<time>/`.
+3. The script **refuses to upload unless the remote's type is `crypt`** (file names and contents encrypted before they leave the machine).
+4. Archives older than 60 days are deleted on the remote (`BACKUP_REMOTE_DAYS`). Uploads are `rclone copy`, never `sync`: a wiped local folder can't wipe the remote.
+
+Exit codes: `0` done, `1` failed, `3` the local archive exists but was **not** copied off the machine (no rclone, no `rclone.conf`, no such remote, or not `crypt`). The "backup failed" alert is P8.7.
+
+**The remote** is two entries in `rclone.conf`: the storage itself (any rclone backend: S3-compatible object storage, SFTP to another machine, …) and `parking-backup`, a `crypt` remote on top of it. Commands: [phase guide P8.6](../phases/phase-8-hardening.md#p86-backups-and-restore). **Keep a copy of `rclone.conf` outside the machine** (password manager): without its two crypt passwords the backups can't be read.
+
+**Other commands:** `backup.sh list` (archives here and on the remote, backed-up `.env` names), `backup.sh env [NAME]` (fetch a `.env`; never overwrites one), `backup.sh restore [NAME]` (default: the newest; fetches it if it isn't in `data/backups/`, refuses while `parking-api` runs, then runs `parking restore` in a one-off container of the API image without network).
+
+**`parking restore ARCHIVE`** checks the archive first (only the expected paths, every checksum, database integrity) and changes nothing if a check fails. Then nothing is lost: an existing database is renamed to `parking.sqlite.before-restore-<time>` (its `-wal`/`-shm` are removed so they can't be replayed into the restored file), a config file that differs is kept as `<file>.bak`. At the next start the API migrates the database if the backup is from an older release, and shows the restored numbers as stale until the workers deliver ([data-model.md §2](data-model.md#2-in-memory-state-api-process)).
+
+Variables for `backup.sh` (environment, all optional): `RCLONE`, `BACKUP_RCLONE_CONFIG`, `BACKUP_REMOTE`, `BACKUP_REMOTE_DAYS`, `BACKUP_ENV_NAME`, `BACKUP_ENV_FILE`, `BACKUP_ROOT` (the folder holding `config/` and `data/`), `BACKUP_API_CONTAINER`, `BACKUP_IMAGE`.
+
+**Restore drill** (P8.6): done on the dev Pi from a backup of the dev stack through a `crypt` remote (results in [PROGRESS.md → Metrics](../../PROGRESS.md#metrics)); repeated with a production backup once production exists.
 
 ## 8. Releases and updating
 
@@ -405,6 +433,7 @@ Two scripts in `deploy/scripts/`, run on the production machine itself (never on
   - `ufw`: deny inbound; allow SSH; server: also UDP 51820 (VPN) and, with `--public-proxy`, 80/443 for a reverse proxy (§5 Option B; a tunnel needs none); lot box: nothing else;
   - WireGuard: a key pair per machine (`/etc/wireguard/parking.key`, never leaves it); the first run prints the public key, the second run with `--peer-key <other machine's key>` (lot box: also `--endpoint <server address>`) writes `wg0.conf` and enables it;
   - `/opt/parking/{deploy,config,models,data}` (`config`, `data`, `models` owned by uid 1000, the containers' user); `--version v0.x.y` copies that release's `deploy/` and `config/` there without overwriting existing config files.
+  - server only: `cron` and `rclone`, and `/etc/cron.d/parking-backup` (the nightly backup at 03:30, [§7](#7-backups)).
 - **`boot-check.sh server|site`**: after a reboot, the time until the stack is back by itself ([§4.1](#41-hardening-p84)).
 - **`prod-env.sh server|site`** (`PARKING_VERSION=v0.x.y` required): writes a new `deploy/.env` (mode 600) from `.env.example`, never overwrites one, never prints a secret. `server` generates a fresh `WORKER_TOKEN`, `ADMIN_TOKEN` and VAPID key pair (from the released API image) and, given `PUBLIC_HOST=<hostname>`, sets `PUBLIC_HOST`, `CORS_ORIGINS=https://<hostname>` and `PUBLIC_APP_URL=https://<hostname>/`; `site` takes the server's `WORKER_TOKEN` from the environment and leaves the API's secrets empty. It lists what is still to fill in by hand (lot location, camera URLs, admin password hash, public origins).
 - **Server VM:** any provider's small x86-64 or ARM64 VM that meets [hardware.md §4.3](hardware.md#43-production-api-server-topologies-t2t3), with a public IPv4 address.

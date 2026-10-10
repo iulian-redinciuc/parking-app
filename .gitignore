@@ -7,6 +7,8 @@ out/
 # backups the admin slot/line editor keeps (P7.3)
 config/**/*.bak
 deploy/.env
+# the backup remote's credentials and encryption passwords (P8.6)
+deploy/rclone.conf
 *.sqlite*
 # python
 __pycache__/

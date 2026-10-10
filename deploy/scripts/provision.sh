@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Set up a production machine for topology T2 (never the dev Pi): automatic security updates, Docker,
-# a deny-by-default firewall, SSH with keys only, the private WireGuard VPN and /opt/parking.
+# a deny-by-default firewall, SSH with keys only, the private WireGuard VPN, /opt/parking and (server)
+# the nightly backup's cron entry.
 # Spec: docs/design/deployment.md §9, §10 · Guide: docs/phases/phase-8-hardening.md P8.2
 #
 #   sudo ./provision.sh server                       # the cloud VM (API)
@@ -84,6 +85,8 @@ step "Packages"
 export DEBIAN_FRONTEND=noninteractive
 run apt-get update
 run apt-get install -y ca-certificates curl openssl ufw unattended-upgrades wireguard-tools
+# the nightly backup and its off-machine copy (deployment.md §7)
+[ "$ROLE" != server ] || run apt-get install -y cron rclone
 
 step "Automatic security updates"
 write_file /etc/apt/apt.conf.d/20auto-upgrades 644 <<'EOF'
@@ -202,6 +205,15 @@ if [ -n "$VERSION" ]; then
     chown -R 1000:1000 "$PREFIX/config"
     rm -rf "$tmp"
   fi
+fi
+
+if [ "$ROLE" = server ]; then
+  step "Nightly backup (03:30, this machine's clock)"
+  # the off-machine copy starts once deploy/rclone.conf has the encrypted remote (deployment.md §7)
+  write_file /etc/cron.d/parking-backup 644 <<EOF
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+30 3 * * * $DEPLOY_USER $PREFIX/deploy/backup.sh 2>&1 | logger -t parking-backup
+EOF
 fi
 
 echo

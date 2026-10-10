@@ -1747,6 +1747,80 @@ def db_prune(
         typer.echo(f"{table}: {count} row(s) deleted")
 
 
+def _backup_paths(config: Path, url: str | None) -> tuple[Path, Path, Path]:
+    """`(database file, config/, data/reference/)` under the app root."""
+    from parking.db.backup import sqlite_path
+    from parking.db.engine import default_url
+
+    root = _find_config(config).resolve().parent.parent
+    return sqlite_path(url or default_url(root)), root / "config", root / "data" / "reference"
+
+
+@app.command()
+def backup(
+    out: Annotated[Path, typer.Option(help="Folder for the archive.")],
+    keep_daily: Annotated[
+        int, typer.Option(min=0, help="Rotate: keep the newest archive of this many days.")
+    ] = 14,
+    keep_weekly: Annotated[
+        int, typer.Option(min=0, help="Rotate: keep the newest archive of this many weeks.")
+    ] = 8,
+    no_rotate: Annotated[bool, typer.Option("--no-rotate", help="Delete no old archive.")] = False,
+    config: Annotated[Path, typer.Option(help="lot.yaml of the app to back up.")] = DEFAULT_CONFIG,
+    url: DbUrl = None,
+) -> None:
+    """Write parking-YYYYMMDD-HHMM.tar.gz (UTC): the database, config/ and the reference images.
+
+    Safe while the API runs (SQLite online backup). Then old archives in the folder are rotated.
+    """
+    from parking.core.clock import SystemClock
+    from parking.db.backup import BackupError, create_backup, rotate
+
+    try:
+        db, config_dir, reference_dir = _backup_paths(config, url)
+        path = create_backup(db, config_dir, reference_dir, out, SystemClock().now())
+        deleted = [] if no_rotate else rotate(out, keep_daily, keep_weekly)
+    except (BackupError, OSError) as e:
+        _fail(f"backup failed: {e}")
+    typer.echo(f"backup written: {path} ({path.stat().st_size} bytes)")
+    for old in deleted:
+        typer.echo(f"rotated out: {old.name}")
+
+
+@app.command()
+def restore(
+    archive: Annotated[Path, typer.Argument(help="A parking-YYYYMMDD-HHMM.tar.gz backup.")],
+    config: Annotated[
+        Path, typer.Option(help="lot.yaml of the app to restore into (it may not exist yet).")
+    ] = DEFAULT_CONFIG,
+    url: DbUrl = None,
+) -> None:
+    """Put a backup's database, config/ and reference images in place. Stop the API first.
+
+    The archive is checked first (checksums, database integrity). An existing database is renamed
+    to <name>.before-restore-<time>; config files that differ are kept as <file>.bak.
+    """
+    from parking.core.clock import SystemClock
+    from parking.db.backup import BackupError, restore_backup
+
+    try:
+        db, config_dir, reference_dir = _backup_paths(config, url)
+        result = restore_backup(archive, db, config_dir, reference_dir, SystemClock().now())
+    except (BackupError, OSError) as e:
+        _fail(f"restore failed: {e}")
+    m = result.manifest
+    typer.echo(
+        f"restored {archive.name} (made {m.get('created')} by {m.get('app_version')}, "
+        f"database revision {m.get('db_revision')})"
+    )
+    typer.echo(f"database: {result.db}")
+    if result.previous_db:
+        typer.echo(f"previous database kept as: {result.previous_db}")
+    typer.echo(f"{len(result.files)} config/reference file(s) written")
+    for kept in result.kept:
+        typer.echo(f"previous file kept as: {kept}")
+
+
 @push_app.command("vapid-keys")
 def push_vapid_keys() -> None:
     """Generate a VAPID key pair and print it as `.env` lines (notifications.md §2)."""

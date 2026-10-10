@@ -193,7 +193,8 @@ frontend/
 | `parking validation pick --camera ID [--count 200] [--from DIR] [--out DIR] [--dry-run]` | 4 | Copy debug captures spread over time of day × occupancy level into `data/validation/<camera>/` (P4.8) |
 | `parking validation check --camera ID [--labels FILE] [--tags LIST] [--min-images 200] [--min-per-tag 15]` | 4 | Count labelled validation images and condition tags; exit 1 below the P4.8 target |
 | `parking db prune` / `parking db aggregate` | 7 | Retention + rollups (also scheduled) |
-| `parking backup --out DIR` | 8 | Consistent SQLite + config backup |
+| `parking backup --out DIR [--keep-daily 14] [--keep-weekly 8] [--no-rotate]` | 8 | Write `parking-YYYYMMDD-HHMM.tar.gz` (database via the online backup API, `config/`, reference images, manifest), then rotate old archives ([deployment.md §7](deployment.md#7-backups)) |
+| `parking restore ARCHIVE` | 8 | Check a backup and put it in place (API stopped); the replaced database and config files are kept |
 
 ## 7. Runtime view (Docker Compose project `parking`)
 
