@@ -25,6 +25,9 @@ test.describe('content security policy', () => {
       await page.goto(`./${hash}`)
       await expect(page.getByRole('heading').first()).toBeVisible()
     }
+    // nothing the app itself does is blocked (checked before the injection below, whose own
+    // refusal is worded differently by each browser engine)
+    expect(blocked).toEqual([])
     // an inline script is refused: what an injected <script> would meet
     const ran = await page.evaluate(() => {
       const script = document.createElement('script')
@@ -33,6 +36,5 @@ test.describe('content security policy', () => {
       return '__inline' in window
     })
     expect(ran).toBe(false)
-    expect(blocked.filter((text) => !text.includes('inline script'))).toEqual([])
   })
 })
