@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from parking.config import AppearanceCfg, Slot
-from parking.vision.appearance import score_slots_appearance, slot_crop
+from parking.vision.appearance import illumination, score_slots_appearance, slot_crop, to_lab
 
 W, H = 1040, 300  # frame size
 SLOT_W, SLOT_H, X0, Y0 = 120, 220, 40, 40
@@ -133,6 +133,34 @@ def test_reference_empty_handles_a_nearly_full_lot():
     assert taken(results) == expected
     # without it the pooled median drifts towards car colours (the known MVP limit)
     assert taken(score_slots_appearance(img, SLOTS, (W, H))) != expected
+
+
+def test_reference_follows_the_light():
+    """The reference's pavement colour is scaled to the frame's light (free slots vote)."""
+    ref = pavement(seed=4)
+    for gain in (0.85, 1.15):
+        img, expected = scene()
+        img = np.clip(img.astype(np.float32) * gain, 0, 255).astype(np.uint8)
+        results = score_slots_appearance(img, SLOTS, (W, H), reference=ref)
+        assert taken(results) == expected, gain
+        assert max(r.score for r in results if not r.taken) < 0.1
+        labs = [to_lab(slot_crop(img, s.polygon, 0.12)) for s in SLOTS]
+        ref_labs = [to_lab(slot_crop(ref, s.polygon, 0.12)) for s in SLOTS]
+        assert illumination(labs, ref_labs) == pytest.approx(gain, abs=0.05)
+
+
+def test_illumination_ignores_cars_and_needs_a_free_slot():
+    ref = pavement(seed=4)
+    ref_labs = [to_lab(slot_crop(ref, s.polygon, 0.12)) for s in SLOTS]
+    img = np.clip(pavement(seed=3).astype(np.float32) * 0.9, 0, 255).astype(np.uint8)
+    for i in range(N - 1):  # seven cars of one colour, one free slot
+        car(img, i, (150, 150, 150))
+    labs = [to_lab(slot_crop(img, s.polygon, 0.12)) for s in SLOTS]
+    assert illumination(labs, ref_labs) == pytest.approx(0.9, abs=0.04)
+    car(img, N - 1, (150, 150, 150))  # full: nothing to go by
+    labs = [to_lab(slot_crop(img, s.polygon, 0.12)) for s in SLOTS]
+    assert illumination(labs, ref_labs) == 1.0
+    assert len(taken(score_slots_appearance(img, SLOTS, (W, H), reference=ref))) == N
 
 
 def test_crop_upright_and_inset():

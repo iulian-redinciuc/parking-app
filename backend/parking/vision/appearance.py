@@ -18,6 +18,10 @@ from parking.vision.occupancy import Size, SlotResult, _scaled
 AppearanceParams = AppearanceCfg
 
 BLUR_FRAC = 0.03  # light blur (fraction of the crop's short side) that hides paver joints
+GAIN_RANGE = (0.5, 2.0)  # frame / reference lightness a slot may vote for
+GAIN_CHROMA_MAX = 4.0  # ... if its a,b are this close to the reference's (scaled)
+GAIN_SPREAD_MAX = 1.5  # ... and its colours spread at most this much wider than the reference's
+GAIN_TOL = 0.04  # votes this close agree
 
 
 def _corners(points: Sequence[Sequence[float]]) -> np.ndarray:
@@ -51,8 +55,38 @@ def pavement_model(labs: Sequence[np.ndarray]) -> tuple[np.ndarray, float]:
     """Median Lab colour of the pooled pixels and the MAD of their distance to it."""
     pooled = np.concatenate([lab.reshape(-1, 3) for lab in labs])
     colour = np.median(pooled, axis=0)
-    spread = float(np.median(np.linalg.norm(pooled - colour, axis=1)))
-    return colour, spread
+    return colour, _spread(pooled, colour)
+
+
+def _spread(pixels: np.ndarray, colour: np.ndarray) -> float:
+    return float(np.median(np.linalg.norm(pixels - colour, axis=1)))
+
+
+def illumination(labs: Sequence[np.ndarray], ref_labs: Sequence[np.ndarray]) -> float:
+    """How much brighter (> 1) or darker the frame's pavement is than the reference's.
+
+    Each slot that still looks like its own pavement votes with the ratio of its median
+    lightness to the same slot's in the reference: the ratio must be plausible, the chroma
+    the reference's (scaled) and the crop as even as the reference's (a car has windows, a
+    roof and a bonnet). The answer is the median of the largest group of agreeing votes;
+    1.0 when no slot votes (a full lot).
+    """
+    votes = []
+    for lab, ref in zip(labs, ref_labs, strict=True):
+        px, ref_px = lab.reshape(-1, 3), ref.reshape(-1, 3)
+        m, r = np.median(px, axis=0), np.median(ref_px, axis=0)
+        ratio = float(m[0] / max(float(r[0]), 1e-6))
+        if (
+            GAIN_RANGE[0] <= ratio <= GAIN_RANGE[1]
+            and np.linalg.norm(m[1:] - r[1:] * ratio) <= GAIN_CHROMA_MAX
+            and _spread(px, m) <= GAIN_SPREAD_MAX * _spread(ref_px, r) + 1
+        ):
+            votes.append(ratio)
+    if not votes:
+        return 1.0
+    v = np.array(votes)
+    groups = [v[np.abs(v - x) <= GAIN_TOL] for x in v]
+    return float(np.median(max(groups, key=len)))
 
 
 def non_pavement(lab: np.ndarray, colour: np.ndarray, spread: float, p: AppearanceCfg):
@@ -92,7 +126,8 @@ def score_slots_appearance(
 
     `frame` is BGR at `frame_size`; slot polygons are in `image_size` pixels and are rescaled.
     `reference` (an image of the empty lot, any size) is used for the pavement colour instead
-    of pooling the slots, which only works while about half the slots are free.
+    of pooling the slots, which only works while about half the slots are free; its colour is
+    scaled to the frame's light (`illumination`).
     """
     p = params or AppearanceCfg()
     polys = [_scaled(s.polygon, image_size, frame_size) for s in slots]
@@ -102,6 +137,7 @@ def score_slots_appearance(
         ref_polys = [_scaled(s.polygon, image_size, (rw, rh)) for s in slots]
         ref_labs = [to_lab(slot_crop(reference, q, p.inset)) for q in ref_polys]
         colour, spread = pavement_model(ref_labs)
+        colour = colour * illumination(labs, ref_labs)  # the light changes, the reference doesn't
     else:
         colour, spread = pavement_model(labs) if labs else (np.zeros(3), 0.0)
     results = []

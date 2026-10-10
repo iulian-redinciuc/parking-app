@@ -155,7 +155,7 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
 **Done when:** green locally and in CI.
 
 ## P2.12: Simulated camera feed from one photo (`parking simulate-feed`)
-**Files:** `backend/parking/vision/simulate.py`, `backend/parking/cli.py`, `backend/tests/unit/test_simulate.py`, `config/lot.yaml`, docs
+**Files:** `backend/parking/vision/simulate.py`, `backend/parking/vision/appearance.py` (the reference follows the light), `backend/parking/cli.py`, `backend/tests/unit/test_simulate.py`, `config/lot.yaml`, docs
 
 **Why:** there is one real photo and no camera yet (the lot's own cameras and network can't be used, see the 2026-10-10 decision), so the replay feed always shows the same 5 cars. This makes many different frames out of that photo, with cars arriving and leaving, to exercise the whole chain (worker → smoothing → API → app) and to give `parking evaluate` more than one image.
 
@@ -165,10 +165,10 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
    - `render(occupancy)`: start from the base image; for each slot whose wanted state differs from the base, warp a sprite into that slot's polygon (a car to fill it, pavement to empty it) with a feathered edge so no seam shows. Donors come from slots of similar shape (a slot cut off by the image edge only gets sprites from other cut-off slots). Vary the cars a little: mirror, small brightness/colour shift;
    - a **sequence**: a seedable random walk where each frame at most one or two cars arrive or leave, with an optional "day" curve (fills up, stays busy, empties), including a nearly empty and a nearly full stretch;
    - frame-wide variation: slow brightness/contrast drift, a little sensor noise, optionally a 1–3 px shift.
-2. `parking simulate-feed --camera cam-ground --base data/samples/ground-01.jpg --labels data/labels/cam-ground.json --frames 200 --seed 1 --out data/replay/ground-sim [--day]` writes `frame-0001.jpg …` plus a labels file in the normal format (`data/labels/cam-ground-sim.json`) holding each frame's true occupancy. Everything stays under git-ignored `data/`.
+2. `parking simulate-feed --camera cam-ground --base data/samples/ground-01.jpg --labels data/labels/cam-ground.json --frames 200 --seed 1 --out data/replay/ground-sim [--day]` writes `frame-0001.jpg …` plus a labels file in the normal format (`data/labels/cam-ground-sim.json`) holding each frame's true occupancy, and the base photo with every car removed (`data/reference/cam-ground-empty.jpg`). Everything stays under git-ignored `data/`. All options: [vision.md §10](../design/vision.md#simulated-feed-parkingvisionsimulatepy-p212).
 3. Unit tests on a **synthetic** base image (no real photo in the repo): same seed → same frames; every frame's labels match what was drawn; emptied slots read as pavement and filled ones as a car to the appearance scorer; no slot changes that wasn't asked for.
 4. Run `parking evaluate` on the 200 frames and put the result in PROGRESS.md → Metrics, **marked as simulated** (the same five cars moved around: it tests the pipeline and the scorer's margins, it is not evidence of real-world accuracy). If some frames fail, fix the scorer or the simulator, whichever is wrong, and say which.
-5. Point the dev replay at it: `cam-ground.source: "folder:data/replay/ground-sim?interval=5&loop=true"`, restart the dev stack (`deploy/scripts/dev-public.sh up` keeps the phone preview working) and check through the API that `free` changes over time and matches the labels after smoothing.
+5. Point the dev replay at it: `cam-ground.source: "folder:data/replay/ground-sim?interval=5&loop=true"` and `occupancy.appearance.reference_empty: data/reference/cam-ground-empty.jpg` (the nearly full frames need it, [vision.md §2.1](../design/vision.md#21-top-down-appearance-scoring-mvp-parkingvisionappearancepy)), restart the dev stack (`deploy/scripts/dev-public.sh up` keeps the phone preview working) and check through the API that `free` changes over time and matches the labels after smoothing.
 6. Docs: a "Simulated feed" subsection in vision.md, and one line in the README on how to regenerate it.
 
 **Done when:** 200 frames exist with labels, `parking evaluate` on them is recorded, and the app on the dev stack (and the phone preview) shows the ground count changing as the simulated cars come and go.
@@ -176,7 +176,7 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
 ---
 
 ## Exit criteria
-- [ ] Dropping a new image into `data/replay/ground/` changes the numbers on `curl -N …/api/stream` within ~20 s
+- [ ] Dropping a new image into the replay folder (`data/replay/ground-sim/` since P2.12) changes the numbers on `curl -N …/api/stream` within ~20 s
 - [ ] Restarting the API shows the last known numbers immediately (marked stale), then live again
 - [ ] Killing the worker → camera `down` after 30 s → zone `stale` after 60 s
 - [ ] `docker ps` shows only `parking-*` containers added; nothing else on the dev Pi was changed

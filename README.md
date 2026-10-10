@@ -74,7 +74,13 @@ npm run build
 
 ## Run the full stack in Docker
 
-The API and the occupancy worker replay the images in `data/replay/ground/` (any `.jpg`, e.g. copies of `data/samples/`):
+The API and the occupancy worker replay a **simulated feed**: 200 frames made from the one sample photo, with cars arriving and leaving ([vision.md §10](docs/design/vision.md#simulated-feed-parkingvisionsimulatepy-p212)). The frames are git-ignored; make them (again) with:
+
+```bash
+cd backend && uv run parking simulate-feed --camera cam-ground --base data/samples/ground-01.jpg --frames 200 --seed 1 --day
+```
+
+Then start the stack:
 
 ```bash
 cd deploy

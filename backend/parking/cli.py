@@ -91,6 +91,13 @@ def _resolve(path: Path, root: Path) -> Path:
     return root / path
 
 
+def _resolve_out(path: Path, root: Path) -> Path:
+    """An output path: like `_resolve`, but going by its top folder (the file isn't there yet)."""
+    if path.is_absolute() or Path(path.parts[0]).exists():
+        return path
+    return root / path
+
+
 def _fail(msg: str) -> None:
     typer.echo(f"error: {msg}", err=True)
     raise typer.Exit(1)
@@ -513,6 +520,114 @@ def evaluate(
     json_path = out / f"{camera}-{report['date']}.json"
     json_path.write_text(json.dumps(report, indent=2) + "\n")
     typer.echo(f"report -> {json_path}; images with mistakes -> {out}/{camera}-*.png")
+
+
+@app.command("simulate-feed")
+def simulate_feed(
+    camera: Annotated[str, typer.Option(help="Camera id in the config, e.g. cam-ground.")],
+    base: Annotated[Path, typer.Option(help="The photo to make the frames from.")] = Path(
+        "data/samples/ground-01.jpg"
+    ),
+    labels: Annotated[
+        Path | None,
+        typer.Option(
+            help="Labels file holding the base photo (default data/labels/<camera>.json)."
+        ),
+    ] = None,
+    frames: Annotated[int, typer.Option(help="Number of frames to write.")] = 200,
+    seed: Annotated[int, typer.Option(help="Same seed, same frames.")] = 1,
+    out: Annotated[
+        Path | None, typer.Option(help="Folder for the frames (default data/replay/<zone>-sim).")
+    ] = None,
+    labels_out: Annotated[
+        Path | None,
+        typer.Option(help="Labels file to write (default data/labels/<camera>-sim.json)."),
+    ] = None,
+    day: Annotated[
+        bool, typer.Option("--day", help="Follow a day: fills up, stays busy, empties.")
+    ] = False,
+    shift: Annotated[
+        int, typer.Option(help="Whole-frame shift per frame, up to this many px.")
+    ] = 2,
+    noise: Annotated[float, typer.Option(help="Sensor noise (sigma in grey levels).")] = 2.0,
+    empty_reference: Annotated[
+        Path | None,
+        typer.Option(
+            help="Where the photo with every car removed goes, for `reference_empty` "
+            "(default data/reference/<camera>-empty.jpg)."
+        ),
+    ] = None,
+    quality: Annotated[int, typer.Option(help="JPEG quality of the frames.")] = 90,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+) -> None:
+    """Make a simulated camera feed from one labelled photo: cars arriving and leaving (P2.12)."""
+    import json
+
+    import cv2
+
+    from parking.config import ConfigError, load_labels
+    from parking.vision import simulate as sim
+
+    if frames <= 0:
+        raise typer.BadParameter("must be positive", param_hint="--frames")
+    if not 0 <= shift <= 3:
+        raise typer.BadParameter("must be between 0 and 3", param_hint="--shift")
+    if noise < 0:
+        raise typer.BadParameter("must not be negative", param_hint="--noise")
+    if not 1 <= quality <= 100:
+        raise typer.BadParameter("must be between 1 and 100", param_hint="--quality")
+    _, cam, root = _occupancy_camera(config, camera, "simulate-feed")
+    slot_file = _slot_file(cam, root)
+
+    base = _resolve(base, root)
+    image = cv2.imread(str(base))
+    if image is None:
+        _fail(f"can't read image {base}")
+    labels_path = _resolve(labels or Path(f"data/labels/{camera}.json"), root)
+    try:
+        label_file = load_labels(labels_path)
+    except (ConfigError, ValueError) as e:
+        _fail(f"labels {labels_path}: {e} (label the image with tools/slot-editor)")
+    if base.name not in label_file.images:
+        _fail(f"{base.name} isn't labelled in {labels_path}")
+    label = label_file.images[base.name]
+    try:
+        simulator = sim.Simulator(image, slot_file, label.taken, label.unsure, seed=seed)
+    except ValueError as e:
+        _fail(str(e))
+
+    target = _resolve_out(out or Path(f"data/replay/{cam.zones[0]}-sim"), root)
+    labels_target = _resolve_out(labels_out or Path(f"data/labels/{camera}-sim.json"), root)
+    empty_target = _resolve_out(empty_reference or Path(f"data/reference/{camera}-empty.jpg"), root)
+    target.mkdir(parents=True, exist_ok=True)
+    for old in target.glob("frame-*.jpg"):  # a shorter run must not leave the last one's frames
+        old.unlink()
+    images: dict = {}
+    counts = []
+    for i, state in enumerate(sim.sequence(simulator, frames, seed, day)):
+        frame = sim.vary(simulator.render(state), i, seed, noise=noise, shift=shift)
+        name = sim.frame_name(i)
+        if not cv2.imwrite(str(target / name), frame, [cv2.IMWRITE_JPEG_QUALITY, quality]):
+            _fail(f"can't write {target / name}")
+        images[name] = {
+            "conditions": ["simulated"],
+            "taken": sorted(state),
+            "unsure": sorted(label.unsure),
+        }
+        counts.append(len(state))
+    labels_target.parent.mkdir(parents=True, exist_ok=True)
+    labels_target.write_text(
+        json.dumps({"version": 1, "camera_id": camera, "images": images}, indent=1) + "\n"
+    )
+    empty_target.parent.mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(empty_target), simulator.render({}), [cv2.IMWRITE_JPEG_QUALITY, 95]):
+        _fail(f"can't write {empty_target}")
+    changes = sum(a != b for a, b in zip(counts, counts[1:], strict=False))
+    typer.echo(
+        f"{frames} frame(s) from {base.name} -> {target} (taken {min(counts)}..{max(counts)} "
+        f"of {len(simulator.slot_ids)}, the count changes {changes} times), "
+        f"labels -> {labels_target}, empty lot -> {empty_target}"
+    )
 
 
 @app.command("bootstrap-slots")

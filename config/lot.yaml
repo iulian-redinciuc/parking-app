@@ -32,7 +32,7 @@ cameras:
   - id: cam-ground
     role: occupancy                # occupancy | flow
     zones: [ground]                # zones this camera reports on
-    source: "folder:data/replay/ground?interval=5&loop=true"   # Phase 2 replay (P2.10)
+    source: "folder:data/replay/ground-sim?interval=5&loop=true"   # simulated feed (P2.12: `parking simulate-feed`)
     # Phase 4:  "snapshot:${CAM_GROUND_SNAPSHOT_URL}" (preferred)  or  "rtsp:${CAM_GROUND_RTSP_URL}"
     sample_every_s: 5
     slots_file: config/slots/cam-ground.json
@@ -58,7 +58,7 @@ cameras:
         shadow_l_range: [0.35, 0.9]
         shadow_chroma_max: 2
         morph_frac: 0.06
-        reference_empty: null      # optional path to an image of the empty lot
+        reference_empty: data/reference/cam-ground-empty.jpg   # written by `parking simulate-feed`
     smoothing:
       consistent_readings: 3
     health:

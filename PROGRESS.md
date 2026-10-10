@@ -52,7 +52,7 @@
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) (MVP) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 11 / 11 | ✅ | 2026-10-08 | 2026-10-08 |
-| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 11 / 12 | 🟡 | 2026-10-08 | |
+| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 12 / 12 | ✅ | 2026-10-08 | 2026-10-10 |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) (MVP) | 10 / 10 | ✅ | 2026-10-09 | 2026-10-10 |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 2 / 12 | ⏸️ | 2026-10-09 | |
 | 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 3 / 11 | ⏸️ | 2026-10-09 | |
@@ -87,7 +87,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P1.10** Benchmark on the dev Pi
 - [x] **P1.11** Tune and decide
 
-## Phase 2: Backend + simulated live feed 🟡
+## Phase 2: Backend + simulated live feed ✅
 - [x] **P2.1** Message models + worker API client (with flow-event outbox)
 - [x] **P2.2** Frame sources + health checks
 - [x] **P2.3** Occupancy worker
@@ -99,7 +99,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P2.9** REST endpoints, CORS, errors
 - [x] **P2.10** Docker images + Compose
 - [x] **P2.11** End-to-end test
-- [ ] **P2.12** Simulated camera feed from one photo (`parking simulate-feed`: cars arriving and leaving)
+- [x] **P2.12** Simulated camera feed from one photo (`parking simulate-feed`: cars arriving and leaving)
 
 ## Phase 3: Mobile web app + public access ✅
 - [x] **P3.1** App shell, routing, theme
@@ -359,6 +359,9 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-10 | P8.8 stays **blocked** although every scriptable check passed on the dev Pi | The guide says "on the production setup": the port scan, the public entry's 404s, the production `.env` and the camera VLAN can only be checked where they exist |
 | 2026-10-10 | **No access to the lot's existing cameras or the building's network**. Default hardware is now a **standalone box**: a Raspberry Pi with its own camera at a window overlooking the lot, on its own mobile data, sending only counts (hardware.md §4.6). New task P4.12 (`device:` / `picamera:` source). The wired PoE setup of P4.1 stays as the alternative if access is granted; the underground/ramp camera waits for that, so the app may start ground level only. Permission to film is still needed | Owner's information; keeps the app independent of the building's IT |
 | 2026-10-10 | New task **P2.12**: a simulated feed made from the one real photo (cars pasted into and removed from the drawn spaces, random arrivals and departures), with true labels per frame, replayed as the dev camera | Only one photo and no camera yet; the app and the scorer need changing scenes to be tested and demonstrated |
+| 2026-10-10 | P2.12: a car's sprite is the **convex hull of the largest non-pavement blob** in its slot's patch (slot + 15% margin), not the slot's rectangle; emptying a slot covers that hull (grown 10%) with a free slot's pavement, shifted half way to the surrounding colour; nothing is ever written inside another slot's polygon. Donors share the cut-off sides and a similar width/height; a car keeps its `Look` (donor, mirror, brightness, hue) while it stays; cut-off slots aren't mirrored across the cut | On the sample photo the cars poke up to ~60 px out of their spaces and sit ~25 px from the neighbour's line: a rectangle with a feathered edge either left car ends behind or dragged the neighbour's side along. Swap `Simulator._car_masks` for a segmentation model later if a new base photo needs it |
+| 2026-10-10 | P2.12 step 4, **the scorer was wrong, twice** (the simulator's frames were right): (1) without an empty-lot reference the pooled pavement median fails once about 9 of 17 spaces are taken (64.7% over the simulated day), the limit vision.md §2.1 already named, so `cam-ground` now sets `reference_empty: data/reference/cam-ground-empty.jpg`, which `simulate-feed` writes (the base photo with its cars removed); (2) with the reference, an 8% brighter frame pushed free spaces to 0.45 (3 mistakes at 0.30, margin gone), so **the reference colour now follows the frame's light** (`appearance.illumination`: pavement-like slots vote with their lightness ratio; ratio, chroma and evenness tests keep cars out; 1.0 when the lot is full) | A fixed reference colour can't work on a camera outdoors; the vote costs a median per slot. The empty-lot image is made from the sample photo, so it's replaced by a real empty-lot frame (or the §9 classifier) with the real camera |
+| 2026-10-10 | P2.12: `simulate-feed` defaults: `--shift 2` (on; the guide said optional), noise sigma 2, JPEG quality 90, a slot stays 4 frames after a change, 0/1/2 changes per frame at 45/40/15%; it always writes the empty-lot image; relative output paths resolve against the repo root when run from `backend/`. The dev feed is the `--day` run (200 frames = 16.7 min per loop at 5 s; the count jumps from nearly empty back to nearly empty at the wrap) | The dwell is one frame more than the smoothing's 3 readings, so every simulated change reaches the app; the day run shows every level (plenty / filling / full) in one loop |
 
 ## Metrics
 
@@ -387,6 +390,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | | 8 | Slot accuracy on production hardware | | ≥ 97% | |
 | | 8 | Flow fps on production hardware | | ≥ 8 | |
 | | 8 | SSE p95 delivery (500 clients, production) | | < 2 s | |
+| 2026-10-10 | 2 | Slot accuracy, **simulated** feed (P2.12) | **100% (3400/3400)**, free-precision 100%, count error 0 on 200 frames; every threshold 0.10–0.55 gives 3400/3400 (0.05: 3393, 0.60: 3341), so free spaces score under 0.10 and taken ones at least 0.55 | ≥ 97% | **Simulated, not evidence of real-world accuracy**: the sample photo's five cars moved around its 17 spaces (`simulate-feed --frames 200 --seed 1 --day`: 1..17 taken, brightness ± 8%, noise, 2 px shift); it tests the pipeline and the scorer's margins. `method: appearance` @ 0.30 with `reference_empty` and the light-following reference (both new in P2.12). Before: no reference 64.7% (100% up to 5 taken, 82% at 9, 6% at 17); reference without the light fix 99.9% with free spaces up to 0.45 |
 
 **P1.10 benchmark** (`parking benchmark --image data/samples/ground-01.jpg --runs 20`, dev Pi 5 8 GB, 2026-10-08; every case in a fresh process after 3 warm-up runs; "Vehicles" = found in the last run; the photo is top-down, so COCO models see ~none, P1.4):
 
@@ -526,3 +530,4 @@ NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occup
 - P8.10: blocked on the production public entry (P8.2/P8.3 blocked) and real count changes during the run. Done: `scripts/load/sse.py` (500 SSE clients opened 100 a minute under the rate limit, delay = receive − `updated_at` per event and client, `/healthz` stream counters, API memory/CPU from `docker stats` locally or over `--ssh`, verdict + exit code, `--out` JSON) + 16 tests (14 unit, 2 short runs against a real uvicorn); CI lints `scripts/`; testing.md §8, phase guide commands. Dev Pi run through a throwaway Caddy + API (removed afterwards): 500 clients, 10 min, p95 0.129 s, 0 errors, memory flat: PASSED.
 - P8.11: blocked on the production machines, the lot's network and the cameras (P8.2/P8.3, P4, P5), and a person at the lot to pull the plugs. Done: `scripts/resilience/drill.py` (five scenarios, watches `/healthz` / `/api/status` / `/api/admin/alerts`, timeline, verdict + exit code, `--out` JSON) + 19 tests; testing.md §9, phase guide commands, runbook *Power and network drills*; backend 955 passed, 3 skipped, ruff clean. Dev Pi runs on a throwaway two-zone stack: 1 min power cut of everything back live 66 s after the fault was seen, lot box power 36 s, 10 min internet cut live ~10 s after the link returned, 10 min camera cut stale for that zone only with the admin alert after ~3 min, all `PASSED` (figures in Metrics).
 - Plan update: standalone-box hardware default (no access to the lot's cameras/network), new tasks P2.12 (simulated feed from one photo) and P4.12 (plugged-in camera source).
+- P2.12: simulated camera feed from the one photo. `parking/vision/simulate.py` (`Simulator`: car and pavement sprites per slot, hull masks, donors of similar shape, `Look` per car; `walk` / `sequence` with the day curve; `vary`: brightness/contrast drift, noise, shift) + `parking simulate-feed` (frames, labels `data/labels/cam-ground-sim.json`, empty-lot image) + `appearance.illumination` (the empty-lot reference follows the frame's light); `test_simulate.py` (16) and 2 new appearance tests on synthetic images, pytest 974 passed, ruff clean. Done-when on the dev Pi: 200 frames (1..17 of 17 taken, 271 MB under `data/replay/ground-sim`), `parking evaluate` 3400/3400 (**simulated**, see Metrics; before the two scorer fixes 64.7%); `cam-ground` replays them with `reference_empty` set, dev stack restarted through `dev-public.sh up`: over 7 min `/api/status` showed ground free going 12 → 16 → … → 2 in 36 steps (15 different values), exactly the labels after 3-reading smoothing, never stale, and the same numbers through the quick tunnel the phone preview uses. The stack is left running. Phase 2 is complete.

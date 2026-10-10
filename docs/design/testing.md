@@ -25,6 +25,7 @@
 | `geometry.py` | overlap ratio: full, none, partial; self-intersecting polygon repaired; point-in-polygon at edges |
 | `vision/occupancy.py` | with **synthetic `Detection` objects** (no model): mask vs box_bottom; `max` not `sum`; threshold boundary; count mode bottom-centre rule |
 | `vision/flow.py` | synthetic tracks: a→b = in; b→a = out; touches a then reverses = nothing; jitter on a line = nothing; one event per track; short tracks ignored; `in_direction` flip |
+| `vision/simulate.py` | on a **synthetic base image** (drawn pavement, lines and cars; one row cut off by the image edge): same seed → same frames; every frame reads as its labels with the appearance scorer (emptied = pavement, filled = car); only the asked slots change; cut-off slots get cut-off donors and no mirror across the cut; at most two changes per frame, cars stay ≥ 4 frames; the day curve has a nearly empty and a nearly full stretch; `simulate-feed` CLI + `evaluate` on its output |
 | `vision/health.py` | black, frozen (N frames), blurry thresholds on generated numpy frames |
 | `vision/shift.py` | translate a synthetic textured image by 0/5/20 px → detection matches |
 | `core/smoothing.py` | first reading sets state; k-1 contrary readings don't flip; k do; alternating noise never flips |

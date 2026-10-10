@@ -45,7 +45,7 @@ cameras:
     role: occupancy                # occupancy | flow
     zones: [ground]                # zones this camera reports on
     source: "file:data/samples/ground-01.jpg"
-    # Phase 2:  "folder:data/replay/ground?interval=5&loop=true"
+    # Phase 2:  "folder:data/replay/ground-sim?interval=5&loop=true"   (frames made by `parking simulate-feed`)
     # Phase 4:  "snapshot:${CAM_GROUND_SNAPSHOT_URL}" (preferred)  or  "rtsp:${CAM_GROUND_RTSP_URL}"
     sample_every_s: 5
     slots_file: config/slots/cam-ground.json
@@ -131,7 +131,7 @@ api:
 | Scheme | Example | Behaviour |
 |--------|---------|-----------|
 | `file:` | `file:data/samples/ground-01.jpg` | The same image every time |
-| `folder:` | `folder:data/replay/ground?interval=5&loop=true` | Images in name order, one per `interval` seconds. `loop=false` stops at the end. New files dropped into the folder are picked up |
+| `folder:` | `folder:data/replay/ground-sim?interval=5&loop=true` | Images in name order, one per `interval` seconds. `loop=false` stops at the end. New files dropped into the folder are picked up |
 | `snapshot:` | `snapshot:http://user:pass@10.0.20.11/cgi-bin/snapshot.jpg` | HTTP GET per sample (JPEG). **Preferred for occupancy** (no decoding between samples, full resolution) |
 | `rtsp:` | `rtsp:rtsp://user:pass@10.0.20.12:554/sub` | Continuous stream on a reader thread that keeps only the latest frame. The occupancy fallback |
 | `video:` | `video:data/recordings/cam-ramp-2026-11-02-0800.mp4?realtime=true&loop=false` | Plays a recording at its native fps like a live camera; `realtime=false` returns every frame as fast as possible (evaluation). For flow tests |
@@ -200,6 +200,8 @@ Made by the slot editor (`tools/slot-editor`) or `parking bootstrap-slots`.
   }
 }
 ```
+`parking simulate-feed` writes the same format to `data/labels/<camera>-sim.json` for its frames ([vision.md §10](vision.md#simulated-feed-parkingvisionsimulatepy-p212)).
+
 Every slot not listed in `taken` or `unsure` is free. `unsure` slots are excluded from metrics. `load_labels(path)` reads it into `LabelFile` (unknown keys are errors; a slot can't be both `taken` and `unsure`).
 
 ### Flow: `data/labels/<clip>.csv`
