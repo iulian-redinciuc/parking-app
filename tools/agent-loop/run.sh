@@ -151,6 +151,8 @@ run_claude_patiently() { # task mode session_id prompt logfile
             write_status "waiting: usage limit reached" "$task" "resuming at $(date -d "@$until" '+%a %H:%M') (session $sid)"
             say "Usage limit reached. Waiting until $(date -d "@$until" '+%a %H:%M'), then resuming the same session."
             sleep_until "$until" || return 1
+            say "Usage limit over; resuming $task (session $sid)."
+            write_status "working" "$task" "resumed after the usage limit · session $sid"
             [ "$mode" = resume ] && prompt="$(continue_prompt "$task")"
             continue
         fi
@@ -159,6 +161,8 @@ run_claude_patiently() { # task mode session_id prompt logfile
             write_status "waiting: network/API problem" "$task" "retry $transient/$MAX_TRANSIENT in $((TRANSIENT_WAIT_S / 60)) min"
             say "Network/API problem; retrying in $((TRANSIENT_WAIT_S / 60)) min."
             sleep_until $(( $(date +%s) + TRANSIENT_WAIT_S )) || return 1
+            say "Retrying $task (session $sid)."
+            write_status "working" "$task" "retry $transient/$MAX_TRANSIENT after a network/API problem · session $sid"
             [ "$mode" = resume ] && prompt="$(continue_prompt "$task")"
             continue
         fi
