@@ -210,6 +210,14 @@ video_time_s,direction,note
 ```
 Git-ignored, because it is tied to real clips. One row per car crossing: seconds from the start of the clip, `in` or `out` (case-insensitive), an optional free-text note (RFC 4180 quoting). The `note` column may be left out of the header; a UTF-8 BOM and blank lines are ignored; rows may be in any order. Made with the tally tool (`tools/flow-tally/`, P5.9), read by `parking evaluate-flow` (`load_flow_labels`), which also writes its own counts in this format.
 
+### Drift notes: `data/labels/drift-<zone>.csv`
+```csv
+ts,true_occupied,app_occupied,note
+2026-11-02T08:00:00+00:00,37,37,day 0
+2026-11-03T08:10:00+00:00,41,42,after a rainy night
+```
+Git-ignored. One row per count during the drift test (P5.11): ISO time (no offset = UTC), the cars really in the zone, the app's `occupied` at that moment, an optional note (the `note` column may be left out of the header; BOM and blank lines ignored; any order). Written by `parking drift-note`, read by `parking drift-report` ([vision.md §10](vision.md#drift-test-live-flow-zone)).
+
 ## 5. Environment variables (`deploy/.env`)
 
 | Variable | Example | Used by |

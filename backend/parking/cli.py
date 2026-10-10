@@ -1293,6 +1293,106 @@ def health_stats(
         typer.echo(report(hours, total, cam.health))
 
 
+def _flow_zone(config: Path, zone: str):
+    """Load lot.yaml and return `(lot, root)`; exits unless `zone` is a flow zone."""
+    from parking.config import ConfigError, cli_env, load_config
+
+    config = _find_config(config)
+    root = config.resolve().parent.parent
+    try:
+        lot = load_config(config, cli_env(root))
+    except (ConfigError, ValueError) as e:
+        _fail(f"{config}: {e}")
+    zones = {z.id: z for z in lot.zones}
+    if zone not in zones:
+        _fail(f"zone '{zone}' is not in {config} (zones: {', '.join(zones) or 'none'})")
+    if zones[zone].method != "flow":
+        _fail(f"zone '{zone}' is a {zones[zone].method} zone; the drift test is for flow zones")
+    return lot, root
+
+
+@app.command("drift-note")
+def drift_note(
+    zone: Annotated[str, typer.Option(help="Flow zone id in the config.")],
+    true: Annotated[int, typer.Option("--true", min=0, help="Cars counted in the zone now.")],
+    app_value: Annotated[
+        int | None, typer.Option("--app", min=0, help="The app's occupied value (skips the API).")
+    ] = None,
+    api_url: Annotated[
+        str, typer.Option("--api", envvar="API_URL", help="API to read the app's value from.")
+    ] = "http://localhost:8000",
+    note: Annotated[str, typer.Option(help="Free text, e.g. 'after a rainy night'.")] = "",
+    at: Annotated[str | None, typer.Option(help="ISO time of the count (default: now).")] = None,
+    file: Annotated[
+        Path | None, typer.Option(help="Notes CSV (default: data/labels/drift-<zone>.csv).")
+    ] = None,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+) -> None:
+    """Note the true count of a flow zone next to the app's value (drift test, P5.11)."""
+    from datetime import UTC, datetime
+
+    from parking.core.drift import DriftNote, append_drift_note
+
+    _, root = _flow_zone(config, zone)
+    if at is None:
+        ts = datetime.now(UTC)
+    else:
+        try:
+            ts = datetime.fromisoformat(at)
+        except ValueError:
+            raise typer.BadParameter("not an ISO time", param_hint="--at") from None
+        ts = ts if ts.tzinfo else ts.replace(tzinfo=UTC)
+    if app_value is None:
+        import httpx
+
+        try:
+            res = httpx.get(f"{api_url.rstrip('/')}/api/status", timeout=10)
+            res.raise_for_status()
+            zones = {z["id"]: z for z in res.json()["zones"]}
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+            _fail(f"can't read {api_url}/api/status ({e}); pass the app's value with --app")
+        if zone not in zones:
+            _fail(f"zone '{zone}' is not in the API's status; pass the app's value with --app")
+        app_value = int(zones[zone]["occupied"])
+    path = file or root / "data" / "labels" / f"drift-{zone}.csv"
+    row = DriftNote(ts, true, app_value, note)
+    append_drift_note(path, row)
+    typer.echo(f"{zone}: true {true}, app {app_value}, error {row.error:+d} -> {path}")
+
+
+@app.command("drift-report")
+def drift_report(
+    zone: Annotated[str, typer.Option(help="Flow zone id in the config.")],
+    file: Annotated[
+        Path | None, typer.Option(help="Notes CSV (default: data/labels/drift-<zone>.csv).")
+    ] = None,
+    target: Annotated[float, typer.Option(min=0, help="Allowed drift in cars per day.")] = 2.0,
+    days: Annotated[float, typer.Option(min=0, help="Days the test has to cover.")] = 7.0,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON instead of a table.")] = False,
+) -> None:
+    """Drift per day from the drift-note file; exit 0 only when the verdict is PASSED (P5.11)."""
+    from parking.core.drift import load_drift_notes, measure_drift, report
+
+    _, root = _flow_zone(config, zone)
+    path = file or root / "data" / "labels" / f"drift-{zone}.csv"
+    if not path.is_file():
+        _fail(f"{path}: no such file (add counts with `parking drift-note`)")
+    try:
+        notes = load_drift_notes(path)
+    except ValueError as e:
+        _fail(str(e))
+    if not notes:
+        _fail(f"{path}: no notes yet (add counts with `parking drift-note`)")
+    result = measure_drift(notes, target=target, min_days=days)
+    if as_json:
+        typer.echo(json.dumps({"zone": zone, **result.as_dict()}, indent=2))
+    else:
+        typer.echo(report(result, zone))
+    if result.verdict != "PASSED":
+        raise typer.Exit(1)
+
+
 @validation_app.command("pick")
 def validation_pick(
     camera: Annotated[str, typer.Option(help="Occupancy camera id in the config.")],

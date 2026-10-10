@@ -159,6 +159,20 @@ Read fps from the health lines with a high `gate_active_ratio` (cars passing). I
 3. Drift per day = |error change| / days.
 4. If drift is above target: check for a pattern (night? queues? pedestrians?) and use a clip of that situation to fix it. Consider enabling the scheduled reset.
 
+How to run it (on the vision host, from `backend/`; the notes go to the git-ignored `data/labels/drift-<zone>.csv`, format in [config.md §4](../design/config.md#drift-notes-datalabelsdrift-zonecsv), maths in [vision.md §10](../design/vision.md#drift-test-live-flow-zone)). Keep the zone's `reset.enabled: false` and make no corrections during the week, or the test starts again:
+```bash
+# day 0: count the level, correct the app to it, then write the first note (error 0)
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"occupied": 37, "note": "drift test day 0"}' http://localhost:8000/api/admin/zones/underground/correct
+uv run parking drift-note --zone underground --true 37
+# every day, when the level can be counted (the app's value is read from the API at that moment;
+# counted earlier? pass what the app showed then: --app 41 --at 2026-11-03T08:10+02:00)
+uv run parking drift-note --zone underground --true 41 --note "after a rainy night"
+# any time; exit 0 only for `verdict: PASSED` (<= 2 cars/day over >= 7 days)
+uv run parking drift-report --zone underground
+```
+The `step` and `/day` columns show which day the error moved: look at that period's flow events (admin page) and record a clip of the same situation for `parking evaluate-flow`.
+
 **Done when:** ≤ 2 cars/day of drift, or an accepted alternative (scheduled reset + display ≈).
 
 ---

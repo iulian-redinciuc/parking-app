@@ -29,6 +29,7 @@
 | `vision/shift.py` | translate a synthetic textured image by 0/5/20 px → detection matches |
 | `core/smoothing.py` | first reading sets state; k-1 contrary readings don't flip; k do; alternating noise never flips |
 | `core/flow_counter.py` | clamp at 0/capacity; duplicate `event_id` ignored; correction resets confidence; restore from DB |
+| `core/drift.py` | drift per day from the first note's error, sign ignored; target edge; too short = incomplete; notes CSV errors; `drift-note` / `drift-report` CLI (API read faked) |
 | `core/fusion.py` | level thresholds; total = sum; stale after timeout (fake clock); trend thresholds; confidence per method |
 | `push/rules.py` | each send/skip rule in [notifications.md §4–5](notifications.md#4-tier-2-im-on-my-way-server-rules-pushrulespy) with a fake clock; quiet hours across midnight; timezones |
 | API routes | status 503 before data; SSE sends current state first then changes; admin auth required; CORS headers; rate limits |

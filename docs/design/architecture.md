@@ -92,6 +92,7 @@ backend/
 │   ├── core/
 │   │   ├── smoothing.py         # SlotSmoother, CountSmoother
 │   │   ├── flow_counter.py      # FlowCounter (clamp, corrections, idempotency)
+│   │   ├── drift.py             # drift test notes + cars/day verdict (P5.11)
 │   │   ├── fusion.py            # StateStore → LotStatus (confidence, stale, trend, level)
 │   │   └── clock.py             # injectable clock for tests
 │   ├── db/
@@ -183,6 +184,8 @@ frontend/
 | `parking record --camera ID [--minutes 60] [--out data/recordings/] [--source rtsp:URL]` | 5 | Save the camera's RTSP stream to MP4 with FFmpeg stream copy (config.md "Low latency and recordings"), then print duration, codec, size, frames and fps from `ffprobe`; exit 1 if it was cut short (< 95% of the time). Needs `ffmpeg` (in the vision image); FFmpeg's messages are printed with the URL and password blanked (P5.2) |
 | `parking stream-check (--camera ID \| --source URI) [--seconds 60] [--window 10] [--json]` | 5 | Read a source and print the rate of new frames per window; **steady** (exit 0) = every window within ±20% of the median and no gap over 1 s. `video:…` checks a recording's playback (P5.2). Dev stand-in camera: `backend/scripts/fake_rtsp.py` (FFmpeg test pattern over RTSP/TCP) |
 | `parking evaluate-flow --video PATH --camera ID [--truth CSV] [--conf X] [--min-track-frames N] [--lines FILE] [--tolerance 2] [--realtime] [--debug-video FILE] [--out out/eval] [--json]` | 5 | Run the whole flow pipeline (gate → tracker → two-line counter) on a clip and compare with a tally (default `data/labels/<clip>.csv`): TP/FP/FN, event accuracy, net error and the target verdict; the overrides are for tuning ([vision.md §10](vision.md#flow-metrics-per-clip), P5.9). Tally CSVs are made with `tools/flow-tally/` |
+| `parking drift-note --zone ID --true N [--app N] [--api URL] [--at ISO] [--note TEXT] [--file CSV]` | 5 | Append the true count of a flow zone next to the app's value (read from the API unless `--app`) to `data/labels/drift-<zone>.csv` (P5.11) |
+| `parking drift-report --zone ID [--file CSV] [--target 2] [--days 7] [--json]` | 5 | Drift in cars/day from those notes and the verdict; exit 0 only for `PASSED` ([vision.md §10](vision.md#drift-test-live-flow-zone)) |
 | `parking push vapid-keys` | 6 | Generate VAPID keys |
 | `parking admin hash-password` | 7 | Argon2 hash for `.env` |
 | `parking health-stats LOG... --camera ID [--since ISO] [--until ISO] [--json]` | 4 | Per lot-local hour p1/median of the logged frame-health metrics and suggested `health:` thresholds ([vision.md §5](vision.md#5-frame-health-parkingvisionhealthpy), P4.4) |
