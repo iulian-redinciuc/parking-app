@@ -360,7 +360,31 @@ Runbook sections, each with symptoms → checks (commands) → fix:
 2. Fix anything found and release a new version (P8.1 flow).
 3. Go live: share the production URL, put up signage, keep the preview for testing future changes.
 
+As built: nothing new is measured in this week; it is the P4.11 sampler on both production machines, the P4.11 daily look at the ground level and the P5.11 drift notes for the underground level, run together on the final setup. The day-by-day procedure, what makes a day clean and the go-live checklist are in the [runbook](../runbook.md#staging-week-and-go-live).
+
+**Before day 0:** P8.2–P8.11 done on the production machines (the week doesn't replace any of them), the address known only to you and the testers.
+
+**Commands** (`soak.py` needs only the host's `python3`; it isn't among the files `provision.sh` installs, so fetch it from the running release):
+```bash
+# day 0, on each machine
+V=$(sed -n 's/^PARKING_VERSION=//p' /opt/parking/deploy/.env) && mkdir -p ~/staging && cd ~/staging
+curl -fsSL https://raw.githubusercontent.com/iulian-redinciuc/parking-app/$V/backend/scripts/soak.py -o soak.py
+# server
+nohup python3 soak.py sample --out soak.jsonl --containers parking-api,parking-web > sampler.log 2>&1 &
+# lot box (the API over the VPN)
+nohup python3 soak.py sample --out soak.jsonl --api http://10.77.0.1:8000 \
+  --containers parking-vision-occupancy,parking-vision-flow,parking-autoheal > sampler.log 2>&1 &
+# day 0, underground: count the level, correct the app to it, first drift note (P5.11's commands, with $P from the runbook)
+# every day: look at the ground level against the app, count the underground level, then on the lot box
+$P drift-note --zone underground --true <counted> --api http://10.77.0.1:8000
+# day 7
+python3 soak.py report soak.jsonl          # on each machine: verdict: PASSED
+$P drift-report --zone underground         # on the lot box: verdict: PASSED
+```
+
 **Done when:** 7 clean days, then the production URL is shared.
+
+*Status (P8.13):* the procedure and the go-live checklist are written (runbook, *Staging week and go-live*). Nothing of the week itself has been run: it needs the production machines and their public URL (P8.2/P8.3), both cameras counting at the lot (P4, P5), the hardening tasks done there (P8.4, P8.6–P8.11), seven days, someone comparing the app with the lot each day, and the signs.
 
 ---
 

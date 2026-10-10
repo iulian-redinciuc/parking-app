@@ -8,7 +8,7 @@ What to do when the running system misbehaves, and how to do the routine jobs: s
 | [A zone is stale / a camera is down](#a-zone-is-stale--a-camera-is-down) | [Restore from backup](#restore-from-backup) | [Privacy check](#privacy-check) |
 | [Counts are wrong (occupancy)](#counts-are-wrong-occupancy-camera) | [Rotate a secret](#rotate-a-secret) | [Security check](#security-check) |
 | [Counts are drifting (flow)](#counts-are-drifting-flow-camera) | [Add a language / zone / camera](#add-a-language--zone--camera) | [Power and network drills](#power-and-network-drills) |
-| [Camera shifted](#camera-shifted) | [Rebuild the dev environment](#rebuild-the-dev-environment) | |
+| [Camera shifted](#camera-shifted) | [Rebuild the dev environment](#rebuild-the-dev-environment) | [Staging week and go-live](#staging-week-and-go-live) |
 | [An alert arrived](#alerts) | | |
 
 ## Where things are
@@ -482,3 +482,44 @@ ADMIN_TOKEN=… uv run python ../scripts/resilience/drill.py camera https://<PUB
 | `other zones went stale too` | Both cameras hang on the same cable, switch port or worker: `docker ps` on the lot box, the switch |
 | `no admin alert` | `GET /api/admin/alerts` shows the issue but not `active`: the cut was shorter than the grace time (about 3 min); `available: false`: no VAPID keys |
 | `… flow events arrived after the reconnect` | No car crossed the ramp during the cut, or the outbox isn't kept: `ls data/outbox/` on the lot box while the link is down |
+
+## Staging week and go-live
+
+Once, before the address is shared ([phase guide P8.13](phases/phase-8-hardening.md#p813-staging-run-and-go-live)), and again in short form (two or three days) after a change to a camera, its position or the counting. Production runs for 7 days with only you and a few testers.
+
+**Day 0.** Everything in P8.2–P8.11 is done on these machines. Start the sampler on both machines (commands in the phase guide), count the underground level and correct the app to it (admin page), write the first drift note. Note the version: `grep '^PARKING_VERSION=' /opt/parking/deploy/.env`.
+
+**Every day**, once or twice, at different times of day over the week (a busy hour, dusk, night, rain if there is any):
+
+1. Look at the ground level and at the app at the same moment: free spaces, and on the admin page the camera's picture with the spaces it marks taken.
+2. Count the underground level and write the drift note (`$P drift-note --zone underground --true <counted> --api http://10.77.0.1:8000`). **No corrections** during the week.
+3. `python3 soak.py report soak.jsonl --days 1` on each machine: read the outages (the verdict complains about the span until day 7), and look at the admin page's alerts.
+4. One line in PROGRESS.md → Metrics: date, ground app/real, underground app/real, outages, what the testers reported.
+
+A day is **clean** when all of these hold:
+
+| | Clean | Otherwise |
+|---|-------|-----------|
+| Ground level | The app's free count is the real one at every look, or off by one space while a car is parking or leaving | [Counts are wrong](#counts-are-wrong-occupancy-camera) |
+| Underground level | The error moved by at most 2 cars since the previous day's note | [Counts are drifting](#counts-are-drifting-flow-camera) |
+| Outages | None that needed a person: every stale period, restart or unreachable minute in the sampler's report ended by itself | [The app can't reach the server](#the-app-shows-cant-reach-the-parking-server), [A zone is stale](#a-zone-is-stale--a-camera-is-down) |
+| Alerts | Every alert that arrived had a real cause, and every real fault raised one | [Alerts](#alerts) |
+| Testers | Nothing reported that made the app wrong or unusable (wrong language text or a layout slip is fixed, but doesn't spoil the day) | |
+
+**A day that isn't clean:** fix it, release a new version ([Deploy](#deploy-a-new-version--roll-back)), and the 7 days start again from the day the fix is running; so does the drift test if the fix touched the flow counting or a correction was needed. A fix that changes neither the counting nor how the machines recover (a text, a layout) doesn't restart the week.
+
+**Day 7.** `python3 soak.py report soak.jsonl` on both machines and `$P drift-report --zone underground` on the lot box all say `verdict: PASSED`, and the seven lines in Metrics are clean.
+
+**Go-live**, in this order:
+
+| | Check |
+|---|-------|
+| 1 | The last version deployed is the one that ran the clean days (or differs only by fixes that didn't restart the week) |
+| 2 | [Backups](#backups): last night's copy is at the off-machine destination; the restore drill was done on this server |
+| 3 | The uptime monitor is green and its test alert reached you ([Alerts](#alerts)) |
+| 4 | [Security check](#security-check) and [Privacy check](#privacy-check) pass; the Privacy screen names the operator and the contact |
+| 5 | The signs are up at the lot's entrances ([security-privacy.md §4.1](design/security-privacy.md#41-privacy-deliverables-p89)) **before** the address is shared |
+| 6 | Turn the sampler off (`pkill -f 'soak.py sample'` on both machines); anything switched on for the week (debug capture, a longer retention, `LOG_LEVEL=DEBUG`) goes back to normal |
+| 7 | Share `https://<PUBLIC_HOST>` (a QR code on the sign works well); tick P8.13 and the exit criteria |
+
+The preview (GitHub Pages, on the dev API or mock data) stays as it is: future changes are tried there first, and reach production only through a release tag.
