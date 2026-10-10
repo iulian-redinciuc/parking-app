@@ -127,12 +127,23 @@ class Zone(Strict):
 
 
 class DetectorCfg(Strict):
+    # yolo: an exported Ultralytics model; yolox: a YOLOX ONNX file (detector-training.md)
+    type: Literal["yolo", "yolox"] = "yolo"
     runtime: Literal["ncnn", "openvino", "onnx", "engine", "hailo"] = "ncnn"
     model: str
     imgsz: int = Field(default=640, gt=0)
     conf: float = Field(default=0.35, gt=0, lt=1)
     classes: list[str] = Field(default_factory=lambda: ["car", "motorcycle", "bus", "truck"])
     use_masks: bool = False
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if self.type == "yolox":
+            if self.runtime != "onnx":
+                raise ValueError("detector type yolox runs on ONNX Runtime: set runtime: onnx")
+            if self.use_masks:
+                raise ValueError("detector type yolox has no masks: set use_masks: false")
+        return self
 
 
 class AppearanceCfg(Strict):
@@ -250,6 +261,11 @@ class Camera(Strict):
             raise ValueError(f"camera '{self.id}': occupancy cameras need slots_file")
         if self.role == "flow" and self.lines_file is None:
             raise ValueError(f"camera '{self.id}': flow cameras need lines_file")
+        if self.role == "flow" and self.detector.type != "yolo":
+            raise ValueError(
+                f"camera '{self.id}': flow cameras track through the yolo detector; "
+                f"type {self.detector.type} is for occupancy cameras only"
+            )
         return self
 
 

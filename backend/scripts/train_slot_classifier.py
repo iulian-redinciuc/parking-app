@@ -26,7 +26,6 @@ Writes `<out>` (ONNX, dynamic batch), `<out>.pt` (weights for `--init`) and `<ou
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import random
 import sys
@@ -40,13 +39,9 @@ import numpy as np
 from parking.config import cli_env, load_config, load_labels, load_slots
 from parking.vision.occupancy import _scaled
 from parking.vision.slot_classifier import CLASSES, CROP_SIZE, MEAN, STD, meta_path, slot_square
+from parking.vision.validation import held_out
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png"}
-
-
-def held_out(name: str, share: float) -> bool:
-    """Deterministic frame split: the same frames are held out every run."""
-    return int(hashlib.sha1(name.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF < share
 
 
 def frame_crops(images: Path, labels_path: Path, slot_file, share: float):

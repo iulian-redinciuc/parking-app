@@ -1,7 +1,8 @@
 """Vehicle detector behind a small protocol (docs/design/vision.md §1).
 
 `YoloDetector` wraps an exported Ultralytics model; `FakeDetector` returns detections
-from a JSON sidecar so tests and CI don't need PyTorch.
+from a JSON sidecar so tests and CI don't need PyTorch. `build_detector` picks the class
+for a camera's `detector.type` (`yolox`: `parking/vision/yolox.py`, no Ultralytics code).
 """
 
 from __future__ import annotations
@@ -113,6 +114,15 @@ class YoloDetector:
             self.conf,
             masks,
         )
+
+
+def build_detector(cfg: Any, model_path: str | Path) -> Detector:
+    """The detector for a camera's `detector` settings (config.md §1), model at `model_path`."""
+    if cfg.type == "yolox":
+        from parking.vision.yolox import YoloxDetector
+
+        return YoloxDetector(str(model_path), cfg.imgsz, cfg.conf, cfg.classes)
+    return YoloDetector(str(model_path), cfg.imgsz, cfg.conf, cfg.classes, cfg.use_masks)
 
 
 class FakeDetector:

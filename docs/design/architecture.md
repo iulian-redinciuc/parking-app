@@ -69,7 +69,9 @@ backend/
 │   ├── geometry.py              # polygon/line helpers on top of shapely + numpy
 │   ├── messages.py              # pydantic payload models shared by workers and API
 │   ├── vision/
-│   │   ├── detector.py          # Detection dataclass, Detector protocol, YoloDetector
+│   │   ├── detector.py          # Detection dataclass, Detector protocol, YoloDetector, build_detector
+│   │   ├── yolox.py             # YoloxDetector: YOLOX ONNX model on ONNX Runtime (P9.4)
+│   │   ├── yolo_dataset.py      # labelled frames → YOLO / COCO training set (`parking export-yolo`, P9.4)
 │   │   ├── occupancy.py         # slot scoring, zone counting
 │   │   ├── flow.py              # TwoLineCounter (per-track crossing state machine)
 │   │   ├── tracking.py          # wrapper around ByteTrack (via ultralytics)
@@ -193,6 +195,7 @@ frontend/
 | `parking health-stats LOG... --camera ID [--since ISO] [--until ISO] [--json]` | 4 | Per lot-local hour p1/median of the logged frame-health metrics and suggested `health:` thresholds ([vision.md §5](vision.md#5-frame-health-parkingvisionhealthpy), P4.4) |
 | `parking validation pick --camera ID [--count 200] [--from DIR] [--out DIR] [--dry-run]` | 4 | Copy debug captures spread over time of day × occupancy level into `data/validation/<camera>/` (P4.8) |
 | `parking validation check --camera ID [--labels FILE] [--tags LIST] [--min-images 200] [--min-per-tag 15]` | 4 | Count labelled validation images and condition tags; exit 1 below the P4.8 target |
+| `parking export-yolo --camera ID [--images DIR] [--labels FILE] [--out data/yolo/<camera>] [--holdout 0.2] [--pad 0] [--review] [--coco] [--force]` | 9 | Labelled frames → a detector training set: one rough box per taken space, YOLO label files + COCO JSON, 20% of the frames held out with their labels for `parking evaluate` (P9.4, [detector-training.md §2](detector-training.md#2-the-dataset-parking-export-yolo)) |
 | `parking db prune` / `parking db aggregate` | 7 | Retention + rollups (also scheduled) |
 | `parking db retention` | 8 | Check that nothing is kept past its retention period (exit 1 if so) |
 | `parking backup --out DIR [--keep-daily 14] [--keep-weekly 8] [--no-rotate]` | 8 | Write `parking-YYYYMMDD-HHMM.tar.gz` (database via the online backup API, `config/`, reference images, manifest), then rotate old archives ([deployment.md §7](deployment.md#7-backups)) |

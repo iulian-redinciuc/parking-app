@@ -29,6 +29,7 @@ Phase guides **link to** the design specs instead of repeating them. If a spec a
 | [design/testing.md](design/testing.md) | Test layers, fixtures, CI, evaluation datasets, device matrix |
 | [design/slot-map.md](design/slot-map.md) | The slot map (P9.1): map file format, `parking slot-map`, the map endpoint, how the app draws it |
 | [design/barrier.md](design/barrier.md) | Barrier / induction-loop integration (P9.3): contacts on GPIO inputs, the barrier worker, `source: "barrier"` flow events, counting alone or compared with the flow camera |
+| [design/detector-training.md](design/detector-training.md) | Fine-tuned detector / licence swap (P9.4): `parking export-yolo`, fine-tuning YOLO11n, `YoloxDetector` (Apache-2.0), comparing them, what the swap doesn't cover |
 | [design/special-spaces.md](design/special-spaces.md) | Special spaces (P9.2): slot types, `by_type` in the status, the chips on the zone card, the notification preference |
 
 ## Phase guides

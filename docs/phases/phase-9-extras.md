@@ -45,7 +45,14 @@ LOG_LEVEL=DEBUG docker compose -f docker-compose.site.yml -f docker-compose.barr
 
 ## P9.4: Fine-tuned detector / licence swap
 **Why:** better accuracy on your specific view, or avoiding AGPL obligations.
-**Outline:** export the labelled validation frames (P4.8) to YOLO format (the slot polygons give rough boxes; review them). Fine-tune YOLO11n on a desktop GPU or Colab. Or train **YOLOX-nano** (Apache-2.0) and add a `YoloxDetector`. Compare with `parking evaluate` on the held-out set.
+**Design note:** [detector-training.md](../design/detector-training.md).
+**Files:** `backend/parking/vision/yolo_dataset.py` + `parking export-yolo` (`cli.py`), `vision/yolox.py` (`YoloxDetector`), `vision/detector.py` (`build_detector`), `config.py` (`detector.type`), `vision/validation.py` (`held_out`, shared with the slot classifier).
+**Steps**
+1. Export the labelled validation frames (P4.8) to YOLO format: `uv run parking export-yolo --camera cam-ground --review` → `data/yolo/cam-ground/` (the slot polygons give rough boxes: look through `review/`, correct the label files, then `--coco` for YOLOX). 20% of the frames are held out.
+2. On a desktop GPU or Colab, fine-tune YOLO11n ([§3](../design/detector-training.md#3-route-a-fine-tune-yolo11n)), or train **YOLOX-nano** (Apache-2.0, [§4](../design/detector-training.md#4-route-b-yolox-nano)), which runs through `YoloxDetector` (`detector.type: yolox`).
+3. Compare with `parking evaluate` on the held-out frames ([§5](../design/detector-training.md#5-comparing)) and switch the camera's `detector` in lot.yaml only if the new model meets the target and beats the current method.
+
+**Done when:** a model trained on the real camera's frames is evaluated on the held-out set against the current method, the table is in PROGRESS.md → Metrics and the better one is configured. **Built and checked on the dev Pi without real frames** (detector-training.md §7): the export, a short CPU fine-tune on simulated frames to prove the format, and `YoloxDetector` on the official YOLOX-nano. **Waiting for:** P4.8's labelled frames and a machine with a GPU.
 
 ## P9.5: Multiple lots
 **Why:** reuse for other locations.

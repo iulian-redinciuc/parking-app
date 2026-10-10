@@ -39,6 +39,8 @@ cameras:
     slots_file: config/slots/cam-ground.json
     control_url: http://vision-occupancy:9000   # how the API reaches this worker (VPN address in T2)
     detector:
+      # type: yolo                 # yolo (default, Ultralytics export) | yolox (a YOLOX ONNX file: runtime onnx,
+      #                            # no masks, occupancy cameras only; docs/design/detector-training.md)
       runtime: ncnn                # ncnn | openvino | onnx | engine | hailo; per machine, see vision.md §11
       model: models/yolo11n-seg_ncnn_model
       imgsz: 1280

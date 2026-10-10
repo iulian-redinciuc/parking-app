@@ -141,12 +141,16 @@ def _slot_file(cam, root: Path):
 
 
 def _yolo_detector(det_cfg, root: Path):
-    from parking.vision.detector import YoloDetector
+    """The camera's detector: `detector.type` picks YOLO (Ultralytics) or YOLOX."""
+    from parking.vision.detector import build_detector
 
     model = _resolve(Path(det_cfg.model), root)
     if not model.exists():
         _fail(f"model {model} not found; run `parking models export` first")
-    return YoloDetector(str(model), det_cfg.imgsz, det_cfg.conf, det_cfg.classes, det_cfg.use_masks)
+    try:
+        return build_detector(det_cfg, model)
+    except ValueError as e:
+        _fail(f"detector {model}: {e}")
 
 
 def _reference(occ, root: Path):
@@ -678,7 +682,8 @@ def bootstrap_slots(
         _fail(f"can't read image {path}")
 
     # vision.md §4: masks on, 1280 px, a low confidence to find as many vehicles as possible
-    det_cfg = cam.detector.model_copy(update={"imgsz": imgsz, "conf": conf, "use_masks": True})
+    masks = cam.detector.type == "yolo"  # YOLOX gives boxes only
+    det_cfg = cam.detector.model_copy(update={"imgsz": imgsz, "conf": conf, "use_masks": masks})
     if _fake_detector_on(fake_detector):
         sidecar = path.with_suffix(".json")
         if not sidecar.is_file():
@@ -703,6 +708,108 @@ def bootstrap_slots(
     typer.echo(
         f"{len(slots)} slot(s) in zone '{zone}' -> {target}\n"
         "Now fix it in tools/slot-editor: add the empty spaces and adjust the corners."
+    )
+
+
+@app.command("export-yolo")
+def export_yolo(
+    camera: Annotated[str, typer.Option(help="Camera id in the config, e.g. cam-ground.")],
+    images: Annotated[
+        Path | None,
+        typer.Option(help="Folder with the labelled frames (default data/validation/<camera>)."),
+    ] = None,
+    labels: Annotated[
+        Path | None,
+        typer.Option(help="Labels file (default data/labels/<camera>-validation.json)."),
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option(help="Dataset folder to write (default data/yolo/<camera>).")
+    ] = None,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    holdout: Annotated[
+        float, typer.Option(help="Share of the frames kept for validation (by file name).")
+    ] = 0.2,
+    pad: Annotated[
+        float, typer.Option(help="Grow each box by this share of the slot's size per side.")
+    ] = 0.0,
+    review: Annotated[
+        bool, typer.Option("--review", help="Also write review/<frame>.jpg with the boxes drawn.")
+    ] = False,
+    coco: Annotated[
+        bool,
+        typer.Option(
+            "--coco",
+            help="Only rebuild annotations/*.json from the label files of an existing dataset "
+            "(after correcting boxes).",
+        ),
+    ] = False,
+    force: Annotated[bool, typer.Option("--force", help="Replace an existing dataset.")] = False,
+) -> None:
+    """Turn labelled frames into a detector training set (detector-training.md): one rough
+    box per taken space, YOLO text labels + COCO JSON, 20% of the frames held out."""
+    import shutil
+
+    from parking.config import ConfigError, load_labels
+    from parking.vision.yolo_dataset import SPLITS, export_frames, write_coco
+
+    if not 0 <= holdout < 1:
+        raise typer.BadParameter("must be between 0 and 1", param_hint="--holdout")
+    if not 0 <= pad <= 0.5:
+        raise typer.BadParameter("must be between 0 and 0.5", param_hint="--pad")
+
+    _, cam, root = _occupancy_camera(config, camera, "export-yolo")
+    target = _resolve_out(out or Path("data") / "yolo" / camera, root)
+
+    if coco:
+        if not (target / "labels").is_dir():
+            _fail(f"no dataset at {target}; run export-yolo without --coco first")
+        try:
+            totals = write_coco(target)
+        except ValueError as e:
+            _fail(str(e))
+        typer.echo(
+            f"annotations rebuilt in {target / 'annotations'}: "
+            + ", ".join(f"{s} {totals[s]} box(es)" for s in SPLITS)
+        )
+        return
+
+    slots = _slot_file(cam, root)
+    folder = _resolve(images or Path("data") / "validation" / camera, root)
+    if not folder.is_dir():
+        _fail(f"no image folder {folder}")
+    labels_path = _resolve(labels or Path(f"data/labels/{camera}-validation.json"), root)
+    try:
+        label_file = load_labels(labels_path)
+    except (ConfigError, ValueError, OSError) as e:
+        _fail(f"labels {labels_path}: {e} (label the images with tools/slot-editor)")
+    if label_file.camera_id != camera:
+        _fail(f"labels {labels_path} are for camera '{label_file.camera_id}', not '{camera}'")
+    known = {s.id for s in slots.slots}
+    unknown = sorted(
+        {i for lab in label_file.images.values() for i in (*lab.taken, *lab.unsure)} - known
+    )
+    if unknown:
+        _fail(f"labels {labels_path} name slot(s) not in the slot file: {', '.join(unknown)}")
+
+    if any((target / d).exists() for d in ("images", "labels")):
+        if not force:
+            _fail(f"{target} already holds a dataset; pass --force to replace it")
+        for d in ("images", "labels", "annotations", "review"):
+            shutil.rmtree(target / d, ignore_errors=True)
+
+    stats = export_frames(folder, label_file, slots, target, holdout, pad, review)
+    if stats.train + stats.val == 0:
+        _fail(f"none of the {len(label_file.images)} labelled image(s) are in {folder}")
+    for name in stats.missing:
+        typer.echo(f"skipped {name}: not in {folder} or unreadable", err=True)
+    typer.echo(
+        f"{stats.train} train + {stats.val} val frame(s), {stats.boxes} box(es), "
+        f"{stats.masked} unsure space(s) painted out -> {target}"
+    )
+    typer.echo(
+        "The boxes are the slots' outlines, not the cars': look through them"
+        + (f" in {target / 'review'}" if review else " (--review draws them)")
+        + ", fix the label files where needed, then `--coco` if you train YOLOX."
     )
 
 

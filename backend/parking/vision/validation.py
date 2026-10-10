@@ -8,6 +8,7 @@ in the slot editor's label mode. `coverage` is the "Done when" of P4.8.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import Counter
@@ -25,6 +26,12 @@ MIN_PER_TAG = 15
 
 NAME = re.compile(r"^(\d{6})_(\d{3})-[a-z+]+\.jpg$")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def held_out(name: str, share: float) -> bool:
+    """Deterministic frame split by file name: the same frames are held out every run, by the
+    slot classifier's training (vision.md §9) and the detector dataset (detector-training.md)."""
+    return int(hashlib.sha1(name.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF < share
 
 
 def period(hour: int) -> str:

@@ -55,6 +55,8 @@ cameras:
     slots_file: config/slots/cam-ground.json
     control_url: http://vision-occupancy:9000   # how the API reaches this worker (VPN address in T2)
     detector:
+      # type: yolo                 # yolo (default, Ultralytics export) | yolox (a YOLOX ONNX file: runtime onnx,
+      #                            # no masks, occupancy cameras only; detector-training.md)
       runtime: ncnn                # ncnn | openvino | onnx | engine | hailo; per machine, see vision.md §11
       model: models/yolo11n-seg_ncnn_model
       imgsz: 1280
@@ -132,6 +134,7 @@ api:
   - `slots` zones have at least one occupancy camera; `flow` zones have a flow camera, a barrier or both, at most one of each
   - a barrier (`role: barrier`, [barrier.md](barrier.md)) names exactly one zone, a `flow` zone; `counted_by` is only allowed on `flow` zones and must name that zone's flow camera or barrier
   - occupancy and flow cameras need a `detector`; a barrier has none
+  - `detector.type: yolox` ([detector-training.md §4](detector-training.md#4-route-b-yolox-nano)) needs `runtime: onnx` and `use_masks: false`, and is only allowed on occupancy cameras (the flow camera tracks through the `yolo` detector)
   - `capacity` is required for `count` and `flow` zones; for `slots` zones it defaults to the number of slots
   - `map` (a zone's slot map, [slot-map.md](slot-map.md)) is optional and only allowed on `slots` zones; the file may be missing (then the zone has no map)
   - occupancy cameras need `slots_file`, flow cameras need `lines_file` (the file may be missing in Phase 1 before slots are drawn; commands that need it fail with a clear message)

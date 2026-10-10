@@ -174,6 +174,17 @@ def test_barrier_rules(raw):
     invalid(raw, r"cameras\.2\.barrier\.mode")
 
 
+def test_yolox_detector_is_for_occupancy_cameras(raw):
+    yolox = {"type": "yolox", "runtime": "onnx", "model": "models/yolox_nano.onnx", "imgsz": 416}
+    raw["cameras"][0]["detector"] = yolox
+    assert LotConfig.model_validate(raw).cameras[0].detector.type == "yolox"
+    raw["cameras"][0]["detector"] = {**yolox, "runtime": "ncnn"}
+    invalid(raw, "detector type yolox runs on ONNX Runtime")
+    raw["cameras"][0]["detector"] = {"model": "m"}
+    raw["cameras"][1]["detector"] = yolox
+    invalid(raw, "camera 'cam-ramp': flow cameras track through the yolo detector")
+
+
 def test_cameras_still_need_a_detector(raw):
     del raw["cameras"][1]["detector"]
     invalid(raw, "camera 'cam-ramp': flow cameras need a detector")

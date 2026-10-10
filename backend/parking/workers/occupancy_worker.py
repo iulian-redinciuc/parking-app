@@ -129,9 +129,12 @@ def _make_detector(cam: Camera, root: Path, fake: bool) -> Detector | SidecarDet
     model = _resolve(det.model, root)
     if not model.exists():
         raise WorkerError(f"model {model} not found; run `parking models export` first")
-    from parking.vision.detector import YoloDetector
+    from parking.vision.detector import build_detector
 
-    return YoloDetector(str(model), det.imgsz, det.conf, det.classes, det.use_masks)
+    try:
+        return build_detector(det, model)
+    except ValueError as e:
+        raise WorkerError(f"detector {model}: {e}") from e
 
 
 def _make_classifier(cam: Camera, root: Path) -> Classifier | None:
