@@ -106,7 +106,7 @@ backend/
 │   │   └── history.py           # /api/history and /api/forecast reads
 │   ├── api/
 │   │   ├── app.py               # create_app(): routers, CORS, rate limits, lifespan
-│   │   ├── deps.py              # settings, db session, state store, auth dependencies
+│   │   ├── deps.py              # Runtime (one per lot, multi-lot.md), lot / camera / zone lookups, auth dependencies
 │   │   ├── sse.py               # Broadcaster (fan-out to SSE clients)
 │   │   ├── ingest.py            # applies worker payloads to core/, records changes, broadcasts
 │   │   ├── cache.py             # 60 s in-memory cache for history / forecast
@@ -142,6 +142,7 @@ frontend/
     ├── api/
     │   ├── types.ts             # LotStatus, Zone, etc. (mirror of api.md)
     │   ├── client.ts            # fetch wrappers, base URL, admin token
+    │   ├── lots.ts              # the lot picked on this device, lotPath() (multi-lot.md §6)
     │   ├── live.ts              # SSE connection manager (reconnect, polling fallback)
     │   └── mock.ts              # fake live data for development without backend
     ├── hooks/

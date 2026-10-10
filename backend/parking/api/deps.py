@@ -7,7 +7,7 @@ import hmac
 import math
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated
 
@@ -50,7 +50,10 @@ class ApiError(Exception):
 
 @dataclass
 class Runtime:
-    """What the lifespan builds; kept on `app.state.runtime`."""
+    """What the lifespan builds for one lot. `app.state.runtime` is the default lot's (the
+    first in lot.yaml); `lots` holds every lot's by id, in file order (multi-lot.md §3).
+    The settings, the engine, the push sender, the root and the jobs are the same objects in
+    all of them."""
 
     settings: Settings
     config: LotConfig
@@ -66,6 +69,22 @@ class Runtime:
     jobs: MaintenanceJobs | None = None  # rollups + retention (data-model.md §4)
     cache: TtlCache | None = None  # history + forecast responses (60 s)
     alerts: AdminAlertMonitor | None = None  # admin alerts (None without VAPID keys)
+    lots: dict[str, Runtime] = field(default_factory=dict, repr=False)
+    total_key: str = "total"  # this lot's `total` pseudo-zone in the rollup tables
+
+    @property
+    def all(self) -> list[Runtime]:
+        """Every lot's runtime, the default lot first."""
+        return list(self.lots.values()) or [self]
+
+    def of_camera(self, camera_id: str | None) -> Runtime | None:
+        """The runtime of the lot `camera_id` belongs to (camera ids are unique across lots)."""
+        return next(
+            (rt for rt in self.all if any(c.id == camera_id for c in rt.config.cameras)), None
+        )
+
+    def of_zone(self, zone_id: str | None) -> Runtime | None:
+        return next((rt for rt in self.all if zone_id in rt.store.capacity), None)
 
     def path(self, path: Path) -> Path:
         """A relative config path (e.g. `slots_file`) under the app root, whatever the cwd."""
@@ -80,6 +99,36 @@ def runtime(request: Request) -> Runtime:
 
 
 RuntimeDep = Annotated[Runtime, Depends(runtime)]
+
+
+def lot_runtime(request: Request) -> Runtime:
+    """The lot named in the path (`/api/lots/{lot}/...`), else the default lot."""
+    rt = runtime(request)
+    lot_id = request.path_params.get("lot")
+    if lot_id is None:
+        return rt
+    found = rt.lots.get(lot_id)
+    if found is None:
+        raise ApiError(404, "not_found", f"unknown lot '{lot_id}'")
+    return found
+
+
+def camera_runtime(request: Request) -> Runtime:
+    """The lot of the `{camera_id}` in the path; the default lot for an unknown camera (the
+    route answers 404)."""
+    rt = runtime(request)
+    return rt.of_camera(request.path_params.get("camera_id")) or rt
+
+
+def zone_runtime(request: Request) -> Runtime:
+    """The lot of the `{zone_id}` in the path; the default lot for an unknown zone."""
+    rt = runtime(request)
+    return rt.of_zone(request.path_params.get("zone_id")) or rt
+
+
+LotDep = Annotated[Runtime, Depends(lot_runtime)]
+CameraLotDep = Annotated[Runtime, Depends(camera_runtime)]
+ZoneLotDep = Annotated[Runtime, Depends(zone_runtime)]
 
 
 def token_ok(header: str | None, token: str | None) -> bool:
@@ -178,8 +227,9 @@ def lang(
         str | None, Query(max_length=35, description="Language of zone names, e.g. `ro`.")
     ] = None,
 ) -> str:
-    config = runtime(request).config
-    available = {code for zone in config.zones for code in zone.name}
+    available = {
+        code for rt in runtime(request).all for zone in rt.config.zones for code in zone.name
+    }
     return resolve_lang(lang, request.headers.get("accept-language"), available)
 
 

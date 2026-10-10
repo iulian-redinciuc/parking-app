@@ -190,16 +190,26 @@ def zone_timelines(
     return out
 
 
+Totals = Mapping[str, Iterable[str]]  # a lot's total pseudo-zone id -> its zone ids
+
+
 def compute_minutes(
-    session: Session, zone_ids: Iterable[str], start: datetime, end: datetime
+    session: Session,
+    zone_ids: Iterable[str],
+    start: datetime,
+    end: datetime,
+    totals: Totals | None = None,
 ) -> list[Bucket]:
-    """Minute buckets of every zone and `total` in `[start, end)`."""
+    """Minute buckets of every zone and of each lot's total in `[start, end)`. `totals` names
+    the lots' pseudo-zones (multi-lot.md §4); without it every zone adds up to `total`."""
     timelines = zone_timelines(session, zone_ids, start, end)
     out: list[Bucket] = []
     for zone_id, points in timelines.items():
         out += minute_buckets(zone_id, points, start, end)
-    if timelines:
-        out += minute_buckets(TOTAL, total_points(timelines), start, end)
+    for key, ids in (totals or {TOTAL: list(timelines)}).items():
+        own = {z: timelines[z] for z in ids if z in timelines}
+        if own:
+            out += minute_buckets(key, total_points(own), start, end)
     return out
 
 
@@ -212,13 +222,18 @@ def _replace(session: Session, model, buckets: list[Bucket], start, end) -> int:
 
 
 def aggregate_minutes(
-    session: Session, zone_ids: Iterable[str], start: datetime, end: datetime
+    session: Session,
+    zone_ids: Iterable[str],
+    start: datetime,
+    end: datetime,
+    totals: Totals | None = None,
 ) -> int:
     """(Re)build `zone_minute` for `[start, end)` from `zone_state`; returns the rows written."""
     start, end = floor_minute(start), floor_minute(end)
     if start >= end:
         return 0
-    return _replace(session, ZoneMinute, compute_minutes(session, zone_ids, start, end), start, end)
+    buckets = compute_minutes(session, zone_ids, start, end, totals)
+    return _replace(session, ZoneMinute, buckets, start, end)
 
 
 def aggregate_hours(session: Session, start: datetime, end: datetime) -> int:
@@ -239,7 +254,11 @@ def last_bucket(session: Session, model) -> datetime | None:
 
 
 def backfill(
-    session: Session, zone_ids: list[str], now: datetime, retention: Retention = DEFAULT_RETENTION
+    session: Session,
+    zone_ids: list[str],
+    now: datetime,
+    retention: Retention = DEFAULT_RETENTION,
+    totals: Totals | None = None,
 ) -> tuple[int, int]:
     """Rebuild every rollup from `zone_state`: minutes up to `now`'s minute (only those within
     the minute retention are stored), hours up to `now`'s hour. Returns (minutes, hours)."""
@@ -254,7 +273,7 @@ def backfill(
     day = floor_hour(first)
     while day < end_minute:  # a day at a time keeps memory flat
         chunk_end = min(day + DAY, end_minute)
-        minutes = compute_minutes(session, zone_ids, day, chunk_end)
+        minutes = compute_minutes(session, zone_ids, day, chunk_end, totals)
         kept = [m for m in minutes if m.bucket_ts >= keep_from]
         hours = [h for h in hour_buckets(minutes) if h.bucket_ts < end_hour]
         if kept:

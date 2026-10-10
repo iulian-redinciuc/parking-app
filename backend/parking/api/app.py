@@ -38,7 +38,15 @@ from parking.api.ingest import Ingestor
 from parking.api.jobs import MaintenanceJobs
 from parking.api.routes import admin, internal, public, push
 from parking.api.sse import Broadcaster
-from parking.config import LotConfig, Settings, SlotFile, cli_env, load_config, load_slots
+from parking.config import (
+    LotConfig,
+    Settings,
+    SlotFile,
+    cli_env,
+    load_lots,
+    load_slots,
+    total_key,
+)
 from parking.core.clock import Clock, SystemClock
 from parking.db.engine import default_url, make_engine, upgrade
 from parking.messages import LotStatus
@@ -123,76 +131,66 @@ def create_app(
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        from parking.core.fusion import StateStore
-
-        config = load_config(config_path, cli_env(root))
+        lots = load_lots(config_path, cli_env(root))
         url = db_url or settings.parking_db_url or default_url(root)
         await anyio.to_thread.run_sync(upgrade, url)
         engine = make_engine(url)
         clk = clock or SystemClock()
-        store = StateStore(config, clk, load_slot_files(config, root))
-        broadcaster = Broadcaster()
         sender = _push_sender(engine, settings, clk, webpush)
-        notifier = almost_full = scheduler = hook = alerts = None
-        if sender is not None:
-            url = app_url(settings.public_app_url)
-            lock = asyncio.Lock()  # one push dispatch at a time
-            notifier = OnMyWayNotifier(engine, sender, config, clk, url, lock)
-            almost_full = AlmostFullNotifier(engine, sender, config, clk, url, lock)
-            scheduler = PushScheduler(
-                engine, sender, config, clk, url, lambda: _current(store), lock
-            )
-            alerts = AdminAlertMonitor(engine, sender, config, clk, url, store, lock, root)
-
-            def hook(old, new):
-                notifier.status_changed(old, new)
-                almost_full.status_changed(old, new)
-
-        ingestor = Ingestor(store, engine, broadcaster.publish, hook)
-        jobs = MaintenanceJobs(engine, config, clk, ingestor=ingestor)
-        app.state.runtime = Runtime(
-            settings,
-            config,
+        lock = asyncio.Lock()  # one push dispatch at a time, whatever the lot
+        runtimes: dict[str, Runtime] = {}
+        for config in lots:
+            rt = _lot_runtime(config, lots, settings, engine, clk, sender, lock, root)
+            rt.lots = runtimes
+            runtimes[config.lot.id] = rt
+        first, *others = runtimes.values()
+        jobs = MaintenanceJobs(
             engine,
-            store,
-            ingestor,
-            broadcaster,
-            sender,
-            notifier,
-            almost_full,
-            scheduler,
-            root,
-            jobs,
-            TtlCache(clk),
-            alerts,
+            first.config,
+            clk,
+            ingestor=first.ingestor,
+            more=[(rt.config, rt.ingestor) for rt in others],
         )
+        for rt in runtimes.values():
+            rt.jobs = jobs
+        app.state.runtime = first
         if settings.worker_token is None:
             log.warning("WORKER_TOKEN is not set: every /internal/* request gets 401")
-        await ingestor.restore()
-        task = asyncio.create_task(_tick_loop(ingestor)) if tick else None
-        if scheduler is not None and tick:
-            scheduler.start()
+        tasks = []
+        for rt in runtimes.values():
+            await rt.ingestor.restore()
+            if not tick:
+                continue
+            tasks.append(asyncio.create_task(_tick_loop(rt.ingestor)))
+            if rt.scheduler is not None:
+                rt.scheduler.start()
+            if rt.alerts is not None:
+                rt.alerts.start()
         if tick:
             jobs.start()
-        if alerts is not None and tick:
-            alerts.start()
-        log.info("API ready: lot %s, %d zone(s), db %s", config.lot.id, len(config.zones), url)
+        for rt in runtimes.values():
+            log.info(
+                "API ready: lot %s, %d zone(s), db %s", rt.config.lot.id, len(rt.config.zones), url
+            )
         try:
             yield
         finally:
-            if task is not None:
+            for task in tasks:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-            if scheduler is not None:
-                scheduler.shutdown()
-            if alerts is not None:
-                await alerts.shutdown()
+            for rt in runtimes.values():
+                if rt.scheduler is not None:
+                    rt.scheduler.shutdown()
+                if rt.alerts is not None:
+                    await rt.alerts.shutdown()
             jobs.shutdown()
-            if notifier is not None:
-                pending = asyncio.gather(notifier.drain(), almost_full.drain())
+            pending = [
+                n.drain() for rt in runtimes.values() for n in (rt.on_my_way, rt.almost_full) if n
+            ]
+            if pending:
                 with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(pending, SHUTDOWN_DRAIN_S)
+                    await asyncio.wait_for(asyncio.gather(*pending), SHUTDOWN_DRAIN_S)
             app.state.runtime = None
             engine.dispose()
 
@@ -220,6 +218,62 @@ def create_app(
     app.include_router(internal.router)
     app.include_router(admin.router)
     return app
+
+
+def _lot_runtime(
+    config: LotConfig,
+    lots: list[LotConfig],
+    settings: Settings,
+    engine,
+    clk: Clock,
+    sender: PushSender | None,
+    lock: asyncio.Lock,
+    root: Path,
+) -> Runtime:
+    """One lot's store, ingest path, stream and push rules (multi-lot.md §3)."""
+    from parking.core.fusion import StateStore
+
+    default = config is lots[0]
+    store = StateStore(config, clk, load_slot_files(config, root))
+    broadcaster = Broadcaster()
+    notifier = almost_full = scheduler = hook = alerts = None
+    if sender is not None:
+        url = app_url(settings.public_app_url)
+        # whose subscriptions this lot's rules serve: its own, and for the default lot also
+        # the ones that name no lot; with a single lot, all of them
+        own = None if len(lots) == 1 else (config.lot.id, *([None] if default else []))
+        notifier = OnMyWayNotifier(engine, sender, config, clk, url, lock, own)
+        almost_full = AlmostFullNotifier(engine, sender, config, clk, url, lock, own)
+        scheduler = PushScheduler(
+            engine, sender, config, clk, url, lambda: _current(store), lock, own
+        )
+        # the machine's own alerts (disk, restart, backup) come from the default lot's monitor
+        alerts = AdminAlertMonitor(
+            engine, sender, config, clk, url, store, lock, root if default else None
+        )
+
+        def hook(old, new):
+            notifier.status_changed(old, new)
+            almost_full.status_changed(old, new)
+
+    ingestor = Ingestor(store, engine, broadcaster.publish, hook)
+    return Runtime(
+        settings,
+        config,
+        engine,
+        store,
+        ingestor,
+        broadcaster,
+        sender,
+        notifier,
+        almost_full,
+        scheduler,
+        root,
+        None,
+        TtlCache(clk),
+        alerts,
+        total_key=total_key(lots, config.lot.id),
+    )
 
 
 def _current(store) -> LotStatus | None:

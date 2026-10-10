@@ -41,6 +41,11 @@ class Message(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+# The sender's lot id in worker payloads (multi-lot.md §3). The API finds the lot from
+# `camera_id` and rejects a payload whose `lot` is another one; None = not said (older workers).
+LotId = Annotated[str | None, Field(default=None)]
+
+
 # --- workers -> API (api.md §5.1) ---
 
 
@@ -54,6 +59,7 @@ class Observation(Message):
     """One analysed frame from an occupancy worker (`POST /internal/observations`)."""
 
     v: Literal[1] = 1
+    lot: LotId
     camera_id: str
     ts: UtcDatetime
     frame_size: tuple[int, int]
@@ -70,6 +76,7 @@ class FlowEventMsg(Message):
     v: Literal[1] = 1
     event_id: str = Field(min_length=1)
     source: FlowSource = "camera"
+    lot: LotId
     camera_id: str
     ts: UtcDatetime
     direction: Direction
@@ -95,6 +102,7 @@ class CameraHealthMsg(Message):
     """Sent by every worker every 10 s (`POST /internal/health`)."""
 
     v: Literal[1] = 1
+    lot: LotId
     camera_id: str
     ts: UtcDatetime
     state: CameraState

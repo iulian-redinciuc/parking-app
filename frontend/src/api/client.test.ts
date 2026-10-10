@@ -19,6 +19,7 @@ import {
   getCameraSnapshot,
   getCorrections,
   getLot,
+  getLots,
   getStatus,
   IS_MOCK,
   onAdminTokenChange,
@@ -66,6 +67,29 @@ describe('API client', () => {
   it('builds URLs with ?lang=', () => {
     expect(apiUrl('/api/status', undefined, BASE)).toBe('http://api.test/api/status')
     expect(apiUrl('/api/lot', 'ro', BASE)).toBe('http://api.test/api/lot?lang=ro')
+  })
+
+  it('asks for the picked lot (multi-lot.md §6)', async () => {
+    localStorage.setItem('parking.lot', 'north')
+    try {
+      const fetch = reply(200, lotStatus)
+      vi.stubGlobal('fetch', fetch)
+      await getStatus({ base: BASE, lang: 'en' })
+      expect(fetch).toHaveBeenCalledWith(
+        'http://api.test/api/lots/north/status?lang=en',
+        expect.anything(),
+      )
+      await getHistory({ zone: 'total', bucket: 'hour' }, { base: BASE }).catch(() => undefined)
+      expect(fetch).toHaveBeenLastCalledWith(
+        'http://api.test/api/lots/north/history?zone=total&bucket=hour',
+        expect.anything(),
+      )
+      const lots = { v: 1, default: 'main', lots: [{ id: 'main', name: 'Main' }] }
+      vi.stubGlobal('fetch', reply(200, lots))
+      expect(await getLots({ base: BASE })).toEqual(lots)
+    } finally {
+      localStorage.removeItem('parking.lot')
+    }
   })
 
   it('returns a valid status and lot', async () => {

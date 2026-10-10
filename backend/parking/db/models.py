@@ -131,6 +131,8 @@ class PushSubscription(SQLModel, table=True):
     p256dh: str
     auth: str
     prefs: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    # the lot it follows (multi-lot.md §5); None (older rows) = the default lot
+    lot_id: str | None = None
     tz: str = "UTC"
     lang: str = "en"
     created_at: datetime = _ts()

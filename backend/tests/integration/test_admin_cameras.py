@@ -119,6 +119,7 @@ async def test_camera_list_shows_latest_health_and_ages(tmp_path, clock, worker)
         ground, ramp = r.json()
         assert ground == {
             "id": "cam-ground",
+            "lot": "main",
             "role": "occupancy",
             "zones": ["ground"],
             "state": "unknown",

@@ -20,6 +20,8 @@ No global state library. Live status is a small external store read with `useSyn
 
 Bottom navigation with three tabs: **Live · Alerts · Stats**. Admin is reached via `#/admin`, with no tab.
 
+The header shows the app's name, or, when the server counts more than one lot (`GET /api/lots`), a **lot picker** in its place (`components/LotPicker.tsx`, a `<select>` named *Car park*). The picked lot is kept in `localStorage` (`parking.lot`); every lot request goes through `lotPath` (`src/api/lots.ts`): `/api/lots/<id>/…` for a picked lot, the paths without a lot (the server's default lot) until one is picked. Picking a lot moves the push subscription and reloads the app ([multi-lot.md §6](multi-lot.md#6-the-app)).
+
 ### 2.1 Live (`#/`)
 ```
 ┌──────────────────────────────┐

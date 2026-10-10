@@ -26,6 +26,20 @@ def _reject(rt: Runtime, path: str, message: str, details: list | None = None) -
     return ApiError(422, "bad_request", message, details)
 
 
+def _lot(rt: Runtime, request: Request, camera_id: str, lot_id: str | None) -> Runtime:
+    """The runtime of the camera's lot (camera ids are unique across lots, multi-lot.md §3);
+    422 if the payload names another lot. An unknown camera goes to the default lot, whose
+    store rejects it."""
+    found = rt.of_camera(camera_id)
+    if found is None:
+        return rt
+    own = found.config.lot.id
+    if lot_id is not None and lot_id != own:
+        msg = f"camera '{camera_id}' belongs to lot '{own}', not '{lot_id}'"
+        raise _reject(found, request.url.path, msg)
+    return found
+
+
 async def _parse[M: BaseModel](request: Request, rt: Runtime, model: type[M]) -> M:
     try:
         return model.model_validate_json(await request.body())
@@ -45,6 +59,7 @@ def _schema(model: type[BaseModel]) -> dict:
 @router.post("/observations", status_code=204, openapi_extra=_schema(Observation))
 async def post_observation(request: Request, rt: RuntimeDep) -> Response:
     obs = await _parse(request, rt, Observation)
+    rt = _lot(rt, request, obs.camera_id, obs.lot)
     try:
         await rt.ingestor.observation(obs)
     except UnknownCameraError as e:
@@ -55,6 +70,8 @@ async def post_observation(request: Request, rt: RuntimeDep) -> Response:
 @router.post("/flow-events", response_model=FlowEventAck, openapi_extra=_schema(FlowEventBatch))
 async def post_flow_events(request: Request, rt: RuntimeDep) -> FlowEventAck:
     batch = await _parse(request, rt, FlowEventBatch)
+    for event in batch.events:  # a batch is one camera's; any other one is rejected below
+        rt = _lot(rt, request, event.camera_id, event.lot)
     try:
         return await rt.ingestor.flow_events(batch)
     except UnknownCameraError as e:
@@ -64,6 +81,7 @@ async def post_flow_events(request: Request, rt: RuntimeDep) -> FlowEventAck:
 @router.post("/health", status_code=204, openapi_extra=_schema(CameraHealthMsg))
 async def post_health(request: Request, rt: RuntimeDep) -> Response:
     msg = await _parse(request, rt, CameraHealthMsg)
+    rt = _lot(rt, request, msg.camera_id, msg.lot)
     try:
         await rt.ingestor.health(msg)
     except UnknownCameraError as e:

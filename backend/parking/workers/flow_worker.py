@@ -79,10 +79,11 @@ def load_line_file(cam: Camera, root: Path) -> LineFile:
     return lines
 
 
-def to_event_msg(camera_id: str, ev: FlowEvent) -> FlowEventMsg:
+def to_event_msg(camera_id: str, ev: FlowEvent, lot: str | None = None) -> FlowEventMsg:
     """The api.md flow payload for one counted crossing (a new `event_id` every call)."""
     return FlowEventMsg(
         event_id=str(uuid.uuid4()),
+        lot=lot,
         camera_id=camera_id,
         ts=datetime.fromtimestamp(ev.ts, UTC),
         direction=ev.direction,
@@ -253,7 +254,7 @@ class FlowWorker(Worker):
         return True
 
     def _publish(self, events: list[FlowEvent]) -> None:
-        msgs = [to_event_msg(self.camera_id, ev) for ev in events]
+        msgs = [to_event_msg(self.camera_id, ev, self.lot.lot.id) for ev in events]
         for m in msgs:
             self.counts[m.direction] += 1
             self._summary[m.direction] += 1
@@ -337,6 +338,7 @@ class FlowWorker(Worker):
         else:
             state = "ok"
         return CameraHealthMsg(
+            lot=self.lot.lot.id,
             camera_id=self.camera_id,
             ts=datetime.now(UTC),
             state=state,

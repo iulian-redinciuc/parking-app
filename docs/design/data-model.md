@@ -56,7 +56,7 @@
 ### `zone_minute` / `zone_hour`: rollups for history and stats
 | Column | Type | Notes |
 |--------|------|-------|
-| zone_id | text | PK part (`total` is stored as a pseudo-zone) |
+| zone_id | text | PK part (`total` is stored as a pseudo-zone; with several lots `total` is the default lot's and `total@<lot id>` each other lot's, [multi-lot.md §4](multi-lot.md#4-database)) |
 | bucket_ts | datetime | PK part, start of the minute/hour (UTC) |
 | free_avg | real | time-weighted average |
 | free_min | int | |
@@ -74,6 +74,7 @@ Migration `0005` (P7.5), primary key `(zone_id, bucket_ts)`. `total` = the sum o
 | p256dh | text | |
 | auth | text | |
 | prefs | json | see `Prefs` in [api.md](api.md#2-public-rest-endpoints) |
+| lot_id | text null | the lot it follows; NULL (rows from before) = the default lot; migration `0008` (P9.5) |
 | tz | text | IANA timezone from the browser |
 | lang | text | |
 | created_at | datetime | |

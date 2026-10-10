@@ -155,6 +155,7 @@ class BarrierWorker(Worker):
         return FlowEventMsg(
             event_id=str(uuid.uuid4()),
             source="barrier",
+            lot=self.lot.lot.id,
             camera_id=self.camera_id,
             ts=datetime.fromtimestamp(edge.ts, UTC),
             direction=direction,
@@ -181,6 +182,7 @@ class BarrierWorker(Worker):
     def health_message(self, final: bool = False) -> CameraHealthMsg:
         down = final or self.source is None
         return CameraHealthMsg(
+            lot=self.lot.lot.id,
             camera_id=self.camera_id,
             ts=datetime.now(UTC),
             state="down" if down else "ok",

@@ -5,6 +5,7 @@
 import { API_BASE } from '../api/base'
 import { mockStatus } from '../api/mock'
 import { getRequest, sendJson } from '../api/client'
+import { selectedLot } from '../api/lots'
 import type { LotStatus, SpaceType } from '../api/types'
 import i18n, { t } from '../i18n'
 import { roundDistance } from './geo'
@@ -149,6 +150,13 @@ const isOnMyWayResult = (x: unknown): x is { until: string | null; sent: boolean
 const isTestResult = (x: unknown): x is { sent: boolean; deleted: boolean } =>
   isObject(x) && typeof x.sent === 'boolean' && typeof x.deleted === 'boolean'
 
+/** `{ lot }` for the lot picked on this device (multi-lot.md §5); nothing for the default lot,
+ * which the server then fills in. Sent with every save, so the subscription follows the picker. */
+function followedLot(): { lot?: string } {
+  const lot = selectedLot()
+  return lot === null ? {} : { lot }
+}
+
 function timeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }
@@ -187,12 +195,24 @@ async function currentSubscription(): Promise<PushSubscription | null> {
 }
 
 async function register(sub: PushSubscription, prefs: Prefs, base: string) {
-  const reg = { prefs, tz: timeZone(), lang: i18n.language }
+  const reg = { prefs, tz: timeZone(), lang: i18n.language, ...followedLot() }
   await sendJson('POST', '/api/push/subscriptions', { subscription: sub.toJSON(), ...reg }, isAny, {
     base,
   })
   remember(sub.endpoint, prefs)
   await savePushRegistration(reg).catch(() => undefined) // for `pushsubscriptionchange`
+}
+
+/**
+ * The lot picker chose another lot (already stored): the zones followed were the old lot's, so
+ * every zone again, any on-my-way window is over, and the subscription moves with the next
+ * `PATCH`. A failed save is not an error here: every later save names the lot again.
+ */
+export async function followSelectedLot(base = API_BASE): Promise<void> {
+  const prefs = { ...loadPrefs(), zones: null }
+  setItem(ON_MY_WAY, null)
+  saveLocalPrefs(prefs)
+  if (storedEndpoint()) await updatePrefs(prefs, base).catch(() => undefined)
 }
 
 /** True when this device has a subscription the app registered (and permission still holds). */
@@ -248,11 +268,11 @@ export async function updatePrefs(prefs: Prefs, base = API_BASE): Promise<void> 
     return
   }
   try {
-    await sendJson('PATCH', '/api/push/subscriptions', { endpoint, prefs }, isAny, { base })
+    const body = { endpoint, prefs, ...followedLot() }
+    await sendJson('PATCH', '/api/push/subscriptions', body, isAny, { base })
     remember(endpoint, prefs)
-    await savePushRegistration({ prefs, tz: timeZone(), lang: i18n.language }).catch(
-      () => undefined,
-    )
+    const reg = { prefs, tz: timeZone(), lang: i18n.language, ...followedLot() }
+    await savePushRegistration(reg).catch(() => undefined)
   } catch (err) {
     const e = asPushError(err)
     const sub = e.code === 'gone' ? await currentSubscription().catch(() => null) : null

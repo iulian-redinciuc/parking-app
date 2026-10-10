@@ -3,6 +3,7 @@
 // while SSE is retried every 60 s; hidden tabs close the stream, `online`/`offline` are followed.
 import i18n from '../i18n'
 import { API_BASE, ApiRequestError, IS_MOCK, apiUrl, getStatus } from './client'
+import { lotPath } from './lots'
 import { createMockFeed, mockScenarioFrom } from './mock'
 import type { ApiError, Connection, LiveFeed, LiveState, LotStatus } from './types'
 import { isLotStatus } from './validate'
@@ -133,7 +134,7 @@ export function createLiveFeed(options: LiveOptions = {}): LiveFeed {
 
   function openSse() {
     closeSse()
-    const source = eventSource(apiUrl('/api/stream', lang, base))
+    const source = eventSource(apiUrl(lotPath('/stream'), lang, base))
     es = source
     // `open` alone proves nothing: a buffering proxy (e.g. a Cloudflare quick tunnel) answers
     // with the headers and then never delivers an event, so polling goes on until one arrives

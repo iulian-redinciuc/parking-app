@@ -66,6 +66,15 @@ def send_status(
     return out
 
 
+# The lot ids whose subscriptions a lot's rules serve (None in it: the rows that name no lot);
+# None = every subscription (a single-lot installation). multi-lot.md §5
+Lots = tuple[str | None, ...] | None
+
+
+def of_lots(subs: list[PushSubscription], lots: Lots) -> list[PushSubscription]:
+    return subs if lots is None else [s for s in subs if s.lot_id in lots]
+
+
 class StatusNotifier:
     """Base of the ingest hooks: `dispatch(old, new, now)` runs in a worker thread for every
     change of a free count or level (none for the start-up restore)."""
@@ -80,12 +89,14 @@ class StatusNotifier:
         clock: Clock,
         url: str,
         lock: asyncio.Lock | None = None,
+        lots: Lots = None,
     ):
         self.engine = engine
         self.sender = sender
         self.config = config
         self.clock = clock
         self.url = url
+        self.lots = lots
         self._lock = lock or asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
 

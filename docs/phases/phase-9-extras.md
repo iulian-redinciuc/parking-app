@@ -56,7 +56,16 @@ LOG_LEVEL=DEBUG docker compose -f docker-compose.site.yml -f docker-compose.barr
 
 ## P9.5: Multiple lots
 **Why:** reuse for other locations.
-**Outline:** `lots: [...]` in config; `lot` in every API path (`/api/lots/<id>/status`); a lot picker in the UI; per-lot subscriptions. Payloads already carry `camera_id`, so add `lot` to them.
+**Design note:** [multi-lot.md](../design/multi-lot.md).
+**Files:** `backend/parking/config.py` (`load_lots`, `lot_of_camera`, `total_key`), `api/app.py` + `api/deps.py` (a `Runtime` per lot, `LotDep` / `CameraLotDep` / `ZoneLotDep`), `api/routes/public.py` (`/api/lots`, `/api/lots/{lot}/…`), `routes/internal.py`, `routes/push.py`, `routes/admin.py`, `api/jobs.py` + `db/rollups.py` (a total per lot), `messages.py` (`lot` in worker payloads), `workers/*`, `push/dispatch.py` (`of_lots`), `db/models.py` + migration `0008` (`push_subscription.lot_id`); `frontend/src/api/lots.ts`, `src/components/LotPicker.tsx` (in `Header`), `src/api/client.ts` (`getLots`, lot paths), `src/lib/push.ts`.
+**Steps**
+1. `lots: [...]` in lot.yaml: each entry a lot with its own `zones` and `cameras`; the first is the default lot. Zone and camera ids are unique across the file. The single-lot form keeps working.
+2. `GET /api/lots` and `/api/lots/<id>/status` (`/stream`, `/maps/…`, `/history`, `/forecast`); the paths without a lot answer for the default lot.
+3. Worker payloads carry `lot`; the API routes them by `camera_id` and rejects a wrong `lot`.
+4. A lot picker in the app's header when there is more than one lot.
+5. A push subscription follows one lot (`lot` in the subscribe / PATCH bodies).
+
+**Done when:** with two lots in lot.yaml each has its own live count in the app, chosen with the picker, and a single-lot installation is unchanged. Checked on the dev Pi with a throwaway two-lot API and two workers on the simulated feed (multi-lot.md §8). To add a real second location: [runbook](../runbook.md#add-a-language--zone--camera--lot).
 
 ## P9.6: Smarter forecast
 **Why:** "you'll probably find a space if you arrive at 9:10".

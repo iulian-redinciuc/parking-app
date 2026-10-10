@@ -1,6 +1,8 @@
-"""Public routes (api.md §2): `/healthz`, `/api/lot`, `/api/status`, `/api/stream`,
-`/api/maps/{zone}`, `/api/history`, `/api/forecast`.
+"""Public routes (api.md §2): `/healthz`, `/api/lots`, and per lot `/api/lots/{lot}` with
+`/status`, `/stream`, `/maps/{zone}`, `/history`, `/forecast` under it.
 
+The paths from before there were several lots (`/api/lot`, `/api/status`, `/api/stream`,
+`/api/maps/{zone}`, `/api/history`, `/api/forecast`) answer for the default lot.
 All share the public GET rate limit; zone names follow `?lang=` / `Accept-Language`.
 """
 
@@ -17,7 +19,15 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import text
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from parking.api.deps import DEFAULT_LANG, ApiError, LangDep, Runtime, RuntimeDep, public_limit
+from parking.api.deps import (
+    DEFAULT_LANG,
+    ApiError,
+    LangDep,
+    LotDep,
+    Runtime,
+    RuntimeDep,
+    public_limit,
+)
 from parking.api.sse import RETRY_MS, Broadcaster
 from parking.db import history as hist
 from parking.db.engine import session_scope
@@ -60,44 +70,60 @@ def _db_ok(rt: Runtime) -> bool:
 @router.get("/healthz")
 async def healthz(rt: RuntimeDep) -> dict:
     """200 while the API is alive, even with cameras down (api.md §2)."""
-    health = rt.store.health
-    stats = rt.ingestor.stats
+    lots = rt.all  # the cameras and the counters of every lot
+    cameras = [(lot, c) for lot in lots for c in lot.config.cameras]
+    stats = [lot.ingestor.stats for lot in lots]
+    streams = [lot.broadcaster for lot in lots]
     return {
         "status": "ok",
         "db": await anyio.to_thread.run_sync(_db_ok, rt),
         "cameras": {
-            c.id: health[c.id].state if c.id in health else "unknown" for c in rt.config.cameras
+            c.id: lot.store.health[c.id].state if c.id in lot.store.health else "unknown"
+            for lot, c in cameras
         },
-        "restarts": {c.id: rt.ingestor.restarts.get(c.id, 0) for c in rt.config.cameras},
+        "restarts": {c.id: lot.ingestor.restarts.get(c.id, 0) for lot, c in cameras},
         "ingest": {
-            "observations": stats.observations,
-            "flow_events": stats.flow_events,
-            "health": stats.health,
-            "rejected": stats.rejected,
-            "db_errors": stats.db_errors,
+            "observations": sum(s.observations for s in stats),
+            "flow_events": sum(s.flow_events for s in stats),
+            "health": sum(s.health for s in stats),
+            "rejected": sum(s.rejected for s in stats),
+            "db_errors": sum(s.db_errors for s in stats),
         },
         "stream": {
-            "clients": rt.broadcaster.clients,
-            "published": rt.broadcaster.published,
-            "dropped": rt.broadcaster.dropped,
+            "clients": sum(b.clients for b in streams),
+            "published": sum(b.published for b in streams),
+            "dropped": sum(b.dropped for b in streams),
         },
     }
 
 
+@router.get("/api/lots")
+async def lots(rt: RuntimeDep) -> dict:
+    """The lots this server counts, in lot.yaml order, for the app's lot picker."""
+    return {
+        "v": 1,
+        "default": rt.config.lot.id,
+        "lots": [{"id": lot.config.lot.id, "name": lot.config.lot.name} for lot in rt.all],
+    }
+
+
+@router.get("/api/lots/{lot}")
 @router.get("/api/lot")
-async def lot(rt: RuntimeDep, lang: LangDep, response: Response) -> dict:
-    """Static lot info (api.md §2); `LOT_LAT`/`LOT_LON` from the settings win over lot.yaml."""
+async def lot(rt: LotDep, lang: LangDep, response: Response) -> dict:
+    """Static lot info (api.md §2); `LOT_LAT`/`LOT_LON` from the settings win over lot.yaml
+    for the default lot."""
     cfg = rt.config
     loc = cfg.lot.location
     s = rt.settings
+    default = rt is rt.all[0]
     response.headers["Vary"] = "Accept-Language"
     return {
         "v": 1,
         "id": cfg.lot.id,
         "name": cfg.lot.name,
         "location": {
-            "lat": s.lot_lat if s.lot_lat is not None else loc.lat,
-            "lon": s.lot_lon if s.lot_lon is not None else loc.lon,
+            "lat": s.lot_lat if default and s.lot_lat is not None else loc.lat,
+            "lon": s.lot_lon if default and s.lot_lon is not None else loc.lon,
         },
         "notify_radius_m": cfg.lot.notify_radius_m,
         "timezone": cfg.lot.timezone,
@@ -116,8 +142,9 @@ async def lot(rt: RuntimeDep, lang: LangDep, response: Response) -> dict:
     }
 
 
+@router.get("/api/lots/{lot}/status", response_model=LotStatus)
 @router.get("/api/status", response_model=LotStatus)
-async def status(rt: RuntimeDep, lang: LangDep, response: Response) -> LotStatus:
+async def status(rt: LotDep, lang: LangDep, response: Response) -> LotStatus:
     """The current `LotStatus`; 503 until the first data (or a restore from the DB)."""
     if not rt.store.has_data:
         raise ApiError(503, "unavailable", "no data received yet since start-up")
@@ -136,8 +163,9 @@ def _read_map(path) -> bytes | None:
         return None
 
 
+@router.get("/api/lots/{lot}/maps/{zone_id}")
 @router.get("/api/maps/{zone_id}")
-async def zone_map(zone_id: str, rt: RuntimeDep) -> Response:
+async def zone_map(zone_id: str, rt: LotDep) -> Response:
     """The zone's slot map as stored (slot-map.md); 404 for a zone without one."""
     zone = next((z for z in rt.config.zones if z.id == zone_id), None)
     if zone is None:
@@ -180,8 +208,9 @@ async def _events(
         log.debug("stream client gone (%d)", broadcaster.clients)
 
 
+@router.get("/api/lots/{lot}/stream")
 @router.get("/api/stream")
-async def stream(rt: RuntimeDep, lang: LangDep) -> EventSourceResponse:
+async def stream(rt: LotDep, lang: LangDep) -> EventSourceResponse:
     """Live `LotStatus` events over SSE (api.md §3); 503 above the client cap."""
     if rt.broadcaster.full:
         raise ApiError(503, "unavailable", "too many live clients, try again later")
@@ -206,13 +235,19 @@ def _zone_capacity(rt: Runtime, zone: str) -> int:
     return rt.store.capacity[zone]
 
 
+def _rollup_id(rt: Runtime, zone: str) -> str:
+    """The zone's id in the rollup tables: `total` is this lot's own pseudo-zone there."""
+    return rt.total_key if zone == TOTAL else zone
+
+
 def _utc(ts: datetime) -> datetime:
     return ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
 
 
+@router.get("/api/lots/{lot}/history")
 @router.get("/api/history")
 async def history(
-    rt: RuntimeDep,
+    rt: LotDep,
     response: Response,
     zone: Annotated[str, Query(max_length=64, description="A zone id or `total`.")] = TOTAL,
     start: Annotated[datetime | None, Query(alias="from")] = None,
@@ -240,7 +275,7 @@ async def history(
 
     def load() -> list[hist.HistoryPoint]:
         with session_scope(rt.engine) as session:
-            return hist.history(session, zone, start_ts, end_ts, bucket, tz)
+            return hist.history(session, _rollup_id(rt, zone), start_ts, end_ts, bucket, tz)
 
     points = await anyio.to_thread.run_sync(load)
     body = {
@@ -263,9 +298,10 @@ async def history(
     return body
 
 
+@router.get("/api/lots/{lot}/forecast")
 @router.get("/api/forecast")
 async def forecast(
-    rt: RuntimeDep,
+    rt: LotDep,
     response: Response,
     zone: Annotated[str, Query(max_length=64, description="A zone id or `total`.")] = TOTAL,
     at: Annotated[datetime | None, Query(description="Default: now + 30 min.")] = None,
@@ -280,7 +316,7 @@ async def forecast(
 
         def load() -> list[float]:
             with session_scope(rt.engine) as session:
-                return hist.forecast_values(session, zone, at_ts, tz)
+                return hist.forecast_values(session, _rollup_id(rt, zone), at_ts, tz)
 
         values = await anyio.to_thread.run_sync(load)
         cached = (at_ts, len(values), hist.expected_free(values, capacity))

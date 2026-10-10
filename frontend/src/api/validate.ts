@@ -4,6 +4,7 @@ import type {
   Forecast,
   History,
   LotInfo,
+  LotList,
   LotStatus,
   Totals,
   ZoneStatus,
@@ -83,6 +84,16 @@ export function isLotStatus(x: unknown): x is LotStatus {
     isTotals(x.total) &&
     Array.isArray(x.zones) &&
     x.zones.every(isZoneStatus)
+  )
+}
+
+export function isLotList(x: unknown): x is LotList {
+  return (
+    isObj(x) &&
+    x.v === 1 &&
+    isStr(x.default) &&
+    Array.isArray(x.lots) &&
+    x.lots.every((lot) => isObj(lot) && isStr(lot.id) && isStr(lot.name))
   )
 }
 

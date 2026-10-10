@@ -126,6 +126,33 @@ api:
     filling: 0.05
 ```
 
+### Several lots: `lots:`
+
+One file can describe several car parks ([multi-lot.md](multi-lot.md)). Then the top-level `lot:`, `zones:` and `cameras:` are replaced by a list, each entry being a lot's own fields plus its zones and cameras; `version:` and `api:` stay at the top and are shared:
+
+```yaml
+version: 1
+lots:
+  - id: main                       # the first lot is the default lot
+    name: "Main street"
+    location: { lat: ${LOT_LAT}, lon: ${LOT_LON} }
+    timezone: ${TZ}
+    zones: [...]                   # as `zones:` above
+    cameras: [...]                 # as `cameras:` above
+  - id: north
+    name: "North gate"
+    location: { lat: ${NORTH_LAT}, lon: ${NORTH_LON} }
+    timezone: ${TZ}
+    zones: [...]
+    cameras: [...]
+api: { ... }
+```
+
+- `lots:` can't be combined with a top-level `lot`, `zones` or `cameras`; it needs at least one entry. Each entry follows the rules below as a lot of its own; an error names it (`lots[1] (north): …`).
+- Lot ids are unique, and **zone ids and camera ids are unique across all lots** (two lots can't both have `ground`).
+- The first entry is the default lot: the API paths without a lot, `LOT_LAT` / `LOT_LON` overrides and the rollup id `total` are its. Keep it first.
+- `load_lots(path)` returns one `LotConfig` per lot (a single-lot file gives one); `load_config(path, camera=…)` the lot a camera belongs to, else the default lot. Workers and the CLI's `--camera` / `--zone` commands find the lot from the id.
+
 ### Loader rules (`parking/config.py`)
 - `${VAR}` is replaced from the environment **before** YAML parsing. A missing variable is an error, unless it's used in a commented-out line.
 - Validation (pydantic), with the error naming the field:

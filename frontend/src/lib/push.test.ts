@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { selectLot } from '../api/lots'
 import { mockStatus } from '../api/mock'
 import {
   cancelOnMyWay,
   DEFAULT_PREFS,
+  followSelectedLot,
   formatCountdown,
   onMyWayUntil,
   startOnMyWay,
@@ -223,6 +225,26 @@ describe('after subscribing (with a server)', () => {
       },
     ])
     expect(loadPrefs()).toEqual(prefs)
+  })
+
+  it('moves the subscription when another lot is picked (multi-lot.md §5)', async () => {
+    await updatePrefs({ ...DEFAULT_PREFS, zones: ['ground'] }, API)
+    localStorage.setItem('parking.onMyWayUntil', String(Date.now() + 60_000))
+    const calls = stubFetch(api)
+    selectLot('north')
+    await followSelectedLot(API)
+    expect(calls).toEqual([
+      {
+        url: `${API}/api/push/subscriptions`,
+        method: 'PATCH',
+        body: { endpoint: ENDPOINT, lot: 'north', prefs: DEFAULT_PREFS },
+      },
+    ])
+    expect(loadPrefs().zones).toBeNull()
+    expect(onMyWayUntil()).toBeNull()
+    expect(swPush.savePushRegistration).toHaveBeenLastCalledWith(
+      expect.objectContaining({ lot: 'north' }),
+    )
   })
 
   it('re-registers when the server forgot this device (404)', async () => {

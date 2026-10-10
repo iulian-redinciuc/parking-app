@@ -7,7 +7,7 @@ What to do when the running system misbehaves, and how to do the routine jobs: s
 | [The app can't reach the server](#the-app-shows-cant-reach-the-parking-server) | [Deploy a new version / roll back](#deploy-a-new-version--roll-back) | [Backups](#backups) |
 | [A zone is stale / a camera is down](#a-zone-is-stale--a-camera-is-down) | [Restore from backup](#restore-from-backup) | [Privacy check](#privacy-check) |
 | [Counts are wrong (occupancy)](#counts-are-wrong-occupancy-camera) | [Rotate a secret](#rotate-a-secret) | [Security check](#security-check) |
-| [Counts are drifting (flow)](#counts-are-drifting-flow-camera) | [Add a language / zone / camera](#add-a-language--zone--camera) | [Power and network drills](#power-and-network-drills) |
+| [Counts are drifting (flow)](#counts-are-drifting-flow-camera) | [Add a language / zone / camera / lot](#add-a-language--zone--camera--lot) | [Power and network drills](#power-and-network-drills) |
 | [Camera shifted](#camera-shifted) | [Rebuild the dev environment](#rebuild-the-dev-environment) | [Staging week and go-live](#staging-week-and-go-live) |
 | [An alert arrived](#alerts) | | |
 
@@ -279,7 +279,7 @@ print(c.execute('delete from admin_session').rowcount, 'sessions ended'); c.comm
 
 A secret that was pushed to the public repository counts as leaked even if the commit is removed: rotate it first ([security-privacy.md §3](design/security-privacy.md#3-public-repo-rules)). After any rotation run the [security check](#security-check).
 
-## Add a language / zone / camera
+## Add a language / zone / camera / lot
 
 Each of these is a change in the repository, released and deployed like any [new version](#deploy-a-new-version--roll-back), except for the files in `/opt/parking/config/`, which are edited on the machines.
 
@@ -302,6 +302,13 @@ Each of these is a change in the repository, released and deployed like any [new
 5. `$DC up -d` on the lot box, `docker restart parking-api` on the server. Check: `$P grab --camera <id> --out data/reference/<id>.jpg`, then *Admin* shows the camera `ok`.
 6. Draw its spaces or lines: *Admin* → the camera → *Edit parking spaces* / *Edit counting lines* → *Save* (copy the file to the lot box), then *Save reference frame*. Count by hand once and compare.
 7. Each worker needs about 1 CPU core and 1.2 GB of memory (`VISION_*` / `FLOW_*` in `.env`): watch `docker stats --no-stream` and the *CPU is hot* alert for a day ([hardware.md](design/hardware.md)).
+
+**A lot** (another car park on the same server and app; [multi-lot.md](design/multi-lot.md)):
+1. On the server, turn `lot.yaml` into the `lots:` form if it isn't yet: the existing `lot:` block becomes the **first** entry of `lots:` with its `zones:` and `cameras:` moved inside it (indent them); `version:` and `api:` stay at the top. Nothing in the database changes. Never move another lot in front of the first one.
+2. Add the new lot after it: `id`, `name`, `location` (through its own `${NORTH_LAT}` / `${NORTH_LON}`, added to the server's `.env`), `timezone`, its `zones` and `cameras`. **Zone and camera ids must be new across the whole file** (`north-ground`, `cam-north`), also in the slot and line files.
+3. `docker restart parking-api`, then `docker logs parking-api | grep "API ready"` shows one line per lot (a mistake in the file is the last line of the log instead, and the API doesn't start: fix it and restart).
+4. The location's lot box: provision it like the first ([deployment.md §10](design/deployment.md#10-provisioning-the-production-machines-t2)), with the override of [deployment.md §4.5](design/deployment.md#45-several-lots-p95) naming its cameras. Then the camera steps above (5–7) for each of its cameras.
+5. Check: `curl -s https://<host>/api/lots` lists both, `curl -s https://<host>/api/lots/<id>/status` answers once its worker reports, and the app (reload it) shows the picker in the header. Existing users stay on the first lot until they pick the other one.
 
 ## Rebuild the dev environment
 

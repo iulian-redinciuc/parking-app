@@ -315,6 +315,27 @@ docker logs -f parking-barrier       # "contacts open (in, out)", then one line 
 
 Keep the same `-f` files and the profile in every later command. A `contacts:` source (a replayed file) needs neither the override nor `GPIO_GID`. The dev override (`docker-compose.dev.yml`) builds the service's image locally like the other workers'.
 
+### 4.5 Several lots (P9.5)
+
+One server (API, database, app) serves every lot of `lot.yaml` ([multi-lot.md](multi-lot.md)); nothing in the server's Compose file changes when a lot is added, only its `lot.yaml` (then `docker restart parking-api`).
+
+Each location has its own lot box with `docker-compose.site.yml`, the same `WORKER_TOKEN`, its own VPN address and its own camera URLs in `.env`. The site file's services name the first lot's cameras (`cam-ground`, `cam-ramp`, `barrier-ramp`), so another lot's box gets an override next to it, kept on that machine:
+
+```yaml
+# /opt/parking/deploy/docker-compose.lot.yml on the lot box of lot `north`
+services:
+  vision-occupancy:
+    command: ["occupancy", "--camera", "cam-north"]
+  vision-flow:
+    command: ["flow", "--camera", "cam-north-ramp"]
+```
+
+```bash
+docker compose -f docker-compose.site.yml -f docker-compose.lot.yml up -d    # the same -f files in every later command
+```
+
+Its `lot.yaml` is the server's file (or only that lot's part of it): a worker reads the lot its camera belongs to and sends the lot id with every payload; the server rejects a payload whose `lot` isn't the camera's. In the server's file each camera's `control_url` points at its own lot box (`http://10.77.0.3:9000` for the second box). Two lots on one machine (a dev set-up) need a second worker service under another name, as for [adding a camera](../runbook.md#add-a-language--zone--camera--lot).
+
 ## 5. Public access for the API
 
 Only `/api/*` and `/healthz` may be reachable from the internet. `/internal/*` and the workers' `/control/*` must never be.

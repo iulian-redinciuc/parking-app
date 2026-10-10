@@ -38,9 +38,11 @@ from sqlmodel import col, select
 
 from parking.api.deps import (
     ApiError,
+    CameraLotDep,
     LangDep,
     Runtime,
     RuntimeDep,
+    ZoneLotDep,
     public_limit,
     rate_limit,
     runtime,
@@ -210,9 +212,9 @@ async def cameras(_: AdminDep, rt: RuntimeDep) -> list[dict]:
     frame keeps ageing; `last_health_age_s` is the time since the message itself."""
     now = rt.store.clock.now()
     out = []
-    for camera in rt.config.cameras:
-        msg = rt.store.health.get(camera.id)
-        seen = rt.ingestor.health_seen(camera.id)
+    for lot, camera in ((r, c) for r in rt.all for c in r.config.cameras):
+        msg = lot.store.health.get(camera.id)
+        seen = lot.ingestor.health_seen(camera.id)
         since = (now - seen).total_seconds() if seen else None
         frame_age = msg.last_frame_age_s if msg else None
         if frame_age is not None and since is not None:
@@ -220,6 +222,7 @@ async def cameras(_: AdminDep, rt: RuntimeDep) -> list[dict]:
         out.append(
             {
                 "id": camera.id,
+                "lot": lot.config.lot.id,
                 "role": camera.role,
                 "zones": camera.zones,
                 "state": msg.state if msg else "unknown",
@@ -273,7 +276,9 @@ def _worker_message(r: httpx.Response) -> str:
 
 
 @router.get("/cameras/{camera_id}/snapshot", dependencies=[Depends(public_limit)])
-async def snapshot(camera_id: str, _: AdminDep, rt: RuntimeDep, annotated: bool = True) -> Response:
+async def snapshot(
+    camera_id: str, _: AdminDep, rt: CameraLotDep, annotated: bool = True
+) -> Response:
     """The worker's current frame as JPEG (annotated with its last analysis by default).
 
     Unknown camera 404; no `control_url` / `WORKER_TOKEN`, a worker that doesn't answer in
@@ -364,13 +369,13 @@ def _bad(message: str) -> ApiError:
 
 
 @router.get("/cameras/{camera_id}/slots", dependencies=[Depends(public_limit)])
-async def get_slots(camera_id: str, _: AdminDep, rt: RuntimeDep) -> dict:
+async def get_slots(camera_id: str, _: AdminDep, rt: CameraLotDep) -> dict:
     """The camera's slot file as stored (config.md §2)."""
     return await _read_config(rt, camera_id, "slots")
 
 
 @router.put("/cameras/{camera_id}/slots", dependencies=[Depends(public_limit)])
-async def put_slots(camera_id: str, body: SlotFile, admin: AdminDep, rt: RuntimeDep) -> dict:
+async def put_slots(camera_id: str, body: SlotFile, admin: AdminDep, rt: CameraLotDep) -> dict:
     """Validates like `load_slots` plus: the path's camera, its zones, slot ids unique across
     the lot. Writes the file (old one kept as `.bak`), reloads the worker, and updates the
     API's slot ids and capacities (published to the live stream)."""
@@ -395,13 +400,13 @@ async def put_slots(camera_id: str, body: SlotFile, admin: AdminDep, rt: Runtime
 
 
 @router.get("/cameras/{camera_id}/lines", dependencies=[Depends(public_limit)])
-async def get_lines(camera_id: str, _: AdminDep, rt: RuntimeDep) -> dict:
+async def get_lines(camera_id: str, _: AdminDep, rt: CameraLotDep) -> dict:
     """The camera's line file as stored (config.md §3)."""
     return await _read_config(rt, camera_id, "lines")
 
 
 @router.put("/cameras/{camera_id}/lines", dependencies=[Depends(public_limit)])
-async def put_lines(camera_id: str, body: LineFile, admin: AdminDep, rt: RuntimeDep) -> dict:
+async def put_lines(camera_id: str, body: LineFile, admin: AdminDep, rt: CameraLotDep) -> dict:
     """Validates like `load_lines` (plus the path's camera), writes with a `.bak`, reloads."""
     camera = _camera(rt, camera_id)
     _config_path(rt, camera, "lines")
@@ -413,7 +418,7 @@ async def put_lines(camera_id: str, body: LineFile, admin: AdminDep, rt: Runtime
 
 
 @router.post("/cameras/{camera_id}/reference-frame", dependencies=[Depends(public_limit)])
-async def reference_frame(camera_id: str, admin: AdminDep, rt: RuntimeDep) -> dict:
+async def reference_frame(camera_id: str, admin: AdminDep, rt: CameraLotDep) -> dict:
     """The worker saves its current frame as the shift-detection reference (vision.md §6).
     Before its first frame 409; unreachable or any other error 503."""
     camera = _camera(rt, camera_id)
@@ -440,7 +445,7 @@ class CorrectBody(BaseModel):
 
 @router.post("/zones/{zone_id}/correct", dependencies=[Depends(public_limit)])
 async def correct_zone(
-    zone_id: str, body: CorrectBody, admin: AdminDep, rt: RuntimeDep, lang: LangDep
+    zone_id: str, body: CorrectBody, admin: AdminDep, rt: ZoneLotDep, lang: LangDep
 ) -> ZoneStatus:
     """Sets a `flow` zone's count (the entry/exit counter drifts; slots/count zones are
     measured, so 409). Above the capacity 422. Writes a `correction` row with the caller as
@@ -470,7 +475,7 @@ async def corrections(
         with session_scope(rt.engine) as session:
             return [row.model_dump() for row in repo.recent_corrections(session, limit)]
 
-    names = {z.id: z.display_name(lang) for z in rt.config.zones}
+    names = {z.id: z.display_name(lang) for lot in rt.all for z in lot.config.zones}
     return [
         {
             "id": row["id"],
@@ -550,7 +555,7 @@ async def alerts(
     or missing endpoint), whether push is on (`available`) and the open issues."""
     enabled = await anyio.to_thread.run_sync(_subscription, rt, endpoint) if endpoint else None
     now = rt.store.clock.now()
-    issues = rt.alerts.tracker.issues(now) if rt.alerts is not None else []
+    issues = [i for lot in rt.all if lot.alerts for i in lot.alerts.tracker.issues(now)]
     for issue in issues:
         issue["since"] = format_ts(issue["since"])
         if issue["last_alert_at"] is not None:

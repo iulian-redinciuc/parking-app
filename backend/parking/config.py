@@ -463,9 +463,59 @@ def _read(path: str | Path) -> str:
     return path.read_text()
 
 
-def load_config(path: str | Path, env: dict[str, str] | None = None) -> LotConfig:
-    """Load lot.yaml; `${VAR}` comes from `env` (default: the process environment)."""
-    return LotConfig.model_validate(yaml.safe_load(interpolate_env(_read(path), env)))
+def load_lots(path: str | Path, env: dict[str, str] | None = None) -> list[LotConfig]:
+    """Every lot of lot.yaml, each as its own `LotConfig`; the first one is the default lot.
+
+    The file describes one lot (`lot:`, `zones:`, `cameras:`) or several (`lots:`, each entry
+    a lot with its own `zones` and `cameras`; `version` and `api` are shared). Zone and camera
+    ids are unique across the whole file (docs/design/multi-lot.md §2).
+    """
+    raw = yaml.safe_load(interpolate_env(_read(path), env))
+    if not isinstance(raw, dict) or "lots" not in raw:
+        return [LotConfig.model_validate(raw)]
+    clash = [key for key in ("lot", "zones", "cameras") if key in raw]
+    if clash:
+        raise ConfigError(f"lots: can't be combined with top-level {', '.join(clash)}")
+    entries = raw["lots"]
+    if not isinstance(entries, list) or not entries:
+        raise ConfigError("lots: must be a list with at least one lot")
+    shared = {key: value for key, value in raw.items() if key != "lots"}
+    lots = []
+    for n, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"lots[{n}]: must be a mapping")
+        lot = {k: v for k, v in entry.items() if k not in ("zones", "cameras")}
+        body = {**shared, "lot": lot, "zones": entry.get("zones", [])}
+        if "cameras" in entry:
+            body["cameras"] = entry["cameras"]
+        try:
+            lots.append(LotConfig.model_validate(body))
+        except ValueError as e:
+            raise ConfigError(f"lots[{n}] ({lot.get('id', '?')}): {e}") from None
+    _require_unique("lot", [c.lot.id for c in lots])
+    _require_unique("zone", [z.id for c in lots for z in c.zones])
+    _require_unique("camera", [cam.id for c in lots for cam in c.cameras])
+    return lots
+
+
+def lot_of_camera(lots: list[LotConfig], camera_id: str) -> LotConfig:
+    """The lot `camera_id` belongs to; the default lot if no lot has it."""
+    return next((c for c in lots if any(cam.id == camera_id for cam in c.cameras)), lots[0])
+
+
+def load_config(
+    path: str | Path, env: dict[str, str] | None = None, camera: str | None = None
+) -> LotConfig:
+    """Load lot.yaml; `${VAR}` comes from `env` (default: the process environment). Of a file
+    with several lots: the one `camera` belongs to, else the default (first) lot."""
+    lots = load_lots(path, env)
+    return lot_of_camera(lots, camera) if camera else lots[0]
+
+
+def total_key(lots: list[LotConfig], lot_id: str) -> str:
+    """The id of a lot's `total` pseudo-zone in the rollup tables: `total` for the default
+    lot (so a single-lot database stays as it is), `total@<lot>` for the others."""
+    return "total" if lot_id == lots[0].lot.id else f"total@{lot_id}"
 
 
 def read_env_file(path: str | Path) -> dict[str, str]:

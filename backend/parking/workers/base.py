@@ -28,7 +28,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from parking.config import Camera, ConfigError, LotConfig, Settings, cli_env, load_config
+from parking.config import (
+    Camera,
+    ConfigError,
+    LotConfig,
+    Settings,
+    cli_env,
+    load_lots,
+    lot_of_camera,
+)
 from parking.core.system import system_stats
 from parking.messages import CameraHealthMsg
 from parking.workers.api_client import ApiClient
@@ -49,9 +57,10 @@ def load_camera(config_path: Path, camera_id: str, role: str) -> tuple[LotConfig
     """Load lot.yaml (`${VAR}` from deploy/.env.example < deploy/.env < environment)."""
     root = config_path.resolve().parent.parent
     try:
-        lot = load_config(config_path, cli_env(root))
+        lots = load_lots(config_path, cli_env(root))
     except (ConfigError, ValueError, OSError) as e:
         raise WorkerError(f"{config_path}: {e}") from None
+    lot = lot_of_camera(lots, camera_id)  # of a file with several lots: the camera's own
     cams = {c.id: c for c in lot.cameras}
     if camera_id not in cams:
         raise WorkerError(

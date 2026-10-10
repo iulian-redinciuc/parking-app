@@ -32,7 +32,7 @@ from parking.core.clock import Clock
 from parking.db.engine import session_scope
 from parking.db.models import NotificationLog, PushSubscription
 from parking.messages import LotStatus
-from parking.push.dispatch import StatusNotifier, send_status
+from parking.push.dispatch import Lots, StatusNotifier, of_lots, send_status
 from parking.push.rules import (
     ALMOST_FULL_COOLDOWN,
     SCHEDULE_CATCH_UP,
@@ -51,10 +51,11 @@ ALMOST_FULL = "almost_full"
 JOB_MISFIRE_S = 30
 
 
-def _subscriptions(engine: Engine, wanted) -> list[PushSubscription]:
-    """Every subscription whose prefs pass `wanted` (prefs are JSON: filtered here)."""
+def _subscriptions(engine: Engine, wanted, lots: Lots = None) -> list[PushSubscription]:
+    """Every subscription of `lots` whose prefs pass `wanted` (prefs are JSON: filtered here)."""
     with session_scope(engine) as session:
-        subs = [s for s in session.exec(select(PushSubscription)) if wanted(s.prefs or {})]
+        rows = of_lots(list(session.exec(select(PushSubscription))), lots)
+        subs = [s for s in rows if wanted(s.prefs or {})]
         for sub in subs:
             session.expunge(sub)
     return subs
@@ -83,7 +84,9 @@ class PushScheduler:
         url: str,
         status: Callable[[], LotStatus | None],
         lock: asyncio.Lock | None = None,
+        lots: Lots = None,
     ):
+        self.lots = lots
         self.engine = engine
         self.sender = sender
         self.config = config
@@ -125,7 +128,7 @@ class PushScheduler:
 
     def run_due(self, start: datetime, end: datetime, now: datetime) -> list[SendResult]:
         """Send the reminders due in `(start, end]`."""
-        subs = _subscriptions(self.engine, lambda p: p.get("schedules"))
+        subs = _subscriptions(self.engine, lambda p: p.get("schedules"), self.lots)
         due = [s for s in subs if schedule_instants(s, start, end)]
         if not due:
             return []
@@ -148,7 +151,7 @@ class AlmostFullNotifier(StatusNotifier):
     name = "almost-full"
 
     def dispatch(self, old: LotStatus, new: LotStatus, now: datetime) -> list[SendResult]:
-        subs = _subscriptions(self.engine, lambda p: p.get("alert_when_almost_full"))
+        subs = _subscriptions(self.engine, lambda p: p.get("alert_when_almost_full"), self.lots)
         hit = [s for s in subs if almost_full_zones(s, old, new)]
         if not hit:
             return []

@@ -75,6 +75,13 @@ export interface LotInfo {
   privacy?: { operator: string | null; contact: string | null }
 }
 
+/** `GET /api/lots`: the lots of this server, the default one first. */
+export interface LotList {
+  v: 1
+  default: string
+  lots: { id: string; name: string }[]
+}
+
 export type HistoryBucket = 'minute' | 'hour' | 'day'
 
 /** One bucket of `GET /api/history`; `t` = bucket start (UTC). */

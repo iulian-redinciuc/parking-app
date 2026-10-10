@@ -2,8 +2,10 @@
 subscription store, plus "I'm on my way" and a test push.
 
 A subscription is found by its `endpoint` (the browser's push URL, unique and unguessable);
-every call with an endpoint updates `last_seen_at`. POSTs share the push budget (20/hour per
-IP), the test push has its own 3/hour per endpoint; GET, PATCH and DELETE use the public budget.
+every call with an endpoint updates `last_seen_at`. It follows one lot (`lot`, default: the
+default lot; multi-lot.md §5): that lot's zones, counts and rules. POSTs share the push budget
+(20/hour per IP), the test push has its own 3/hour per endpoint; GET, PATCH and DELETE use the
+public budget.
 Without VAPID keys in `.env` the key and the sending routes answer 503.
 """
 
@@ -22,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlmodel import select
 
 from parking.api.deps import ApiError, RateLimiter, Runtime, RuntimeDep, public_limit, rate_limit
+from parking.config import ID_PATTERN
 from parking.db.engine import session_scope
 from parking.db.models import PushSubscription
 from parking.messages import SPACE_TYPES, LotStatus, SpaceType, format_ts
@@ -108,8 +111,12 @@ def _check_tz(tz: str) -> str:
     return tz
 
 
+LotId = Annotated[str | None, Field(default=None, max_length=64, pattern=ID_PATTERN)]
+
+
 class SubscribeBody(Body):
     subscription: SubscriptionJson
+    lot: LotId  # the lot to follow; None = the default lot
     prefs: Prefs = Field(default_factory=Prefs)
     tz: str = Field(default="UTC", min_length=1, max_length=64)
     lang: str = Field(default="en", min_length=2, max_length=35, pattern=r"^[A-Za-z]{2,8}(-\w+)*$")
@@ -122,6 +129,7 @@ class SubscribeBody(Body):
 
 class PrefsBody(Body):
     endpoint: Endpoint
+    lot: LotId  # move the subscription to this lot; None = it stays where it is
     prefs: Prefs
 
 
@@ -142,6 +150,33 @@ class OnMyWayBody(Body):
 
 
 # --- helpers ---
+
+
+def _lot(rt: Runtime, lot_id: str | None) -> Runtime:
+    """The runtime of the lot a body names (None = the default lot); 422 for an unknown one."""
+    if lot_id is None:
+        return rt
+    found = rt.lots.get(lot_id)
+    if found is None:
+        msg = f"unknown lot '{lot_id}'"
+        details = [{"type": "value_error", "loc": ["body", "lot"], "msg": msg}]
+        raise ApiError(422, "bad_request", f"lot: {msg}", details)
+    return found
+
+
+def _lot_of(rt: Runtime, sub: PushSubscription) -> Runtime:
+    """The runtime of the subscription's lot; the default lot's if it names none (or one that
+    is gone from lot.yaml)."""
+    return rt.lots.get(sub.lot_id or "", rt)
+
+
+def _find(rt: Runtime, endpoint: str) -> PushSubscription | None:
+    with session_scope(rt.engine) as session:
+        query = select(PushSubscription).where(PushSubscription.endpoint == endpoint)
+        sub = session.exec(query).first()
+        if sub is not None:
+            session.expunge(sub)
+        return sub
 
 
 def _check_zones(rt: Runtime, prefs: Prefs) -> None:
@@ -210,7 +245,8 @@ async def vapid_public_key(rt: RuntimeDep) -> dict:
 @router.post("/subscriptions", status_code=201, dependencies=[Depends(push_limit)])
 async def subscribe(body: SubscribeBody, rt: RuntimeDep) -> dict:
     """Create the subscription, or update the one with this endpoint (same id)."""
-    _check_zones(rt, body.prefs)
+    lot = _lot(rt, body.lot)
+    _check_zones(lot, body.prefs)
     sub = body.subscription
     now = rt.store.clock.now()
 
@@ -225,6 +261,8 @@ async def subscribe(body: SubscribeBody, rt: RuntimeDep) -> dict:
                 session.add(row)
             row.p256dh, row.auth = sub.keys.p256dh, sub.keys.auth
             row.prefs, row.tz, row.lang = body.prefs.stored(), body.tz, body.lang
+            if row.lot_id != lot.config.lot.id:  # another lot: its on-my-way window ends
+                row.lot_id, row.on_my_way_until = lot.config.lot.id, None
             row.last_seen_at, row.failures = now, 0
             return row.id
 
@@ -233,13 +271,20 @@ async def subscribe(body: SubscribeBody, rt: RuntimeDep) -> dict:
 
 @router.patch("/subscriptions", dependencies=[Depends(public_limit)])
 async def update_prefs(body: PrefsBody, rt: RuntimeDep) -> dict:
-    """Replace the preferences of a subscription."""
-    _check_zones(rt, body.prefs)
-    prefs = body.prefs.stored()
-    sub = await anyio.to_thread.run_sync(lambda: _touch(rt, body.endpoint, prefs=prefs))
+    """Replace the preferences of a subscription; with `lot`, also move it to that lot (its
+    on-my-way window ends)."""
+    sub = await anyio.to_thread.run_sync(_find, rt, body.endpoint)
     if sub is None:
         raise _not_found()
-    return {"id": sub.id, "prefs": sub.prefs}
+    lot = _lot(rt, body.lot) if body.lot is not None else _lot_of(rt, sub)
+    _check_zones(lot, body.prefs)
+    changes: dict = {"prefs": body.prefs.stored()}
+    if body.lot is not None and lot is not _lot_of(rt, sub):
+        changes |= {"lot_id": lot.config.lot.id, "on_my_way_until": None, "on_my_way_sent": 0}
+    sub = await anyio.to_thread.run_sync(lambda: _touch(rt, body.endpoint, **changes))
+    if sub is None:
+        raise _not_found()
+    return {"id": sub.id, "lot": lot.config.lot.id, "prefs": sub.prefs}
 
 
 @router.delete("/subscriptions", status_code=204, dependencies=[Depends(public_limit)])
@@ -270,9 +315,10 @@ async def on_my_way(body: OnMyWayBody, rt: RuntimeDep) -> dict:
         raise _not_found()
     if until is None:
         return {"until": None, "sent": False}
-    result, status = await _send(rt, sub, "on_my_way", "high")
+    lot = _lot_of(rt, sub)
+    result, status = await _send(lot, sub, "on_my_way", "high")
     if result.ok:  # the baseline for the rules, and push 1 of the window's 6
-        await anyio.to_thread.run_sync(record_sent, rt.engine, sub, status, rt.config)
+        await anyio.to_thread.run_sync(record_sent, rt.engine, sub, status, lot.config)
     return {"until": format_ts(until), "sent": result.ok}
 
 
@@ -289,5 +335,5 @@ async def test_push(body: EndpointBody, rt: RuntimeDep, request: Request) -> dic
         retry = str(max(math.ceil(wait), 1))
         headers = {"Retry-After": retry}
         raise ApiError(429, "rate_limited", "too many test pushes (3/hour)", headers=headers)
-    result, _ = await _send(rt, sub, "test", "normal")
+    result, _ = await _send(_lot_of(rt, sub), sub, "test", "normal")
     return {"sent": result.ok, "deleted": result.deleted}

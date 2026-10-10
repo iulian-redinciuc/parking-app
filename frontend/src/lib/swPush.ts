@@ -86,6 +86,8 @@ export interface PushRegistration {
   prefs: unknown
   tz: string
   lang: string
+  /** The lot the subscription follows; absent = the server's default lot. */
+  lot?: string
 }
 
 const STORE = 'parking-push'
@@ -164,6 +166,7 @@ export async function renewSubscription({
       prefs: saved.prefs,
       tz: saved.tz,
       lang: saved.lang,
+      lot: saved.lot,
     }),
   })
   if (!res.ok) throw new Error(`subscriptions: HTTP ${res.status}`)

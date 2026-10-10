@@ -67,7 +67,9 @@ Codes: `bad_request` (400; also 422 for a body or query that fails validation, w
 | Method | Path | Phase | Description |
 |--------|------|-------|-------------|
 | GET | `/healthz` | 2 | `{"status":"ok","db":true,"cameras":{"cam-ground":"ok","cam-ramp":"unknown"},"restarts":{"cam-ground":0,"cam-ramp":0},"ingest":{"observations":n,"flow_events":n,"health":n,"rejected":n,"db_errors":n},"stream":{"clients":n,"published":n,"dropped":n}}`. `unknown` = no health message since start-up; `restarts` = times each camera's worker came back as a new process since the API started (a new `started_at` in its health messages; the watchdog of [deployment.md §4.2](deployment.md#42-watchdog-for-stuck-workers-p85) or a crash); counters since start-up (`stream.dropped` = events dropped from full SSE client queues). HTTP 200 even when cameras are down, because the API itself is alive |
-| GET | `/api/lot` | 2 | Static lot info (below). `location` uses `LOT_LAT`/`LOT_LON` from the settings when set, else lot.yaml; zone `capacity` is the effective one (slot count for `slots` zones) |
+| GET | `/api/lots` | 9 | The lots of this server, in lot.yaml order: `{"v":1,"default":"main","lots":[{"id":"main","name":"Parking"}]}` ([multi-lot.md](multi-lot.md)); one entry for a single-lot installation |
+| GET | `/api/lots/{lot}` and `/api/lots/{lot}/status`, `/stream`, `/maps/{zone}`, `/history`, `/forecast` | 9 | The routes below for the lot `{lot}`; unknown lot `404 not_found`. **The paths without a lot (`/api/lot`, `/api/status`, …) answer for the default lot**, the first in lot.yaml |
+| GET | `/api/lot` | 2 | Static lot info (below). `location` uses `LOT_LAT`/`LOT_LON` from the settings when set (default lot only), else lot.yaml; zone `capacity` is the effective one (slot count for `slots` zones) |
 | GET | `/api/status` | 2 | `LotStatus`; `503 unavailable` until the first data since start-up, unless state was restored from the DB (then 200 with `stale: true`). `Cache-Control: no-cache` |
 | GET | `/api/stream` | 2 | SSE (see §3) |
 | GET | `/api/maps/{zone}` | 9 | The zone's slot map ([slot-map.md](slot-map.md)): the SVG file named by the zone's `map` in lot.yaml, as stored, `image/svg+xml`, `Cache-Control: public, max-age=300`, with `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox` and `X-Content-Type-Options: nosniff`. `404 not_found` for an unknown zone, a zone without a map, a missing file or one over 200 KB |
@@ -78,8 +80,8 @@ Zone names (`/api/lot`, `/api/status`, `/api/stream`): `?lang=` first, then the 
 
 `/api/history` and `/api/forecast` answers are cached in memory for 60 s per API process (keyed by the query as sent, so a default `to`/`at` can be up to 60 s old) and sent with `Cache-Control: public, max-age=60` (P7.6, `parking/db/history.py`, `parking/api/cache.py`).
 | GET | `/api/push/vapid-public-key` | 6 | `{"key":"BAx…"}`; `503 unavailable` when the VAPID keys aren't set |
-| POST | `/api/push/subscriptions` | 6 | Body: `{"subscription": <PushSubscription JSON>, "prefs": Prefs, "tz": "Europe/Bucharest", "lang": "en"}` → 201 `{"id":"…"}`. Upserts by endpoint (same `id`; keys, prefs, tz, lang replaced, `failures` reset) |
-| PATCH | `/api/push/subscriptions` | 6 | Body: `{"endpoint":"…","prefs":Prefs}` → 200 `{"id","prefs"}` (prefs replaced as a whole); unknown endpoint 404 |
+| POST | `/api/push/subscriptions` | 6 | Body: `{"subscription": <PushSubscription JSON>, "lot": "main", "prefs": Prefs, "tz": "Europe/Bucharest", "lang": "en"}` → 201 `{"id":"…"}`. Upserts by endpoint (same `id`; keys, lot, prefs, tz, lang replaced, `failures` reset). `lot` (optional, default: the default lot) is the lot the subscription follows ([multi-lot.md §5](multi-lot.md#5-push-subscriptions)); unknown lot 422 |
+| PATCH | `/api/push/subscriptions` | 6 | Body: `{"endpoint":"…","prefs":Prefs}` → 200 `{"id","lot","prefs"}` (prefs replaced as a whole); unknown endpoint 404. With `"lot"` in the body the subscription moves to that lot (its on-my-way window ends); `prefs.zones` are checked against the subscription's lot |
 | DELETE | `/api/push/subscriptions` | 6 | Body: `{"endpoint":"…"}` → 204, also for an unknown endpoint (idempotent) |
 | POST | `/api/push/on-my-way` | 6 | Body: `{"endpoint":"…","minutes":30}` (5–120, or `0` = cancel) → 202 `{"until":"…Z"\|null,"sent":bool}`, plus an immediate push (`Urgency: high`; none on cancel). Each call starts a new window (its 6-push cap starts over); after it, pushes follow the rules in notifications.md §4 |
 | POST | `/api/push/test` | 6 | Body: `{"endpoint":"…"}`. Sends one test push with the current status → 200 `{"sent":bool,"deleted":bool}`. Rate limit 3/hour per endpoint |
@@ -213,6 +215,7 @@ Delivery rules:
 - **Observations:** if the API is unreachable, the worker drops the observation (only the latest matters) and keeps going.
 - **Flow events:** must not be lost. The worker keeps an **outbox** (in memory, plus `data/outbox/<camera>.jsonl` on disk so it survives a worker restart). It retries with backoff (1 → 30 s) and removes events once the API accepts them. `event_id` makes retries safe: duplicates are ignored.
 - **Client** (`parking/workers/api_client.py`, P2.1): 5 s timeout; the outbox file is rewritten atomically after each accepted batch and deleted when empty; on start-up a torn last line (crash mid-write) and repeated `event_id`s are skipped. Every failure (network, 5xx, also 4xx) is retried with backoff, so a misconfigured token never loses events. Print mode writes each payload (flow events as a `{"events": […]}` batch) as one JSON line to stdout and sends nothing.
+- **`lot`** (P9.5): every payload carries the sender's lot id from its lot.yaml. The API finds the lot from `camera_id` (camera ids are unique across lots) and answers 422 when `lot` names another one, so a lot box with the wrong file can't feed another lot; a payload without `lot` (older workers) is accepted.
 - **Payload models:** `parking/messages.py`. Unknown fields are ignored (forward compatibility); timestamps are serialised as UTC with milliseconds and `Z`, and a timestamp without a zone is read as UTC.
 - **API side** (`parking/api/routes/internal.py` → `parking/api/ingest.py`, P2.7): the token is checked first (constant-time; no `WORKER_TOKEN` set = every request 401), then the body is parsed, so a request without the token always gets `401 unauthorized`. A payload that doesn't validate, or names a camera that isn't in lot.yaml with the right role, gets **422** `{"error": {"code": "bad_request", "message", "details"}}`; it's logged and counted in `/healthz` (`ingest.rejected`). Every payload goes through one lock: `StateStore` → DB rows (in a thread; a DB error is logged and counted, the in-memory state is kept) → publish the status. Flow-event duplicates are ids already in memory **or** in `flow_event` (survives restarts); clamped events are stored with `applied=false` and count as accepted. A flow event's `source` (`camera`, the default, or `barrier`, P9.3) must match the role of its `camera_id` in lot.yaml, else 422; in a zone with a flow camera **and** a barrier only one of them moves the count, the other's events are accepted and stored with `counted=false` ([barrier.md §4](barrier.md#4-one-source-or-two-api)).
 - **Crashed worker:** there's no "last will" message. The API marks a camera `down` when it hasn't received a health message for 30 s, and its zones become `stale` after `stale_after_s`.
@@ -236,7 +239,7 @@ Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `
 ### observation
 ```json
 {
-  "v": 1, "camera_id": "cam-ground", "ts": "2026-10-07T17:05:12.120Z",
+  "v": 1, "lot": "main", "camera_id": "cam-ground", "ts": "2026-10-07T17:05:12.120Z",
   "frame_size": [2560, 1440], "inference_ms": 143, "detections": 31,
   "slots": [ { "id": "G01", "score": 0.82, "taken": true }, { "id": "G02", "score": 0.04, "taken": false } ],
   "zone_counts": { }
@@ -247,7 +250,7 @@ Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `
 ### flow
 ```json
 {
-  "v": 1, "event_id": "6f1c2a1e-…", "source": "camera", "camera_id": "cam-ramp", "ts": "2026-10-07T17:06:01.480Z",
+  "v": 1, "event_id": "6f1c2a1e-…", "source": "camera", "lot": "main", "camera_id": "cam-ramp", "ts": "2026-10-07T17:06:01.480Z",
   "direction": "in", "track_id": 4412, "cls": "car", "confidence": 0.77
 }
 ```
@@ -256,7 +259,7 @@ Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `
 ### health (every 10 s)
 ```json
 {
-  "v": 1, "camera_id": "cam-ground", "ts": "…",
+  "v": 1, "lot": "main", "camera_id": "cam-ground", "ts": "…",
   "state": "ok", "issue": null,
   "fps": 0.2, "last_frame_age_s": 3.1, "inference_ms_avg": 151, "unhealthy_ratio": 0.0,
   "gate_active_ratio": null,

@@ -22,19 +22,19 @@ TS = datetime(2026, 10, 7, 17, 5, 12, 120000, tzinfo=UTC)
 
 # The examples from api.md, as written there.
 OBSERVATION = {
-    "v": 1, "camera_id": "cam-ground", "ts": "2026-10-07T17:05:12.120Z",
+    "v": 1, "lot": "main", "camera_id": "cam-ground", "ts": "2026-10-07T17:05:12.120Z",
     "frame_size": [2560, 1440], "inference_ms": 143, "detections": 31,
     "slots": [{"id": "G01", "score": 0.82, "taken": True},
               {"id": "G02", "score": 0.04, "taken": False}],
     "zone_counts": {},
 }  # fmt: skip
 FLOW = {
-    "v": 1, "event_id": "6f1c2a1e-0000", "source": "camera", "camera_id": "cam-ramp",
-    "ts": "2026-10-07T17:06:01.480Z", "direction": "in", "track_id": 4412,
-    "cls": "car", "confidence": 0.77,
+    "v": 1, "event_id": "6f1c2a1e-0000", "source": "camera", "lot": "main",
+    "camera_id": "cam-ramp", "ts": "2026-10-07T17:06:01.480Z", "direction": "in",
+    "track_id": 4412, "cls": "car", "confidence": 0.77,
 }  # fmt: skip
 HEALTH = {
-    "v": 1, "camera_id": "cam-ground", "ts": "2026-10-07T17:05:12.000Z",
+    "v": 1, "lot": "main", "camera_id": "cam-ground", "ts": "2026-10-07T17:05:12.000Z",
     "state": "ok", "issue": None, "fps": 0.2, "last_frame_age_s": 3.1,
     "inference_ms_avg": 151, "unhealthy_ratio": 0.0, "gate_active_ratio": None,
     "started_at": "2026-10-07T09:00:00.000Z", "disk_pct": 41.5, "cpu_temp_c": 58.4,

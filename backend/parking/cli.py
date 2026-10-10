@@ -109,18 +109,18 @@ def _fake_detector_on(flag: bool) -> bool:
 
 def _camera(config: Path, camera: str):
     """Load lot.yaml and return `(lot, camera, root)`; exits with a message on any problem."""
-    from parking.config import ConfigError, cli_env, load_config
+    from parking.config import ConfigError, cli_env, load_lots, lot_of_camera
 
     config = _find_config(config)
     root = config.resolve().parent.parent
     try:
-        lot = load_config(config, cli_env(root))
+        lots = load_lots(config, cli_env(root))
     except (ConfigError, ValueError) as e:
         _fail(f"{config}: {e}")
-    cams = {c.id: c for c in lot.cameras}
+    cams = {c.id: c for lot in lots for c in lot.cameras}
     if camera not in cams:
         _fail(f"camera '{camera}' is not in {config} (cameras: {', '.join(cams) or 'none'})")
-    return lot, cams[camera], root
+    return lot_of_camera(lots, camera), cams[camera], root
 
 
 def _occupancy_camera(config: Path, camera: str, command: str):
@@ -1586,17 +1586,18 @@ def health_stats(
 
 def _flow_zone(config: Path, zone: str):
     """Load lot.yaml and return `(lot, root)`; exits unless `zone` is a flow zone."""
-    from parking.config import ConfigError, cli_env, load_config
+    from parking.config import ConfigError, cli_env, load_lots
 
     config = _find_config(config)
     root = config.resolve().parent.parent
     try:
-        lot = load_config(config, cli_env(root))
+        lots = load_lots(config, cli_env(root))
     except (ConfigError, ValueError) as e:
         _fail(f"{config}: {e}")
-    zones = {z.id: z for z in lot.zones}
+    zones = {z.id: z for lot in lots for z in lot.zones}
     if zone not in zones:
         _fail(f"zone '{zone}' is not in {config} (zones: {', '.join(zones) or 'none'})")
+    lot = next(lot for lot in lots if any(z.id == zone for z in lot.zones))
     if zones[zone].method != "flow":
         _fail(f"zone '{zone}' is a {zones[zone].method} zone; the drift test is for flow zones")
     return lot, root
@@ -1987,14 +1988,14 @@ DbUrl = Annotated[
 
 
 def _db_engine(config: Path, url: str | None):
-    """`(lot config, engine)` for the maintenance commands; the DB is upgraded first."""
-    from parking.config import ConfigError, cli_env, load_config
+    """`(lot configs, engine)` for the maintenance commands; the DB is upgraded first."""
+    from parking.config import ConfigError, cli_env, load_lots
     from parking.db.engine import default_url, make_engine, upgrade
 
     config = _find_config(config)
     root = config.resolve().parent.parent
     try:
-        lot = load_config(config, cli_env(root))
+        lots = load_lots(config, cli_env(root))
     except (ConfigError, ValueError) as e:
         _fail(f"{config}: {e}")
     url = url or default_url(root)
@@ -2002,7 +2003,7 @@ def _db_engine(config: Path, url: str | None):
         upgrade(url)
     except Exception as e:
         _fail(f"upgrade failed: {e}")
-    return lot, make_engine(url)
+    return lots, make_engine(url)
 
 
 @db_app.command("aggregate")
@@ -2023,14 +2024,14 @@ def db_aggregate(
     from parking.db import rollups
     from parking.db.engine import session_scope
 
-    lot, engine = _db_engine(config, url)
+    lots, engine = _db_engine(config, url)
     now = SystemClock().now()
+    jobs = MaintenanceJobs.for_lots(engine, lots, SystemClock())
     try:
         if backfill:
             with session_scope(engine) as session:
-                minutes, hours = rollups.backfill(session, [z.id for z in lot.zones], now)
+                minutes, hours = rollups.backfill(session, jobs.zone_ids, now, totals=jobs.totals)
         else:
-            jobs = MaintenanceJobs(engine, lot, SystemClock())
             minutes, hours = jobs.run_minutes(now), jobs.run_hours(now)
     finally:
         engine.dispose()
@@ -2056,14 +2057,14 @@ def db_prune(
     from parking.core.clock import SystemClock
     from parking.db.rollups import Retention
 
-    lot, engine = _db_engine(config, url)
+    lots, engine = _db_engine(config, url)
     retention = Retention(
         raw=timedelta(days=raw_days),
         minute=timedelta(days=minute_days),
         log=timedelta(days=log_days),
     )
     try:
-        deleted = MaintenanceJobs(engine, lot, SystemClock(), retention).run_prune(
+        deleted = MaintenanceJobs.for_lots(engine, lots, SystemClock(), retention).run_prune(
             SystemClock().now()
         )
         if vacuum:

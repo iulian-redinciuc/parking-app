@@ -282,7 +282,7 @@ class OccupancyWorker(Worker):
         self._analysed_at.append(time.monotonic())
         self._inference_ms.append(result.inference_ms)
 
-        obs = to_observation(result, frame.ts)
+        obs = to_observation(result, frame.ts, self.lot.lot.id)
         sent = self.api.send_observation(obs)
         self.observations += 1
         self._summary.add(result, sent)
@@ -359,6 +359,7 @@ class OccupancyWorker(Worker):
         fps = (len(times) - 1) / span if span > 0 else None
         ms = list(self._inference_ms)
         return CameraHealthMsg(
+            lot=self.lot.lot.id,
             camera_id=self.camera_id,
             ts=datetime.now(UTC),
             state=state,
@@ -452,9 +453,10 @@ class OccupancyWorker(Worker):
         self._setup.source.close()
 
 
-def to_observation(result: AnalysisResult, ts: datetime) -> Observation:
+def to_observation(result: AnalysisResult, ts: datetime, lot: str | None = None) -> Observation:
     """The api.md observation for one analysed frame (`ts` = when the frame was read)."""
     return Observation(
+        lot=lot,
         camera_id=result.camera_id,
         ts=ts,
         frame_size=result.frame_size,

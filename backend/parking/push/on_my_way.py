@@ -14,7 +14,7 @@ from sqlmodel import select
 from parking.db.engine import session_scope
 from parking.db.models import PushSubscription
 from parking.messages import LotStatus
-from parking.push.dispatch import StatusNotifier, send_status
+from parking.push.dispatch import StatusNotifier, of_lots, send_status
 from parking.push.rules import should_send_on_my_way, watched
 from parking.push.sender import SendResult
 
@@ -42,7 +42,7 @@ class OnMyWayNotifier(StatusNotifier):
         """Query the active windows, apply the rules, send, update `last_sent_*`."""
         with session_scope(self.engine) as session:
             query = select(PushSubscription).where(PushSubscription.on_my_way_until > now)
-            subs = list(session.exec(query))
+            subs = of_lots(list(session.exec(query)), self.lots)
             for sub in subs:
                 session.expunge(sub)
         levels = self.config.api.levels

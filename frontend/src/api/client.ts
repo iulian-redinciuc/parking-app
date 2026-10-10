@@ -3,6 +3,7 @@
 // Admin calls add `Authorization: Bearer <token>` from sessionStorage; a 401 forgets the token,
 // which sends the admin screens back to the login.
 import { API_BASE, IS_MOCK } from './base'
+import { lotPath } from './lots'
 import { correctMockZone, mockLotInfo, mockSlotMap, mockStatus } from './mock'
 import type {
   ApiError,
@@ -10,10 +11,18 @@ import type {
   History,
   HistoryBucket,
   LotInfo,
+  LotList,
   LotStatus,
   ZoneStatus,
 } from './types'
-import { isApiErrorBody, isForecast, isHistory, isLotInfo, isLotStatus } from './validate'
+import {
+  isApiErrorBody,
+  isForecast,
+  isHistory,
+  isLotInfo,
+  isLotList,
+  isLotStatus,
+} from './validate'
 
 export { API_BASE, IS_MOCK } from './base'
 export const TIMEOUT_MS = 10_000
@@ -119,23 +128,36 @@ async function request<T>(
   }
 }
 
+// The lot routes below go to the lot picked on this device (`lotPath`: `/api/lots/<id>/...`),
+// or to the server's default lot over the paths without one (multi-lot.md §6).
+
 /** `GET /api/status`. Rejects with `unavailable` (503) until the server has data. */
 export function getStatus(options?: RequestOptions): Promise<LotStatus> {
   if (IS_MOCK && !options?.base) return Promise.resolve(mockStatus())
-  return request('/api/status', isLotStatus, options)
+  return request(lotPath('/status'), isLotStatus, options)
 }
 
 /** `GET /api/lot`: static lot info. */
 export function getLot(options?: RequestOptions): Promise<LotInfo> {
   if (IS_MOCK && !options?.base) return Promise.resolve(mockLotInfo())
-  return request('/api/lot', isLotInfo, options)
+  return request(lotPath(), isLotInfo, options)
+}
+
+/** `GET /api/lots`: the lots this server counts and which one is the default. A server from
+ * before there were several answers 404: that is one lot, so no picker. */
+export async function getLots(options?: RequestOptions): Promise<LotList> {
+  if (IS_MOCK && !options?.base) {
+    const { id, name } = mockLotInfo()
+    return { v: 1, default: id, lots: [{ id, name }] }
+  }
+  return request('/api/lots', isLotList, options)
 }
 
 /** `GET /api/maps/<zone>` (slot-map.md): the zone's slot map as SVG text, `null` when it has
  * none (404). The answer may come from the browser cache (the server allows 5 min). */
 export async function getSlotMap(zoneId: string, options?: RequestOptions): Promise<string | null> {
   if (IS_MOCK && !options?.base) return mockSlotMap(zoneId)
-  const path = `/api/maps/${encodeURIComponent(zoneId)}`
+  const path = lotPath(`/maps/${encodeURIComponent(zoneId)}`)
   let res: Response
   try {
     res = await fetch(apiUrl(path, undefined, options?.base), {
@@ -176,7 +198,7 @@ function query(params: Record<string, string | undefined>): string {
  * lazily loaded module, so its code stays out of the main chunk. */
 export async function getHistory(params: HistoryQuery, options?: RequestOptions): Promise<History> {
   if (IS_MOCK && !options?.base) return (await import('./mockHistory')).mockHistory(params)
-  return request(`/api/history${query({ ...params })}`, isHistory, options)
+  return request(lotPath(`/history${query({ ...params })}`), isHistory, options)
 }
 
 /** `GET /api/forecast` (`at` defaults to now + 30 min server-side); 404 `not_enough_data` with
@@ -186,7 +208,7 @@ export async function getForecast(
   options?: RequestOptions,
 ): Promise<Forecast> {
   if (IS_MOCK && !options?.base) return (await import('./mockHistory')).mockForecast(params)
-  return request(`/api/forecast${query(params)}`, isForecast, options)
+  return request(lotPath(`/forecast${query(params)}`), isForecast, options)
 }
 
 /** A JSON `POST`/`PATCH`/`DELETE` to the API (the push routes, api.md §2); never mocked here. */

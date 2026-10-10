@@ -20,6 +20,7 @@ known) until `parking db aggregate --backfill`. The scheduled flow-zone reset go
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -29,7 +30,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import Engine, text
 
 from parking.api.ingest import Ingestor
-from parking.config import LotConfig, crontab_trigger
+from parking.config import LotConfig, crontab_trigger, total_key
 from parking.core.clock import Clock
 from parking.db import rollups
 from parking.db.engine import session_scope
@@ -67,16 +68,39 @@ class MaintenanceJobs:
         clock: Clock,
         retention: rollups.Retention | None = None,
         ingestor: Ingestor | None = None,
+        more: Sequence[tuple[LotConfig, Ingestor | None]] = (),
     ):
+        """`config` / `ingestor` are the default lot's, `more` the other lots' (one set of
+        jobs serves them all: the rollup tables are shared, multi-lot.md §4)."""
         self.engine = engine
-        self.zone_ids = [z.id for z in config.zones]
+        lots = [(config, ingestor), *more]
+        configs = [c for c, _ in lots]
+        self.zone_ids = [z.id for c in configs for z in c.zones]
+        # each lot's total pseudo-zone in the rollups -> its zone ids
+        self.totals = {total_key(configs, c.lot.id): [z.id for z in c.zones] for c in configs}
         # zone id -> its enabled scheduled reset (flow zones only, config.md §1)
-        self.resets = {z.id: z.reset for z in config.zones if z.reset and z.reset.enabled}
+        self.resets = {
+            z.id: z.reset for c in configs for z in c.zones if z.reset and z.reset.enabled
+        }
         self.ingestor = ingestor
-        self.tz = lot_timezone(config)
+        # zone id -> the ingestor and time zone of its lot (the scheduled resets)
+        self._ingestors = {z.id: i for c, i in lots for z in c.zones}
+        self._zone_tz = {z.id: lot_timezone(c) for c in configs for z in c.zones}
+        self.tz = lot_timezone(config)  # prune and vacuum run on the default lot's clock
         self.clock = clock
         self.retention = retention or rollups.Retention()
         self._scheduler: AsyncIOScheduler | None = None
+
+    @classmethod
+    def for_lots(
+        cls,
+        engine: Engine,
+        lots: Sequence[LotConfig],
+        clock: Clock,
+        retention: rollups.Retention | None = None,
+    ) -> MaintenanceJobs:
+        """The jobs of every lot of a config file, without ingestors (the CLI: no resets)."""
+        return cls(engine, lots[0], clock, retention, more=[(c, None) for c in lots[1:]])
 
     # --- synchronous cores ---
 
@@ -87,7 +111,7 @@ class MaintenanceJobs:
             start = end - MINUTE_CATCH_UP
             if last is not None:
                 start = max(start, min(last + rollups.MINUTE, end - rollups.MINUTE))
-            return rollups.aggregate_minutes(session, self.zone_ids, start, end)
+            return rollups.aggregate_minutes(session, self.zone_ids, start, end, self.totals)
 
     def run_hours(self, now: datetime) -> int:
         end = rollups.floor_hour(now)
@@ -107,7 +131,7 @@ class MaintenanceJobs:
     async def run_reset(self, zone_id: str) -> None:
         """Set the zone's count to its `reset.value` (a `correction` row, published)."""
         value = self.resets[zone_id].value
-        row = await self.ingestor.correct(
+        row = await self._ingestors[zone_id].correct(
             zone_id, value, RESET_ACTOR, f"scheduled reset ({self.resets[zone_id].cron})", "reset"
         )
         log.info("scheduled reset: zone %s %d -> %d", zone_id, row.old_occupied, row.new_occupied)
@@ -125,14 +149,14 @@ class MaintenanceJobs:
                 CronTrigger(day_of_week="sun", hour=4, minute=30, timezone=self.tz),
             ),
         }
-        if self.ingestor is not None:
-            for zone_id, reset in self.resets.items():
-                jobs[f"reset-{zone_id}"] = (
-                    self._reset_job(zone_id),
-                    crontab_trigger(reset.cron, self.tz),
-                )
-        elif self.resets:
-            log.warning("no ingestor: scheduled resets of %s are off", ", ".join(self.resets))
+        for zone_id, reset in self.resets.items():
+            if self._ingestors[zone_id] is None:
+                log.warning("no ingestor: the scheduled reset of %s is off", zone_id)
+                continue
+            jobs[f"reset-{zone_id}"] = (
+                self._reset_job(zone_id),
+                crontab_trigger(reset.cron, self._zone_tz[zone_id]),
+            )
         for job_id, (func, trigger) in jobs.items():
             self._scheduler.add_job(
                 func,
