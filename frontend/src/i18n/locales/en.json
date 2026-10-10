@@ -45,6 +45,14 @@
     "estimated_flow": "Estimated from entry/exit counts",
     "estimated_camera": "Estimated: the camera view is unclear"
   },
+  "special": {
+    "list": "Special spaces",
+    "accessible": "Accessible",
+    "ev": "EV charging",
+    "motorcycle": "Motorcycle",
+    "reserved": "Reserved",
+    "count": "{{type}}: {{free}} of {{capacity}} free"
+  },
   "map": {
     "show": "Show map",
     "hide": "Hide map",
@@ -118,6 +126,8 @@
     "almost_full": "Warn when almost full",
     "almost_full_hint": "When a zone you follow is almost full or full.",
     "zones": "Zones",
+    "special": "Special spaces",
+    "special_hint": "Named in every notification. While you're on your way, you're also told when the last one is taken or one comes free.",
     "reminders": "Reminders",
     "reminders_hint": "Get the free spaces at a set time.",
     "reminder": "{{days}} at {{time}}",

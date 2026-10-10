@@ -18,6 +18,7 @@ import {
   subscribe,
   unsubscribe,
   updatePrefs,
+  zonesSummary,
 } from './push'
 import * as swPush from './swPush'
 
@@ -309,6 +310,18 @@ describe('mock mode', () => {
     expect(body.startsWith(`${status.total.free} free · `)).toBe(true)
     for (const z of status.zones)
       expect(body).toContain(`${z.name} ${z.method === 'flow' ? '≈' : ''}${z.free}`)
+  })
+})
+
+describe('zonesSummary', () => {
+  it('adds the followed special spaces the lot has, summed over the zones', () => {
+    const status = mockStatus()
+    const ground = status.zones.find((z) => z.id === 'ground')!
+    const plain = zonesSummary(status)
+    expect(plain).not.toContain('Accessible')
+    saveLocalPrefs({ ...DEFAULT_PREFS, space_types: ['accessible', 'reserved'] })
+    expect(zonesSummary(status)).toBe(`${plain} · Accessible ${ground.by_type!.accessible!.free}`)
+    expect(zonesSummary(status, ['ev'])).toBe(`${plain} · EV charging ${ground.by_type!.ev!.free}`)
   })
 })
 

@@ -15,7 +15,15 @@ Pick in any order once Phase 8 is done. Each item is a small project; write a sh
 
 ## P9.2: Special spaces
 **Why:** "2 accessible spaces free", "EV charger free".
-**Outline:** use the slot `type` field; add `by_type` counts per zone to `LotStatus` (`{"accessible": {"capacity": 2, "free": 1}}`); show small chips on the zone card; optional alert preferences per type.
+**Design note:** [special-spaces.md](../design/special-spaces.md).
+**Files:** `backend/parking/messages.py` (`TypeCount`, `ZoneStatus.by_type`), `core/fusion.py` (`_by_type`), `push/payload.py`, `push/rules.py` (`special_flipped`), `push/dispatch.py`, `api/routes/push.py` (`Prefs.space_types`); `frontend/src/components/ZoneCard.tsx`, `src/lib/status.ts`, `src/lib/push.ts`, `src/screens/NotificationsScreen.tsx`, `src/api/mock.ts`.
+**Steps**
+1. Give the special spaces their `type` in the slot file (admin slot editor → select a space → *Type*): `accessible`, `ev`, `motorcycle` or `reserved`.
+2. The API adds `by_type` counts per `slots` zone to `LotStatus` (`{"accessible": {"capacity": 2, "free": 1}}`).
+3. The zone card shows a small chip per type the zone has.
+4. Alert preference per type (`prefs.space_types`, Alerts → *Special spaces*): the followed types are named in every push, and an on-my-way window also pushes when one runs out or comes back.
+
+**Done when:** a space marked accessible in the slot file shows on its zone's card as `Accessible n / m`, and `n` follows that space being taken and freed. Checked on the dev Pi against the simulated feed (special-spaces.md §5). The committed slot file marks no special spaces yet: mark the real ones once the real lot's layout is drawn (P4.5).
 
 ## P9.3: Barrier / induction-loop integration
 **Why:** near-perfect entry/exit counts where a barrier exists.

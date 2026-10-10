@@ -16,6 +16,7 @@ from parking.config import Levels
 from parking.core.fusion import level_for
 from parking.db.models import PushSubscription
 from parking.messages import LotStatus, ZoneStatus
+from parking.push.payload import type_free
 
 MIN_GAP = timedelta(minutes=2)  # between on-my-way pushes, except "became full"
 MAX_PER_WINDOW = 6  # pushes per on-my-way window, the immediate one included
@@ -58,6 +59,16 @@ def became_full(sub: PushSubscription, old: LotStatus | None, new: LotStatus) ->
     )
 
 
+def special_flipped(sub: PushSubscription, old: LotStatus | None, new: LotStatus) -> bool:
+    """One of `prefs.space_types` went between "none free" and "some free" in the watched
+    zones (the last accessible space was taken, an EV charger came free)."""
+    wanted = (sub.prefs or {}).get("space_types")
+    if old is None or not wanted:
+        return False
+    before, after = type_free(watched_zones(sub, old)), type_free(watched_zones(sub, new))
+    return any(t in before and t in after and (before[t] == 0) != (after[t] == 0) for t in wanted)
+
+
 def free_threshold(capacity: int) -> float:
     """`max(3, 10% of capacity)`."""
     return max(MIN_FREE_DELTA, FREE_DELTA_RATIO * capacity)
@@ -71,15 +82,18 @@ def should_send_on_my_way(
     levels: Levels | None = None,
 ) -> bool:
     """notifications.md §4: during the window, push when the watched level changed, the
-    watched free count moved by `max(3, 10% of capacity)` since the last push, or a watched
-    zone became full; at most 6 pushes per window, 2 min apart unless a zone became full.
-    Quiet hours don't apply (the user asked for these)."""
+    watched free count moved by `max(3, 10% of capacity)` since the last push, a watched
+    zone became full, or a special space type the user follows ran out or came back; at most
+    6 pushes per window, 2 min apart except for those last two. Quiet hours don't apply (the
+    user asked for these)."""
     until = sub.on_my_way_until
     if until is None or until <= now:
         return False
     if sub.on_my_way_sent >= MAX_PER_WINDOW:
         return False
     if became_full(sub, old_status, new_status):
+        return True
+    if special_flipped(sub, old_status, new_status):
         return True
     if sub.last_sent_at is not None and now - sub.last_sent_at < MIN_GAP:
         return False

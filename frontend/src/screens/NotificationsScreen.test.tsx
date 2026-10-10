@@ -1,4 +1,11 @@
-import { act, fireEvent, render as renderDom, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render as renderDom,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -164,6 +171,21 @@ describe('NotificationsScreen', () => {
       expect(push.loadPrefs()).toMatchObject({ alert_when_almost_full: true, proximity: true })
     })
 
+    it('follows the special spaces the lot has', async () => {
+      stubPush('granted')
+      render(<NotificationsScreen />)
+      // the mock lot has accessible spaces and EV chargers, nothing else
+      const group = within(await screen.findByRole('group', { name: 'Special spaces' }))
+      expect(group.getAllByRole('checkbox')).toHaveLength(2)
+      fireEvent.click(group.getByRole('checkbox', { name: 'EV charging' }))
+      fireEvent.click(group.getByRole('checkbox', { name: 'Accessible' }))
+      await waitFor(() => expect(push.updatePrefs).toHaveBeenCalledOnce())
+      expect(vi.mocked(push.updatePrefs).mock.calls[0][0].space_types).toEqual(['accessible', 'ev'])
+      expect(group.getByRole('checkbox', { name: 'EV charging' })).toBeChecked()
+      fireEvent.click(group.getByRole('checkbox', { name: 'Accessible' }))
+      await waitFor(() => expect(push.loadPrefs().space_types).toEqual(['ev']))
+    })
+
     it('adds and removes a reminder, sets quiet hours and filters zones', async () => {
       stubPush('granted')
       render(<NotificationsScreen />)
@@ -171,7 +193,9 @@ describe('NotificationsScreen', () => {
       expect(screen.getByText('Mon, Tue, Wed, Thu, Fri at 08:30')).toBeInTheDocument()
       fireEvent.click(screen.getByRole('switch', { name: /Quiet hours/ }))
       expect(screen.getByLabelText('From')).toHaveValue('22:00')
-      const zones = await screen.findAllByRole('checkbox')
+      const zones = within(await screen.findByRole('group', { name: 'Zones' })).getAllByRole(
+        'checkbox',
+      )
       fireEvent.click(zones[0])
       await waitFor(() => expect(push.updatePrefs).toHaveBeenCalledOnce())
       const saved = vi.mocked(push.updatePrefs).mock.calls[0][0]

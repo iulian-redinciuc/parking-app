@@ -24,7 +24,7 @@ from sqlmodel import select
 from parking.api.deps import ApiError, RateLimiter, Runtime, RuntimeDep, public_limit, rate_limit
 from parking.db.engine import session_scope
 from parking.db.models import PushSubscription
-from parking.messages import LotStatus, format_ts
+from parking.messages import SPACE_TYPES, LotStatus, SpaceType, format_ts
 from parking.push.on_my_way import record_sent
 from parking.push.payload import app_url, status_payload
 from parking.push.sender import PushSender, SendResult, Urgency
@@ -73,6 +73,13 @@ class Prefs(Body):
     schedules: list[Schedule] = Field(default_factory=list, max_length=10)
     quiet_hours: QuietHours | None = None
     alert_when_almost_full: bool = False
+    # special spaces to mention in every push and to follow while on the way (P9.2)
+    space_types: list[SpaceType] = Field(default_factory=list, max_length=len(SPACE_TYPES))
+
+    @field_validator("space_types")
+    @classmethod
+    def _unique_types(cls, v: list[str]) -> list[str]:
+        return [t for t in SPACE_TYPES if t in v]
 
     def stored(self) -> dict:
         return self.model_dump(by_alias=True)
@@ -177,8 +184,15 @@ async def _send(
 ) -> tuple[SendResult, LotStatus | None]:
     sender = _sender(rt)
     status = rt.store.status(sub.lang) if rt.store.has_data else None
-    zones = (sub.prefs or {}).get("zones")
-    payload = status_payload(status, kind, app_url(rt.settings.public_app_url), sub.tz, zones)
+    prefs = sub.prefs or {}
+    payload = status_payload(
+        status,
+        kind,
+        app_url(rt.settings.public_app_url),
+        sub.tz,
+        prefs.get("zones"),
+        prefs.get("space_types"),
+    )
     return await anyio.to_thread.run_sync(sender.send, sub, payload, urgency), status
 
 

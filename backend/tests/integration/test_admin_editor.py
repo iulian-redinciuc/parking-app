@@ -205,6 +205,13 @@ async def test_put_slots_writes_backs_up_reloads_and_updates_capacity(tmp_path, 
         assert ground(app)["occupied"] == 2
         assert ground(app)["slots"] == {"G01": True, "G03": True}
 
+        # marking a space as accessible shows up in the status at once (P9.2)
+        assert ground(app)["by_type"] == {}
+        new["slots"][1]["type"] = "accessible"
+        r = await c.put("/api/admin/cameras/cam-ground/slots", json=new, headers=ADMIN_H)
+        assert r.status_code == 200, r.text
+        assert ground(app)["by_type"] == {"accessible": {"capacity": 1, "free": 0}}
+
         r = await c.get("/api/admin/cameras/cam-ground/slots", headers=ADMIN_H)
         assert r.json() == new
 

@@ -1,17 +1,19 @@
 import { useTranslation } from 'react-i18next'
 import type { ZoneStatus } from '../api/types'
-import { TONE_TEXT, formatFree, isEstimated, levelInfo } from '../lib/status'
+import { TONE_TEXT, formatFree, isEstimated, levelInfo, specialSpaces } from '../lib/status'
 import LevelBar from './LevelBar'
 import SlotMap from './SlotMap'
 import TrendIcon from './TrendIcon'
 
-// One zone: name, free / capacity, trend, a bar with the level word, a note when estimated, and
-// the slot map where the zone has one (P9.1).
+// One zone: name, free / capacity, trend, a bar with the level word, a chip per kind of special
+// space (accessible, EV charging…, P9.2), a note when estimated, and the slot map where the zone
+// has one (P9.1).
 // `dimmed` greys the numbers: they're old (stale zone, or the connection is down).
 export default function ZoneCard({ zone, dimmed = false }: { zone: ZoneStatus; dimmed?: boolean }) {
   const { t } = useTranslation()
   const level = levelInfo(zone.level)
   const nameId = `zone-${zone.id}`
+  const special = specialSpaces(zone)
   return (
     <li
       className={`flex flex-col gap-2 rounded-xl bg-surface p-4 ${dimmed ? 'dimmed' : ''}`}
@@ -38,6 +40,33 @@ export default function ZoneCard({ zone, dimmed = false }: { zone: ZoneStatus; d
           {level.label}
         </span>
       </div>
+      {special.length > 0 && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label={t('special.list')}>
+          {special.map((s) => (
+            <span
+              key={s.type}
+              className="rounded-full border border-muted/40 px-2.5 py-0.5 text-sm"
+              data-testid={`special-${s.type}`}
+              data-free={s.free}
+            >
+              <span aria-hidden="true">
+                {t(`special.${s.type}`)}{' '}
+                <span className={`font-semibold tabular-nums ${s.free > 0 ? 'text-ok' : ''}`}>
+                  {s.free}
+                </span>
+                <span className="text-muted tabular-nums"> / {s.capacity}</span>
+              </span>
+              <span className="sr-only">
+                {t('special.count', {
+                  type: t(`special.${s.type}`),
+                  free: s.free,
+                  capacity: s.capacity,
+                })}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
       {zone.stale && (
         <p className="flex items-center gap-1.5 text-sm">
           <svg

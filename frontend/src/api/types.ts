@@ -5,6 +5,15 @@ export type Level = 'plenty' | 'filling' | 'almost_full' | 'full'
 export type Trend = 'filling' | 'emptying' | 'steady'
 export type ZoneMethod = 'slots' | 'count' | 'flow'
 
+/** Slot types counted separately (`by_type`); `standard` spaces only show in the zone's totals. */
+export type SpaceType = 'accessible' | 'ev' | 'motorcycle' | 'reserved'
+
+/** The spaces of one type in a zone; they are part of the zone's own counts too. */
+export interface TypeCount {
+  capacity: number
+  free: number
+}
+
 export interface Totals {
   capacity: number
   occupied: number
@@ -32,6 +41,8 @@ export interface ZoneStatus {
   updated_at: string | null
   /** Slot id → taken, only for `slots` zones. */
   slots: Record<string, boolean> | null
+  /** Special spaces per type, only for `slots` zones (`{}` = none); absent before P9.2. */
+  by_type?: Partial<Record<SpaceType, TypeCount>> | null
 }
 
 /** `GET /api/status` and every SSE `status` event. */

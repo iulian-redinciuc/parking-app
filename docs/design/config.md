@@ -184,7 +184,7 @@ Made by the slot editor (`tools/slot-editor`) or `parking bootstrap-slots`.
 
 - `polygon`: at least 3 `[x, y]` points in pixels of `image_size`, clockwise or anticlockwise, non-self-intersecting.
 - `id`: unique per lot. Convention: zone letter + two digits (`G01`, `U17`).
-- `type`: `standard | accessible | ev | motorcycle | reserved` (Phase 9 uses it; until then informational).
+- `type`: `standard | accessible | ev | motorcycle | reserved`, default `standard`. The four special types are counted separately in the status (`by_type`) and shown as chips on the zone card ([special-spaces.md](special-spaces.md), P9.2); they still count in the zone's total. Set it in the admin slot editor or here.
 - `count_zones`: only for `count`-method zones (vehicles counted inside the polygon).
 - `reference_image` is git-ignored data; only the path is committed.
 

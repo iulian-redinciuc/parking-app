@@ -49,6 +49,16 @@ export function isTotals(x: unknown): x is Totals {
   return isObj(x) && isCounts(x)
 }
 
+function isTypeCount(x: unknown): boolean {
+  return (
+    isObj(x) &&
+    Number.isInteger(x.capacity) &&
+    Number.isInteger(x.free) &&
+    (x.capacity as number) >= 0 &&
+    (x.free as number) >= 0
+  )
+}
+
 export function isZoneStatus(x: unknown): x is ZoneStatus {
   return (
     isObj(x) &&
@@ -59,7 +69,8 @@ export function isZoneStatus(x: unknown): x is ZoneStatus {
     oneOf(TRENDS)(x.trend) &&
     (x.updated_at === null || isTs(x.updated_at)) &&
     (x.slots === null ||
-      (isObj(x.slots) && Object.values(x.slots).every((v) => typeof v === 'boolean')))
+      (isObj(x.slots) && Object.values(x.slots).every((v) => typeof v === 'boolean'))) &&
+    (x.by_type == null || (isObj(x.by_type) && Object.values(x.by_type).every(isTypeCount)))
   )
 }
 

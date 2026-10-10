@@ -63,6 +63,7 @@ def lot(tmp_path):
     (tmp_path / "config" / "slots").mkdir(parents=True)
     (tmp_path / "config" / "lot.yaml").write_text(LOT_YAML)
     slots = [{"id": s, "zone": "ground", "polygon": SQUARE} for s in SLOTS]
+    slots[0]["type"] = "accessible"  # G01 (P9.2)
     slot_file = {"version": 1, "camera_id": "cam-ground", "image_size": [10, 10], "slots": slots}
     (tmp_path / "config" / "slots" / "cam-ground.json").write_text(json.dumps(slot_file))
     return tmp_path
@@ -106,7 +107,9 @@ async def test_status_503_until_first_observation_then_lot_status(lot):
         ground, under = status["zones"]
         assert (ground["name"], ground["occupied"], ground["free"]) == ("Ground", 1, 2)
         assert ground["slots"] == {"G01": True, "G02": False, "G03": False}
+        assert ground["by_type"] == {"accessible": {"capacity": 1, "free": 0}}
         assert ground["stale"] is False and ground["updated_at"].endswith("Z")
+        assert under["by_type"] is None
         assert under["slots"] is None and under["updated_at"] is None and under["stale"] is True
         assert status["total"]["capacity"] == 63 and status["total"]["stale"] is True
 

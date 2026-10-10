@@ -14,6 +14,7 @@ from parking.push.rules import (
     became_full,
     free_threshold,
     should_send_on_my_way,
+    special_flipped,
     watched,
 )
 
@@ -21,7 +22,9 @@ T0 = datetime(2026, 10, 9, 8, 0, tzinfo=UTC)
 CAP = {"ground": 40, "underground": 60}
 
 
-def status(ground: int, underground: int = 30) -> LotStatus:
+def status(ground: int, underground: int = 30, special: dict | None = None) -> LotStatus:
+    """`special`: the ground zone's `by_type` as `{type: (capacity, free)}`."""
+    by_type = {t: {"capacity": c, "free": f} for t, (c, f) in (special or {}).items()}
     zones = [
         ZoneStatus(
             id=zid,
@@ -35,6 +38,7 @@ def status(ground: int, underground: int = 30) -> LotStatus:
             stale=False,
             trend="steady",
             updated_at=T0,
+            by_type=by_type if zid == "ground" else None,
         )
         for zid, free in (("ground", ground), ("underground", underground))
     ]
@@ -53,6 +57,7 @@ def status(ground: int, underground: int = 30) -> LotStatus:
 def sub(
     *,
     zones=None,
+    space_types=(),
     until=T0 + timedelta(minutes=15),
     last_sent_at=T0,
     last=None,
@@ -64,7 +69,7 @@ def sub(
         endpoint="https://push.example.test/x",
         p256dh="k",
         auth="a",
-        prefs={"zones": zones},
+        prefs={"zones": zones, "space_types": list(space_types)},
         on_my_way_until=until,
         last_sent_at=last_sent_at,
         on_my_way_sent=sent,
@@ -173,3 +178,35 @@ def test_last_push_without_data_sends_once_data_arrives(clock):
     s = sub(last=None)  # the immediate push said "No data yet"
     assert should_send_on_my_way(s, status(30), status(30), later(clock, 2))
     assert not should_send_on_my_way(s, status(30), status(30), T0 + timedelta(minutes=1))
+
+
+# --- special spaces (P9.2) ---
+
+
+def test_followed_type_running_out_or_coming_back_sends_at_once(clock):
+    s = sub(space_types=["accessible"], last=status(30, special={"accessible": (2, 1)}))
+    one, none = (
+        status(30, special={"accessible": (2, 1)}),
+        status(29, special={"accessible": (2, 0)}),
+    )
+    now = later(clock, 0.5)  # inside the 2 min gap
+    assert special_flipped(s, one, none) and should_send_on_my_way(s, one, none, now)
+    assert special_flipped(s, none, one) and should_send_on_my_way(s, none, one, now)
+    # 2 -> 1 free is no flip, and neither is a type the user doesn't follow
+    two = status(31, special={"accessible": (2, 2)})
+    assert not special_flipped(s, two, one) and not should_send_on_my_way(s, two, one, now)
+    ev = sub(space_types=["ev"], last=one)
+    assert not special_flipped(ev, one, none)
+    assert not special_flipped(sub(last=one), one, none)
+    assert not special_flipped(s, None, none)
+
+
+def test_special_flip_respects_the_cap_and_the_watched_zones(clock):
+    one, none = status(30, special={"ev": (1, 1)}), status(29, special={"ev": (1, 0)})
+    capped = sub(space_types=["ev"], last=one, sent=MAX_PER_WINDOW)
+    assert not should_send_on_my_way(capped, one, none, later(clock, 3))
+    # the EV space is on the ground level; this user only watches the underground
+    other = sub(zones=["underground"], space_types=["ev"], last=one)
+    assert not special_flipped(other, one, none)
+    # a type that appeared with a slot-file change is not a flip
+    assert not special_flipped(sub(space_types=["ev"]), status(30), none)

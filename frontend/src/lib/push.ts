@@ -5,9 +5,10 @@
 import { API_BASE } from '../api/base'
 import { mockStatus } from '../api/mock'
 import { getRequest, sendJson } from '../api/client'
-import type { LotStatus } from '../api/types'
+import type { LotStatus, SpaceType } from '../api/types'
 import i18n, { t } from '../i18n'
 import { roundDistance } from './geo'
+import { specialTotals } from './status'
 import { isIosSafari, isStandalone } from './pwa'
 import {
   clearPushRegistration,
@@ -39,6 +40,8 @@ export interface Prefs {
   schedules: Schedule[]
   quiet_hours: QuietHours | null
   alert_when_almost_full: boolean
+  /** Special spaces named in every notification and followed while on the way (P9.2). */
+  space_types: SpaceType[]
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -48,6 +51,7 @@ export const DEFAULT_PREFS: Prefs = {
   schedules: [],
   quiet_hours: null,
   alert_when_almost_full: false,
+  space_types: [],
 }
 
 export const MAX_SCHEDULES = 10
@@ -274,9 +278,14 @@ export async function unsubscribe(base = API_BASE): Promise<void> {
   await sub?.unsubscribe().catch(() => undefined)
 }
 
-/** The zones as in a push body (api.md §6): "Ground 12 · Underground ≈11". */
-export function zonesSummary(status: LotStatus): string {
-  return status.zones.map((z) => `${z.name} ${z.method === 'flow' ? '≈' : ''}${z.free}`).join(' · ')
+/** The zones as in a push body (api.md §6): "Ground 12 · Underground ≈11", then the special
+ * spaces this device follows (`prefs.space_types`) that the lot has: "Accessible 1". */
+export function zonesSummary(status: LotStatus, types = loadPrefs().space_types): string {
+  const zones = status.zones.map((z) => `${z.name} ${z.method === 'flow' ? '≈' : ''}${z.free}`)
+  const special = specialTotals(status.zones)
+    .filter((s) => types.includes(s.type))
+    .map((s) => `${t(`special.${s.type}`)} ${s.free}`)
+  return [...zones, ...special].join(' · ')
 }
 
 /** "You're 400 m away · 23 free (Ground 12 · Underground ≈11)" (notifications.md §3). */

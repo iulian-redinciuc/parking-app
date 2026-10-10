@@ -1,7 +1,16 @@
 // Mock mode (`VITE_API_BASE=mock`, docs/design/frontend.md §3): a realistic, changing
 // `LotStatus` for UI work and Playwright, behind the same `LiveFeed` interface as live.ts.
 import lotInfoJson from './__fixtures__/lot-info.json'
-import type { Level, LiveFeed, LiveState, LotInfo, LotStatus, Trend, ZoneStatus } from './types'
+import type {
+  Level,
+  LiveFeed,
+  LiveState,
+  LotInfo,
+  LotStatus,
+  SpaceType,
+  Trend,
+  ZoneStatus,
+} from './types'
 
 /**
  * Forced edge states for UI checks (`?mock=<scenario>` in mock mode, P3.5): `loading` never
@@ -63,6 +72,27 @@ function mockSlotIds(info: LotInfo['zones'][number]): string[] | null {
     { length: info.capacity },
     (_, i) => `${info.id[0].toUpperCase()}${String(i + 1).padStart(2, '0')}`,
   )
+}
+
+/** The mock lot's special spaces: the last two of a `slots` zone are accessible, the two before
+ * them have EV chargers (zones of 10 spaces or more). */
+function mockSlotType(slots: string[], id: string): SpaceType | null {
+  if (slots.length < 10) return null
+  const fromEnd = slots.length - 1 - slots.indexOf(id)
+  return fromEnd < 2 ? 'accessible' : fromEnd < 4 ? 'ev' : null
+}
+
+function mockByType(slots: string[], taken: Set<string>): ZoneStatus['by_type'] {
+  const counts: NonNullable<ZoneStatus['by_type']> = {}
+  // newest ids first, so the keys come out in the server's order (accessible, then ev)
+  for (const id of [...slots].reverse()) {
+    const type = mockSlotType(slots, id)
+    if (!type) continue
+    const count = (counts[type] ??= { capacity: 0, free: 0 })
+    count.capacity++
+    if (!taken.has(id)) count.free++
+  }
+  return counts
 }
 
 // the mock map: rows of this many spaces, in pairs with a driving lane between the pairs
@@ -214,6 +244,7 @@ export function createMockLot(
       trend: trendFor(free - z.history[0], cap),
       updated_at: z.updatedAt,
       slots: z.slots ? Object.fromEntries(z.slots.map((s) => [s, z.taken.has(s)])) : null,
+      by_type: z.slots ? mockByType(z.slots, z.taken) : null,
     }
   }
 

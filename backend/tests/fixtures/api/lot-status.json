@@ -23,7 +23,11 @@
       "stale": false,
       "trend": "filling",
       "updated_at": "2026-10-07T17:05:12.000Z",
-      "slots": { "G01": true, "G02": false }
+      "slots": { "G01": true, "G02": false },
+      "by_type": {
+        "accessible": { "capacity": 2, "free": 1 },
+        "ev": { "capacity": 2, "free": 0 }
+      }
     },
     {
       "id": "underground",
@@ -37,7 +41,8 @@
       "stale": false,
       "trend": "steady",
       "updated_at": "2026-10-07T17:04:58.000Z",
-      "slots": null
+      "slots": null,
+      "by_type": null
     }
   ]
 }

@@ -10,8 +10,9 @@ import {
   type AdminIssue,
 } from '../api/client'
 import { IS_MOCK } from '../api/base'
-import type { LotInfo } from '../api/types'
+import type { LotInfo, SpaceType } from '../api/types'
 import InstallHint from '../components/InstallHint'
+import { useLiveStatus } from '../hooks/useLiveStatus'
 import { requestLocation } from '../lib/geo'
 import {
   cancelOnMyWay,
@@ -35,6 +36,7 @@ import {
   type Prefs,
   type Schedule,
 } from '../lib/push'
+import { SPACE_TYPES, specialTotals } from '../lib/status'
 
 // The Alerts screen (frontend.md §2.2, notifications.md §2): never asks for permission until
 // "Enable notifications" is tapped; iPhone Safari outside the installed app gets the install hint.
@@ -168,6 +170,7 @@ function PushSettings({ onGone }: { onGone: () => void }) {
   const { t, i18n } = useTranslation()
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs)
   const [lot, setLot] = useState<LotInfo | null>(null)
+  const { status } = useLiveStatus()
   const [save, setSave] = useState<SaveState>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [test, setTest] = useState<string | null>(null)
@@ -238,6 +241,18 @@ function PushSettings({ onGone }: { onGone: () => void }) {
     }
   }
 
+  // the special spaces the lot has (from the live status), plus any already followed
+  const lotTypes = specialTotals(status?.zones ?? []).map((s) => s.type)
+  const spaceTypes = SPACE_TYPES.filter(
+    (type) => lotTypes.includes(type) || prefs.space_types.includes(type),
+  )
+  const toggleType = (type: SpaceType) => {
+    const on = prefs.space_types.includes(type)
+    change({
+      space_types: SPACE_TYPES.filter((x) => (x === type ? !on : prefs.space_types.includes(x))),
+    })
+  }
+
   const zones = lot?.zones ?? []
   const zoneOn = (id: string) => prefs.zones === null || prefs.zones.includes(id)
   const toggleZone = (id: string) => {
@@ -279,6 +294,24 @@ function PushSettings({ onGone }: { onGone: () => void }) {
                 className="size-5 accent-accent"
               />
               <span>{z.name}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+
+      {spaceTypes.length > 0 && (
+        <fieldset className="flex flex-col gap-2 rounded-xl bg-surface p-4">
+          <legend className="float-left font-semibold">{t('alerts.special')}</legend>
+          <p className="text-sm text-muted">{t('alerts.special_hint')}</p>
+          {spaceTypes.map((type) => (
+            <label key={type} className="flex min-h-11 items-center gap-3">
+              <input
+                type="checkbox"
+                checked={prefs.space_types.includes(type)}
+                onChange={() => toggleType(type)}
+                className="size-5 accent-accent"
+              />
+              <span>{t(`special.${type}`)}</span>
             </label>
           ))}
         </fieldset>

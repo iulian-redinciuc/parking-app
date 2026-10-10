@@ -63,6 +63,17 @@ describe('shared API fixtures', () => {
     expect(isLotStatus(status)).toBe(false)
     expect(isLotStatus({ ...lotStatus, v: 2 })).toBe(false)
     expect(isLotStatus({ ...lotStatus, zones: [{ ...lotStatus.zones[1], slots: [] }] })).toBe(false)
+    // by_type (P9.2): absent from an older server, never a malformed count
+    const older: Record<string, unknown> = { ...lotStatus.zones[0] }
+    delete older.by_type
+    expect(isLotStatus({ ...lotStatus, zones: [older] })).toBe(true)
+    for (const by_type of [
+      { ev: 1 },
+      { ev: { capacity: 1 } },
+      { ev: { capacity: 1, free: -1 } },
+      [],
+    ])
+      expect(isLotStatus({ ...lotStatus, zones: [{ ...lotStatus.zones[0], by_type }] })).toBe(false)
     expect(isLotStatus({ ...lotStatus, total: { ...lotStatus.total, confidence: 1.2 } })).toBe(
       false,
     )

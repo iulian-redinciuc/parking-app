@@ -9,12 +9,13 @@ test('a count change is reflected on the Live screen', async ({ page }) => {
   await page.clock.install()
   await page.goto('./?mock=estimated#/')
   const count = page.getByTestId('big-count')
-  const zones = page.getByRole('list', { name: 'Zones' })
+  const zones = page.getByRole('list', { name: 'Zones' }).getByRole('listitem')
   await expect(count).toHaveText(/^≈ \d+$/)
 
   const read = async () => {
-    const free = [...((await zones.textContent()) ?? '').matchAll(/(\d+) \/ \d+/g)].map((m) =>
-      Number(m[1]),
+    // each card's first "n / capacity" is the zone's count (special-space chips come after it)
+    const free = (await zones.allTextContents()).map((text) =>
+      Number(text.match(/(\d+) \/ \d+/)?.[1]),
     )
     return { total: await count.textContent(), free }
   }

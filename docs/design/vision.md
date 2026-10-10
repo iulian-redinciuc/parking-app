@@ -237,6 +237,7 @@ occupied = clamp(occupied + (+1 if in else -1), 0, capacity)
 | `count` | median-smoothed count | 0.9 / 0.5, same rule |
 | `flow` | FlowCounter value | `max(0.3, 1 − 0.01 × events_since_correction − 0.02 × hours_since_correction)`. An initial heuristic, to be tuned in Phase 5 from measured drift |
 
+- **Special spaces** (P9.2): for a `slots` zone the store also counts the smoothed-free slots per slot `type` (`by_type`, [special-spaces.md §2](special-spaces.md#2-by_type-in-the-status)); a change there is published like a count change.
 - **Trend** over `trend_window_min` (15 min): Δfree ≤ −max(2, 5% of capacity) → `filling`; ≥ +that → `emptying`; else `steady`.
 - **Level**: computed from free/capacity (see [api.md](api.md#levels)).
 - The UI shows **"≈"** before a number when confidence < 0.8.

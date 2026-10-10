@@ -31,6 +31,7 @@ from parking.core.clock import Clock
 from parking.core.flow_counter import FlowCounter
 from parking.core.smoothing import CountSmoother, SlotSmoother
 from parking.messages import (
+    SPACE_TYPES,
     CameraHealthMsg,
     CameraState,
     FlowEventMsg,
@@ -39,6 +40,7 @@ from parking.messages import (
     Observation,
     Totals,
     Trend,
+    TypeCount,
     ZoneStatus,
 )
 
@@ -154,9 +156,19 @@ class _ZoneView:
     confidence: float
     stale: bool
     trend: Trend
+    # (type, capacity, free) of the zone's special spaces: `by_type` of a `slots` zone
+    by_type: tuple[tuple[str, int, int], ...] = ()
 
     def key(self) -> tuple:
-        return (self.occupied, self.free, self.level, self.confidence, self.stale, self.trend)
+        return (
+            self.occupied,
+            self.free,
+            self.level,
+            self.confidence,
+            self.stale,
+            self.trend,
+            self.by_type,
+        )
 
 
 class StateStore:
@@ -265,7 +277,8 @@ class StateStore:
         return self._diff("health")
 
     def replace_slot_file(self, camera_id: str, slot_file: SlotFile) -> list[Change]:
-        """An admin saved a new slot file (P7.3): new slot ids, zones and `slots` capacities.
+        """An admin saved a new slot file (P7.3): new slot ids, zones, types and `slots`
+        capacities.
 
         Smoothed states of slots that are gone are dropped; kept ids keep theirs (the worker's
         next readings correct them)."""
@@ -365,6 +378,11 @@ class StateStore:
                     trend=view.trend,
                     updated_at=self._updated_at[zone.id],
                     slots=slots,
+                    by_type=(
+                        {t: TypeCount(capacity=c, free=f) for t, c, f in view.by_type}
+                        if zone.method == "slots"
+                        else None
+                    ),
                 )
             )
         capacity = sum(z.capacity for z in zones)
@@ -415,6 +433,24 @@ class StateStore:
             if taken and self._slot_zone.get(c.id, {}).get(slot_id) == zone_id
         )
 
+    def _by_type(self, zone_id: str) -> tuple[tuple[str, int, int], ...]:
+        """(type, capacity, free) per special type the zone has, in `SPACE_TYPES` order. As in
+        the zone's own count, a space without a reading yet counts as free."""
+        counts: dict[str, list[int]] = {}
+        for camera in self._zone_cameras(zone_id):
+            slot_file = self.slot_files.get(camera.id)
+            if slot_file is None:
+                continue
+            slot_zone = self._slot_zone.get(camera.id, {})
+            states = self._slots[camera.id].states
+            for slot in slot_file.slots:
+                if slot.type == "standard" or slot_zone.get(slot.id) != zone_id:
+                    continue
+                count = counts.setdefault(slot.type, [0, 0])
+                count[0] += 1
+                count[1] += 0 if states.get(slot.id) else 1
+        return tuple((t, *counts[t]) for t in SPACE_TYPES if t in counts)
+
     def _stale(self, zone_id: str, now: datetime) -> bool:
         if self._updated_at[zone_id] is None:
             return True
@@ -450,6 +486,7 @@ class StateStore:
                 confidence=self._confidence(zone.id),
                 stale=self._stale(zone.id, now),
                 trend=trend_for(self._trend[zone.id].delta(now, self.trend_window), capacity),
+                by_type=self._by_type(zone.id) if zone.method == "slots" else (),
             )
         return views
 

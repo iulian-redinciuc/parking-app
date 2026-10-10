@@ -90,6 +90,27 @@ describe('ZoneCard', () => {
     expect(within(card).getByText(word)).toHaveClass(cls)
   })
 
+  it('shows a chip per kind of special space, with words for screen readers', () => {
+    const card = renderZone(zone())
+    const chips = within(card).getByRole('group', { name: 'Special spaces' })
+    expect(chips.children).toHaveLength(2)
+    expect(within(card).getByTestId('special-accessible')).toHaveTextContent('Accessible 1 / 2')
+    expect(within(card).getByText('Accessible: 1 of 2 free')).toHaveClass('sr-only')
+    expect(within(card).getByTestId('special-ev')).toHaveTextContent('EV charging 0 / 2')
+    expect(within(card).getByTestId('special-ev')).toHaveAttribute('data-free', '0')
+  })
+
+  it.each([[{}], [null], [undefined]])('shows no chips for by_type %j', (by_type) => {
+    const card = renderZone(zone({ by_type }))
+    expect(within(card).queryByRole('group', { name: 'Special spaces' })).toBeNull()
+  })
+
+  it('skips a space type this app version does not know', () => {
+    const by_type = { accessible: { capacity: 1, free: 1 }, taxi: { capacity: 3, free: 2 } }
+    const card = renderZone(zone({ by_type } as Partial<ZoneStatus>))
+    expect(within(card).getByRole('group', { name: 'Special spaces' }).children).toHaveLength(1)
+  })
+
   it('marks a low-confidence flow zone with ≈ and an Estimated note', () => {
     const card = renderZone({ ...status.zones[1], confidence: 0.6 })
     expect(card).toHaveTextContent('≈ 11 / 60')

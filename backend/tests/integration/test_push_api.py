@@ -193,6 +193,7 @@ async def test_subscribe_upserts_by_endpoint(lot):
             "schedules": [],
             "quiet_hours": None,
             "alert_when_almost_full": False,
+            "space_types": [],
         }
 
         other = body()
@@ -249,6 +250,13 @@ async def test_patch_replaces_prefs_and_validates(lot):
         bad = {"endpoint": ENDPOINT, "prefs": {"radius_m": 50}}
         r = await client.patch("/api/push/subscriptions", json=bad)
         assert r.status_code == 422
+
+        # special spaces (P9.2): stored unique, in the contract's order; `standard` isn't one
+        types = {"endpoint": ENDPOINT, "prefs": {"space_types": ["ev", "accessible", "ev"]}}
+        r = await client.patch("/api/push/subscriptions", json=types)
+        assert r.status_code == 200 and r.json()["prefs"]["space_types"] == ["accessible", "ev"]
+        types["prefs"]["space_types"] = ["standard"]
+        assert (await client.patch("/api/push/subscriptions", json=types)).status_code == 422
         unknown = {"endpoint": ENDPOINT + "-nope", "prefs": {}}
         r = await client.patch("/api/push/subscriptions", json=unknown)
         assert r.status_code == 404 and r.json()["error"]["code"] == "not_found"
@@ -369,3 +377,30 @@ def test_payload_without_zone_filter_and_unknown_tz():
     )  # fmt: skip
     p = status_payload(status, "almost_full", "#/", tz="Nowhere/Gone", zones=["roof"])
     assert (p["title"], p["body"], p["level"]) == ("Parking: 0 free", "Ground 0 · 14:05", "full")
+
+
+def test_payload_names_the_followed_special_spaces():
+    from parking.messages import LotStatus
+
+    zone = {"method": "slots", "capacity": 10, "occupied": 5, "free": 5, "level": "plenty",
+            "confidence": 1, "stale": False, "trend": "steady"}  # fmt: skip
+    status = LotStatus.model_validate(
+        {
+            "lot": "main",
+            "updated_at": "2026-10-09T14:05:00Z",
+            "total": {"capacity": 20, "occupied": 10, "free": 10, "level": "plenty",
+                      "confidence": 1, "stale": False},
+            "zones": [
+                zone | {"id": "ground", "name": "Ground", "by_type": {
+                    "accessible": {"capacity": 2, "free": 1}, "ev": {"capacity": 1, "free": 0}}},
+                zone | {"id": "roof", "name": "Roof", "by_type": {
+                    "accessible": {"capacity": 1, "free": 1}}},
+            ],
+        }
+    )  # fmt: skip
+    types = ["accessible", "ev", "reserved"]  # the lot has no reserved spaces: left out
+    p = status_payload(status, "schedule", "#/", space_types=types)
+    assert p["body"] == "Ground 5 · Roof 5 · Accessible 2 · EV charging 0 · 14:05"
+    p = status_payload(status, "schedule", "#/", zones=["roof"], space_types=types)
+    assert p["body"] == "Roof 5 · Accessible 1 · 14:05"
+    assert status_payload(status, "schedule", "#/")["body"] == "Ground 5 · Roof 5 · 14:05"

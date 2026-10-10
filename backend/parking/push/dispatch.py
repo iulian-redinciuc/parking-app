@@ -35,9 +35,10 @@ def localized(status: LotStatus, config: LotConfig, lang: str) -> LotStatus:
 
 
 def counts_changed(old: LotStatus, new: LotStatus) -> bool:
-    """Only free counts and levels feed the rules; trend/confidence-only changes don't."""
-    return [(z.id, z.free, z.level) for z in old.zones] != [
-        (z.id, z.free, z.level) for z in new.zones
+    """Only free counts (the special spaces' too) and levels feed the rules;
+    trend/confidence-only changes don't."""
+    return [(z.id, z.free, z.level, z.by_type) for z in old.zones] != [
+        (z.id, z.free, z.level, z.by_type) for z in new.zones
     ]
 
 
@@ -50,16 +51,17 @@ def send_status(
     url: str,
     urgency: Urgency,
 ) -> list[tuple[PushSubscription, SendResult]]:
-    """The status push to each of `subs`, one payload per (lang, tz, zones) so `send_many`
-    shares it; `(sub, result)` pairs."""
+    """The status push to each of `subs`, one payload per (lang, tz, zones, space types) so
+    `send_many` shares it; `(sub, result)` pairs."""
     groups: dict[tuple, list[PushSubscription]] = defaultdict(list)
     for sub in subs:
-        zones = (sub.prefs or {}).get("zones")
-        groups[(sub.lang, sub.tz, tuple(zones) if zones else None)].append(sub)
+        prefs = sub.prefs or {}
+        zones, types = prefs.get("zones"), prefs.get("space_types")
+        groups[(sub.lang, sub.tz, tuple(zones) if zones else None, tuple(types or ()))].append(sub)
     out = []
-    for (lang, tz, zones), group in groups.items():
+    for (lang, tz, zones, types), group in groups.items():
         shown = localized(status, config, lang) if status is not None else None
-        payload = status_payload(shown, kind, url, tz, list(zones or ()))
+        payload = status_payload(shown, kind, url, tz, list(zones or ()), list(types))
         out.extend(zip(group, sender.send_many(group, payload, urgency), strict=True))
     return out
 

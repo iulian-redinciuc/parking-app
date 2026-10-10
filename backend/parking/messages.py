@@ -31,6 +31,9 @@ ZoneMethod = Literal["slots", "count", "flow"]
 CameraState = Literal["ok", "degraded", "down"]
 CameraIssue = Literal["black", "frozen", "blurry", "shifted", "connect_failed"]
 Direction = Literal["in", "out"]
+# slot types counted separately (`by_type`); `standard` spaces only show in the zone's totals
+SpaceType = Literal["accessible", "ev", "motorcycle", "reserved"]
+SPACE_TYPES: tuple[SpaceType, ...] = ("accessible", "ev", "motorcycle", "reserved")
 
 
 class Message(BaseModel):
@@ -119,6 +122,13 @@ class Totals(Message):
     stale: bool
 
 
+class TypeCount(Message):
+    """The spaces of one type in a zone; they are part of the zone's own counts too."""
+
+    capacity: int = Field(ge=0)
+    free: int = Field(ge=0)
+
+
 class ZoneStatus(Message):
     id: str
     name: str
@@ -132,6 +142,8 @@ class ZoneStatus(Message):
     trend: Trend
     updated_at: UtcDatetime | None = None
     slots: dict[str, bool] | None = None
+    # special spaces per type, only for `slots` zones (`{}` = the zone has none)
+    by_type: dict[SpaceType, TypeCount] | None = None
 
 
 class LotStatus(Message):

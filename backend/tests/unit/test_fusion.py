@@ -450,3 +450,86 @@ def test_flow_counter_clamp_duplicates_correct_restore():
     counter.restore(1, corrected_at=clock.now(), events_since_correction=3)
     assert counter.occupied == 1
     assert counter.confidence() == pytest.approx(0.97)
+
+
+# --- special spaces (P9.2) ---
+
+SPECIAL = {"G01": "accessible", "G02": "accessible", "G03": "ev"}
+
+
+def typed_slot_file(types=SPECIAL, ids=GROUND_SLOTS) -> SlotFile:
+    return SlotFile.model_validate(
+        {
+            "version": 1,
+            "camera_id": "cam-ground",
+            "image_size": [100, 100],
+            "slots": [
+                {"id": s, "zone": "ground", "polygon": SQUARE, "type": types.get(s, "standard")}
+                for s in ids
+            ],
+        }
+    )
+
+
+def by_type(store, zone_id="ground"):
+    counts = zone(store, zone_id).by_type
+    return counts and {t: (c.capacity, c.free) for t, c in counts.items()}
+
+
+def test_by_type_counts_the_special_spaces_of_a_slots_zone():
+    clock = FakeClock()
+    store = StateStore(make_config(), clock, {"cam-ground": typed_slot_file()})
+    # before any reading a space counts as free, like in the zone's own count
+    assert by_type(store) == {"accessible": (2, 2), "ev": (1, 1)}
+    store.apply_observation(obs(clock, taken={"G01", "G03", "G07"}))
+    assert by_type(store) == {"accessible": (2, 1), "ev": (1, 0)}
+    assert zone(store, "ground").free == 7  # special spaces are part of the zone's count
+    # only `slots` zones have it
+    assert by_type(store, "roof") is None and by_type(store, "underground") is None
+
+
+def test_by_type_is_empty_without_special_spaces():
+    store, clock = make_store()
+    store.apply_observation(obs(clock, taken={"G01"}))
+    assert by_type(store) == {}
+
+
+def test_by_type_follows_the_smoothed_state():
+    clock = FakeClock()
+    store = StateStore(make_config(), clock, {"cam-ground": typed_slot_file()})
+    store.apply_observation(obs(clock))
+    k = store.config.cameras[0].smoothing.consistent_readings
+    for _ in range(k - 1):
+        store.apply_observation(obs(clock, taken={"G03"}))
+        assert by_type(store)["ev"] == (1, 1)
+    store.apply_observation(obs(clock, taken={"G03"}))
+    assert by_type(store)["ev"] == (1, 0)
+
+
+def test_a_swap_between_types_is_a_change_even_when_the_count_stays():
+    clock = FakeClock()
+    store = StateStore(make_config(), clock, {"cam-ground": typed_slot_file()})
+    k = store.config.cameras[0].smoothing.consistent_readings
+    for _ in range(k):
+        store.apply_observation(obs(clock, taken={"G01"}))
+    assert by_type(store)["accessible"] == (2, 1)
+    before = store.updated_at
+    clock.advance(seconds=5)
+    # the accessible space frees up while a standard one is taken: still 9 free
+    changes = []
+    for _ in range(k):
+        changes += store.apply_observation(obs(clock, taken={"G07"}))
+    [change] = zone_changes(changes, "ground")
+    assert (change.free, change.count_changed) == (9, False)
+    assert store.updated_at > before
+    assert by_type(store)["accessible"] == (2, 2)
+
+
+def test_retyping_a_slot_in_the_editor_is_published():
+    clock = FakeClock()
+    store = StateStore(make_config(), clock, {"cam-ground": typed_slot_file()})
+    store.apply_observation(obs(clock))
+    changes = store.replace_slot_file("cam-ground", typed_slot_file({"G05": "reserved"}))
+    assert [c.source for c in zone_changes(changes, "ground")] == ["config"]
+    assert by_type(store) == {"reserved": (1, 1)}
+    assert store.replace_slot_file("cam-ground", typed_slot_file({"G05": "reserved"})) == []

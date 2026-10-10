@@ -53,8 +53,19 @@ describe('mock feed', () => {
       for (const z of s.zones) {
         expect(z.free).toBe(z.capacity - z.occupied)
         expect(z.level).toBe(levelFor(z.free, z.capacity))
-        if (z.slots) expect(Object.values(z.slots).filter(Boolean)).toHaveLength(z.occupied)
-        else expect(z.method).not.toBe('slots')
+        if (z.slots) {
+          expect(Object.values(z.slots).filter(Boolean)).toHaveLength(z.occupied)
+          // the special spaces are the zone's last four: 2 EV chargers, then 2 accessible
+          const last = Object.values(z.slots).slice(-4)
+          expect(z.by_type).toEqual({
+            accessible: { capacity: 2, free: last.slice(2).filter((taken) => !taken).length },
+            ev: { capacity: 2, free: last.slice(0, 2).filter((taken) => !taken).length },
+          })
+          expect(Object.keys(z.by_type!)).toEqual(['accessible', 'ev'])
+        } else {
+          expect(z.method).not.toBe('slots')
+          expect(z.by_type).toBeNull()
+        }
       }
     }
     const zones = statuses.flatMap((s) => s.zones)

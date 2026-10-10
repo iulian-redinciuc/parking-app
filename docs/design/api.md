@@ -19,14 +19,16 @@ Returned by `GET /api/status` and sent in every SSE `status` event.
       "capacity": 40, "occupied": 28, "free": 12,
       "level": "filling", "confidence": 1.0, "stale": false,
       "trend": "filling", "updated_at": "2026-10-07T17:05:12Z",
-      "slots": { "G01": true, "G02": false }
+      "slots": { "G01": true, "G02": false },
+      "by_type": { "accessible": { "capacity": 2, "free": 1 }, "ev": { "capacity": 1, "free": 0 } }
     },
     {
       "id": "underground", "name": "Underground", "method": "flow",
       "capacity": 60, "occupied": 49, "free": 11,
       "level": "filling", "confidence": 0.86, "stale": false,
       "trend": "steady", "updated_at": "2026-10-07T17:04:58Z",
-      "slots": null
+      "slots": null,
+      "by_type": null
     }
   ]
 }
@@ -38,6 +40,7 @@ Returned by `GET /api/status` and sent in every SSE `status` event.
 | `total.confidence` | The lowest zone confidence |
 | `total.stale` | `true` if **any** zone is stale |
 | `slots` | Map slot id → taken, only for `slots` zones (drawn by the slot map, [slot-map.md](slot-map.md)) |
+| `by_type` | Special spaces per slot type (`accessible`, `ev`, `motorcycle`, `reserved`; never `standard`), only for `slots` zones: `capacity` and `free` of each type the zone has, `{}` when it has none, `null` for other zones. They are part of the zone's own counts ([special-spaces.md](special-spaces.md), P9.2). Clients accept an answer without it |
 | `trend` | `filling` / `emptying` / `steady` (see [vision.md §8](vision.md#8-fusion-confidence-trend-parkingcorefusionpy)) |
 | `updated_at` (zone) | `null` until the zone has received data |
 
@@ -105,10 +108,11 @@ Push routes (`parking/api/routes/push.py`, P6.2): the subscription is found by `
   "zones": ["ground", "underground"],
   "schedules": [ { "days": [1, 2, 3, 4, 5], "time": "08:30" } ],
   "quiet_hours": { "from": "22:00", "to": "07:00" },
-  "alert_when_almost_full": true
+  "alert_when_almost_full": true,
+  "space_types": ["accessible"]
 }
 ```
-(`days`: 1 = Monday … 7 = Sunday, in the subscription's `tz`.) Rules: `radius_m` 100–5000 (`null` = the lot's `notify_radius_m`); `zones` ids from lot.yaml (`null` = all); `time`, `from`, `to` are `HH:MM` (00:00–23:59); `days` 1–7, 1–7 entries, stored sorted and unique; at most 10 schedules. Defaults when left out: `proximity` / `alert_when_almost_full` `false`, `radius_m` / `zones` / `quiet_hours` `null`, `schedules` `[]`; the stored prefs always have every key.
+(`days`: 1 = Monday … 7 = Sunday, in the subscription's `tz`.) Rules: `radius_m` 100–5000 (`null` = the lot's `notify_radius_m`); `zones` ids from lot.yaml (`null` = all); `time`, `from`, `to` are `HH:MM` (00:00–23:59); `days` 1–7, 1–7 entries, stored sorted and unique; at most 10 schedules. `space_types` (P9.2): special slot types (`accessible`, `ev`, `motorcycle`, `reserved`) to name in every push and to follow while on the way ([special-spaces.md §4](special-spaces.md#4-notifications)), stored unique in that order; anything else is 422. Defaults when left out: `proximity` / `alert_when_almost_full` `false`, `radius_m` / `zones` / `quiet_hours` `null`, `schedules` / `space_types` `[]`; the stored prefs always have every key (a subscription stored before P9.2 has no `space_types`, read as `[]`).
 
 ---
 
@@ -278,6 +282,8 @@ Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `
   "kind": "on_my_way"
 }
 ```
+With `prefs.space_types`, the body names the free special spaces of the shown zones before the time: `Ground 12 · Underground ≈11 · Accessible 1 · EV charging 0 · 17:05` (only types those zones have).
+
 `tag` makes a new notification replace the previous one instead of stacking. `kind`: `test | on_my_way | schedule | almost_full | admin_alert`. An `admin_alert` (P7.8) has an English title starting `Admin: `, `level: null`, a per-issue `tag` (`admin-<kind>:<id>`, so its hourly repeat and its "resolved" replace it), `url` the camera page (`#/admin/cameras/<id>`) or `#/admin`, plus `"issue": "<kind>:<id>"` and `"resolved": bool`.
 
 ---

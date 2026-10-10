@@ -28,6 +28,7 @@ Phase guides **link to** the design specs instead of repeating them. If a spec a
 | [design/security-privacy.md](design/security-privacy.md) | Threats, controls, secrets, public-repo rules, GDPR checklist |
 | [design/testing.md](design/testing.md) | Test layers, fixtures, CI, evaluation datasets, device matrix |
 | [design/slot-map.md](design/slot-map.md) | The slot map (P9.1): map file format, `parking slot-map`, the map endpoint, how the app draws it |
+| [design/special-spaces.md](design/special-spaces.md) | Special spaces (P9.2): slot types, `by_type` in the status, the chips on the zone card, the notification preference |
 
 ## Phase guides
 

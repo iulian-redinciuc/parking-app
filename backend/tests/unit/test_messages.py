@@ -47,10 +47,12 @@ LOT_STATUS = {
         {"id": "ground", "name": "Ground", "method": "slots", "capacity": 40,
          "occupied": 28, "free": 12, "level": "filling", "confidence": 1.0, "stale": False,
          "trend": "filling", "updated_at": "2026-10-07T17:05:12.000Z",
-         "slots": {"G01": True, "G02": False}},
+         "slots": {"G01": True, "G02": False},
+         "by_type": {"accessible": {"capacity": 2, "free": 1}}},
         {"id": "underground", "name": "Underground", "method": "flow", "capacity": 60,
          "occupied": 49, "free": 11, "level": "filling", "confidence": 0.86, "stale": False,
-         "trend": "steady", "updated_at": "2026-10-07T17:04:58.000Z", "slots": None},
+         "trend": "steady", "updated_at": "2026-10-07T17:04:58.000Z", "slots": None,
+         "by_type": None},
     ],
 }  # fmt: skip
 

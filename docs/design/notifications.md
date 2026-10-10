@@ -59,9 +59,10 @@ After that, on every status change, for each subscription with `on_my_way_until 
 | Level changed | e.g. `plenty → filling`, `almost_full → full` |
 | Free changed a lot | `abs(free − last_sent_free) ≥ max(3, 10% of capacity)` (for the zones in `prefs.zones`) |
 | A preferred zone became full | always, even if the above doesn't hold |
+| A followed special space type ran out or came back (P9.2) | `prefs.space_types`: its free count in the preferred zones went 0 ↔ more than 0; ignores the gap like "became full" ([special-spaces.md §4](special-spaces.md#4-notifications)) |
 
 …and all of these hold:
-- ≥ 2 min since `last_sent_at` (except "became full", which ignores the gap),
+- ≥ 2 min since `last_sent_at` (except "became full" and the special-space rule, which ignore the gap),
 - ≤ 6 pushes per on-my-way window,
 - not in quiet hours (on-my-way **overrides** quiet hours, since the user explicitly asked).
 
