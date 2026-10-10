@@ -118,7 +118,11 @@ class StatusNotifier:
     async def drain(self) -> None:
         """Wait for the pending dispatches (tests, shutdown)."""
         while self._tasks:
-            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+            tasks = list(self._tasks)
+            await asyncio.gather(*tasks, return_exceptions=True)
+            # not left to the done callbacks: gathering tasks that have all just finished
+            # returns without yielding, so their callbacks would never get to run
+            self._tasks.difference_update(tasks)
 
     def dispatch(self, old: LotStatus, new: LotStatus, now: datetime) -> list[SendResult]:
         raise NotImplementedError
