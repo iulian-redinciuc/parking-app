@@ -352,6 +352,8 @@ Runbook sections, each with symptoms → checks (commands) → fix:
 
 **Done when:** someone other than you could follow the runbook to fix a stale camera.
 
+*Status (P8.12):* written ([runbook](../runbook.md)); the README has a *Production* section pointing to it. The stale-camera section was walked through on the dev Pi against a throwaway API + worker (worker stopped, wrong token, API unreachable, camera unreachable, then the fix). The steps that need the production machines (VPN, public entry, provisioning, updates) are written from the specs and get their first real run in P8.13. One thing to know with two machines: a slot or line file saved in the admin editor is written on the server and has to be copied to the lot box (runbook → *Counts are wrong*).
+
 ## P8.13: Staging run and go-live
 **Steps**
 1. Run production for **7 days** with only you and a few testers, comparing against reality daily (as in P4.11/P5.11).

@@ -1,8 +1,351 @@
 # Runbook
 
-What to do when the running system misbehaves: symptoms → checks (commands) → fix. Production paths are used (`/opt/parking`, [deployment.md §10](design/deployment.md#10-provisioning-the-production-machines-t2)); "server" is the API machine, "lot box" the vision host.
+What to do when the running system misbehaves, and how to do the routine jobs: symptoms → checks (commands) → fix. Production paths are used (`/opt/parking`, [deployment.md §10](design/deployment.md#10-provisioning-the-production-machines-t2)); "server" is the API machine (the cloud VM), "lot box" the vision host at the lot.
 
-> Started in P8.6 with backups and restore; the alerts table is from P8.7, the security check from P8.8, the drills from P8.11. The other sections (stale camera, drifting count, tunnel down, full disk, updates, secret rotation, …) are written in [P8.12](phases/phase-8-hardening.md#p812-runbook-and-readme).
+| Something is wrong | Routine jobs | Regular checks |
+|--------------------|--------------|----------------|
+| [The app can't reach the server](#the-app-shows-cant-reach-the-parking-server) | [Deploy a new version / roll back](#deploy-a-new-version--roll-back) | [Backups](#backups) |
+| [A zone is stale / a camera is down](#a-zone-is-stale--a-camera-is-down) | [Restore from backup](#restore-from-backup) | [Privacy check](#privacy-check) |
+| [Counts are wrong (occupancy)](#counts-are-wrong-occupancy-camera) | [Rotate a secret](#rotate-a-secret) | [Security check](#security-check) |
+| [Counts are drifting (flow)](#counts-are-drifting-flow-camera) | [Add a language / zone / camera](#add-a-language--zone--camera) | [Power and network drills](#power-and-network-drills) |
+| [Camera shifted](#camera-shifted) | [Rebuild the dev environment](#rebuild-the-dev-environment) | |
+| [An alert arrived](#alerts) | | |
+
+## Where things are
+
+| | Server (cloud VM) | Lot box (vision host) |
+|---|---|---|
+| Containers | `parking-api`, `parking-web` (Caddy + the app) | `parking-vision-occupancy` (camera `cam-ground`), `parking-vision-flow` (`cam-ramp`), `parking-autoheal` |
+| Compose file (in `/opt/parking/deploy`) | `docker-compose.server.yml`, profile `web` | `docker-compose.site.yml`, profile `flow` |
+| Address on the VPN (`wg0`) | `10.77.0.1` (API on port 8000) | `10.77.0.2` (workers' control ports 9000, 9001) |
+| `/opt/parking/deploy/.env` | all the API's secrets | the camera URLs, the server's `WORKER_TOKEN` |
+| `/opt/parking/config/` | `lot.yaml`, `slots/`, `lines/`: **the same files on both machines** | |
+| `/opt/parking/data/` | `db/` (the database), `backups/` | `reference/`, `outbox/`, `debug/`, `recordings/` |
+
+The lot box has no public address. Reach it through the server: `ssh -J <you>@<server> <you>@10.77.0.2`.
+
+The commands below use these two shorthands. Paste the one for the machine you are on first:
+
+```bash
+# server
+cd /opt/parking/deploy && DC="docker compose -f docker-compose.server.yml --profile web"
+# lot box
+cd /opt/parking/deploy && DC="docker compose -f docker-compose.site.yml --profile flow"
+```
+
+`.env` is read when a container is **created**: after changing it run `$DC up -d` (it recreates what changed). `docker restart` keeps the old values. `lot.yaml` is read when a process starts, so there `docker restart <container>` is enough.
+
+Admin calls from a shell use the static token (on the server; from elsewhere copy it from your password manager):
+
+```bash
+ADMIN_TOKEN=$(sed -n 's/^ADMIN_TOKEN=//p' /opt/parking/deploy/.env)
+HOST=https://<PUBLIC_HOST>            # on the server itself http://127.0.0.1:8000 works too
+```
+
+The `parking` command line on the lot box (for a grab, a recording, an evaluation) runs in the vision image:
+
+```bash
+P="docker run --rm --env-file .env -v /opt/parking/config:/app/config -v /opt/parking/data:/app/data -v /opt/parking/models:/app/models -w /app --entrypoint /app/backend/.venv/bin/parking ghcr.io/iulian-redinciuc/parking-vision:$(sed -n 's/^PARKING_VERSION=//p' .env)"
+```
+
+## The app shows "Can't reach the parking server"
+
+**Symptoms:** the red banner *Can't reach the parking server* with the header on *Offline*, for everybody. (*You're offline* is the phone's own connection; *Camera data is n min old* is [a stale zone](#a-zone-is-stale--a-camera-is-down): the server answers, the cameras don't.)
+
+**Check**, from a connection that is not the server's or the lot's (a phone on mobile data, your laptop):
+
+```bash
+curl -sS -m 10 -o /dev/null -w '%{http_code}\n' https://<PUBLIC_HOST>/healthz     # 200 = the server is fine
+curl -sS -m 10 https://<PUBLIC_HOST>/api/status | head -c 300
+```
+
+| `curl` says | Cause | Fix |
+|-------------|-------|-----|
+| `Could not resolve host` | The name doesn't point at the server | A domain: its DNS A record. No domain: the name is `<the server's IPv4 with dashes>.sslip.io`, so a new address means a new `PUBLIC_HOST`, `CORS_ORIGINS` and `PUBLIC_APP_URL` in `.env`, then `$DC up -d` |
+| `Connection timed out` / `refused` | The VM is off, or ports 80/443 are closed | The provider's console: is it running? Then SSH in: `sudo ufw status` (80, 443 allowed), `$DC ps` (`parking-web` up), `$DC up -d` |
+| A certificate / TLS error | Caddy couldn't get or renew the certificate | `docker logs --tail 50 parking-web`: it needs ports 80 and 443 open and `PUBLIC_HOST` resolving to this machine. Then `docker restart parking-web` |
+| `502` | Caddy runs, the API doesn't | `$DC ps`; `docker logs --tail 50 parking-api` (the error is at the end); `$DC up -d`. `Can't locate revision`: the database is from a newer release, see [Restore](#restore-from-backup) |
+| `429` | The rate limit (120 requests a minute per address) | Wait a minute. If it's everybody: `docker logs --since 10m parking-web` shows who is hammering |
+| `200` for `/healthz`, `503` for `/api/status` | The API is up and has never had data since it started | [A zone is stale](#a-zone-is-stale--a-camera-is-down) |
+| `200` for both, the app still can't | The app is opened from another address than the API allows | `grep -E '^(PUBLIC_HOST\|CORS_ORIGINS)=' .env`: `CORS_ORIGINS` must be exactly `https://<PUBLIC_HOST>`. Then `$DC up -d` |
+
+No SSH either: the machine is off or its network is gone, which only the provider's console and status page can show. After any fix: `scripts/boot-check.sh server` waits and prints `ready …` once every container is healthy and no zone is stale. (Its last line, `later than the limit`, and its exit code 1 are about the time since the machine booted: they only matter right after a reboot.)
+
+## A zone is stale / a camera is down
+
+**Symptoms:** a zone says *not live* and the banner *Camera data is n min old* (or *No camera data yet*); the admin alert *Camera … is down* (after about 3 min) or *…: no fresh data* (after 5 min). The app keeps showing the last known numbers.
+
+**1. Which camera, and what does it say?** In the app: *Admin* → the camera list. Or from a shell:
+
+```bash
+curl -s $HOST/healthz                                                      # "cameras":{"cam-ground":"down",…}
+curl -s -H "Authorization: Bearer $ADMIN_TOKEN" $HOST/api/admin/cameras    # state, issue, last_frame_age_s, last_health_age_s
+```
+
+| `state` / `issue` | Meaning | Go to |
+|-------------------|---------|-------|
+| `unknown`, or `down` with `last_health_age_s` growing past 30 | The API hears nothing from the worker | step 2 |
+| `down` / `degraded` with `issue: connect_failed` | The worker runs and reports, but gets no picture from the camera | step 3 |
+| `issue: black`, `frozen` or `blurry` | The camera delivers pictures the worker can't use | step 4 |
+| `issue: shifted` | The camera moved | [Camera shifted](#camera-shifted) |
+| `ok`, but the zone is still stale | Frames arrive, results don't | step 2 (the worker's log) |
+
+**2. The worker and its way to the API** (on the lot box). No SSH to the lot box at all: its power or the lot's internet is out, and somebody has to go and look (power LED, router, cables); it starts and reconnects by itself once both are back.
+
+```bash
+$DC ps                                              # every container "Up … (healthy)"
+docker logs --tail 50 parking-vision-occupancy      # or parking-vision-flow
+ping -c 3 10.77.0.1                                 # the server over the VPN
+curl -sS -m 5 http://10.77.0.1:8000/healthz         # the API over the VPN
+```
+
+| What you see | Fix |
+|--------------|-----|
+| The container is missing or `Exited` | `$DC up -d`. If it exits again, the last log lines say why (a field in `lot.yaml`, a missing slot file or model) |
+| `Restarting` / `unhealthy` over and over | The worker's loop hangs and `parking-autoheal` keeps restarting it: the log before each restart shows where. Out of memory (`docker inspect -f '{{.State.OOMKilled}}' parking-vision-occupancy`): raise `VISION_MEMORY` / `FLOW_MEMORY` in `.env`, `$DC up -d` |
+| `POST /internal/… failed, dropped: ConnectError` / `ConnectTimeout`, `ping` fails | The VPN is down: `sudo wg show` (a `latest handshake` under 3 min is good), `sudo systemctl restart wg-quick@wg0`. Still nothing: the lot's internet (`ping -c 3 1.1.1.1`), or the server (the section above) |
+| `ping` works, `curl` doesn't | The API isn't running, or not on the VPN address: on the server `$DC ps` and `grep VPN_BIND_IP .env` (`10.77.0.1`) |
+| `failed, dropped: HTTP 401` | `WORKER_TOKEN` differs between the two machines: copy the server's into the lot box's `.env`, `$DC up -d` |
+| `failed, dropped: HTTP 422` | The two machines' `lot.yaml` differ (the server doesn't know this camera or its role): make them the same, restart the API and the worker |
+
+**3. The camera** (on the lot box):
+
+```bash
+grep -E '^CAM_.*_URL=' .env | sed -E 's#//[^@]*@#//<user:password>@#'      # the camera's address, without the password
+ping -c 3 <camera address>
+$P grab --camera cam-ground --out data/debug/check.jpg --force             # "… frame from 'cam-ground' …", or why no frame comes
+```
+
+| What you see | Fix |
+|--------------|-----|
+| `ping` fails | Power and cable: the PoE port's light on the switch, the cable, the camera's own LED. Power-cycle the camera (unplug its PoE cable for 10 s). A changed address: give it back its fixed address in the router ([hardware.md](design/hardware.md)) |
+| `ping` works, the grab ends with `no frame from … : HTTP 401` (or `403`) | The camera's password isn't the one in `.env`: [Rotate a secret](#rotate-a-secret) |
+| `ping` works, the grab ends with a timeout or `HTTP 404` | The stream or snapshot is switched off in the camera, or the path in the URL is wrong: the camera's web page (from the lot box's network), then the URL in `.env` |
+| The grab works | The camera is fine now: `docker restart parking-vision-occupancy` and watch its log. Delete `data/debug/check.jpg` |
+
+**4. The picture.** *Admin* → the camera → *New snapshot* shows what the worker sees (also a frame it refused).
+
+| Issue | Usual cause | Fix |
+|-------|-------------|-----|
+| `black` | Lens covered, no light and no infrared at night | Uncover it; switch the camera's IR / night mode on. A lit lot that is simply dark: lower `health.black_mean_max` for that camera in `lot.yaml` |
+| `frozen` | The camera repeats one picture (its firmware hangs) | Power-cycle the camera; update its firmware if it comes back |
+| `blurry` | Dirt, water or a spider's web on the lens; focus lost | Clean the lens, refocus. Soft night pictures that are fine to the eye: lower `health.blur_laplacian_min` (how to measure: [vision.md §5](design/vision.md#5-frame-health-parkingvisionhealthpy)) |
+
+A threshold change in `lot.yaml` goes on **both** machines; then `docker restart` the worker.
+
+**5. Confirm.** The zone is live again within a minute of the first good frame (3 consistent readings for a changed space):
+
+```bash
+curl -s $HOST/healthz                 # the camera is "ok"
+scripts/boot-check.sh server          # on the server: "ready …" = every container healthy, no zone stale
+```
+
+The alert sends its own "…is back up" push. A flow zone that was blind while cars drove in or out now has a wrong count: [correct it](#counts-are-drifting-flow-camera).
+
+## Counts are wrong (occupancy camera)
+
+**Symptoms:** the free count of a `slots` zone (ground) differs from what you see at the lot, while the camera is `ok`.
+
+**Check:** *Admin* → the camera → the annotated snapshot. Every space is drawn in its colour for free or taken.
+
+| What the snapshot shows | Cause | Fix |
+|-------------------------|-------|-----|
+| All shapes sit beside their spaces by the same amount | The camera moved | [Camera shifted](#camera-shifted) |
+| One or a few shapes are off, cover a neighbour's car, or a space is missing | The slot file | *Edit parking spaces*: drag the corners onto the **ground** of the space (where the tyres stand), add or delete spaces, *Save* |
+| The shapes are right, some spaces are still read wrong (a shadow, a wet patch, a dark car on dark ground) | The scoring | Tune it with the numbers below |
+| The picture is right and so is the count, the app shows an older number | A space changes only after 3 readings in a row agree | Wait 15 s. If it stays: [stale](#a-zone-is-stale--a-camera-is-down) |
+
+**After *Save* with the server and the lot box on two machines:** the editor writes `config/slots/<camera>.json` on the **server**, but the worker reads the lot box's copy. Until the copies are the same, the app counts with the new spaces and the worker measures the old ones. Copy the file over and restart the worker, from your own machine:
+
+```bash
+scp <you>@<server>:/opt/parking/config/slots/cam-ground.json /tmp/cam-ground.json
+scp -J <you>@<server> /tmp/cam-ground.json <you>@10.77.0.2:/opt/parking/config/slots/cam-ground.json
+ssh -J <you>@<server> <you>@10.77.0.2 docker restart parking-vision-occupancy
+```
+
+(`Permission denied`: the `config/` folders belong to uid 1000, the containers' user; copy as that user or `sudo chown -R 1000:1000 /opt/parking/config` afterwards.)
+
+**Tuning the scoring** (on the lot box, on pictures you counted by hand):
+
+```bash
+$P grab --camera cam-ground --out data/debug/now.jpg --force
+$P analyze --image data/debug/now.jpg --camera cam-ground --out data/debug/analyze     # now.json (score per space) + now.png
+$P analyze --image data/debug/now.jpg --camera cam-ground --out data/debug/analyze --threshold 0.25    # try another threshold
+$P evaluate --camera cam-ground --images data/validation/cam-ground --sweep 0.15:0.5:0.05   # the labelled validation set: the best threshold overall
+```
+
+Put the value into `occupancy.threshold` of that camera in `lot.yaml` on both machines and `docker restart parking-vision-occupancy`. Don't tune on one picture: a threshold that fixes today's shadow can break the night. The target is ≥ 97% of spaces right on the validation set ([vision.md §10](design/vision.md#10-evaluation-parkingvisionevaluatepy)). Delete the pictures in `data/debug/` afterwards (they can show people and plates).
+
+## Counts are drifting (flow camera)
+
+**Symptoms:** the count of a `flow` zone (underground) moves away from the real number of cars over days; the app shows the zone's number with `≈` (low confidence); the admin alert *…: entry/exit count is off* (more than 3 entries or exits in a day that would have taken it below 0 or above the capacity).
+
+A flow zone only counts cars crossing a line, so every missed or doubled car stays in the number until somebody corrects it.
+
+**Fix first: correct the count.** Count the cars on the level, then *Admin* → the zone's form (number, note), or:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"occupied": 37, "note": "hand count"}' $HOST/api/admin/zones/underground/correct
+curl -s -H "Authorization: Bearer $ADMIN_TOKEN" "$HOST/api/admin/corrections?limit=10"     # the log: old → new, when, who
+```
+
+Phones show the new number at once. If the level is empty every night, let the app do it: `zones[].reset` in `lot.yaml` (`enabled: true`, `cron: "0 3 * * *"`, `value: 0`; [config.md §1](design/config.md#1-configlotyaml)), on the server, then `docker restart parking-api`.
+
+**Then find out why**, when the corrections are more than a car or two a day:
+
+| Check | Command | Fix |
+|-------|---------|-----|
+| Was the camera away? Cars that pass while it is down are never counted | *Admin* → cameras; `docker logs --since 24h parking-vision-flow \| grep -ci reconnect` on the lot box | [A camera is down](#a-zone-is-stale--a-camera-is-down) |
+| Did events wait on the lot box? | `ls -l /opt/parking/data/outbox/` (empty when everything was delivered) | They are sent when the link is back; nothing to do |
+| Are the lines still where the cars drive? | `$P lines-check --camera cam-ramp --image data/debug/ramp.jpg --out data/debug/ramp-lines.jpg` after a `$P grab --camera cam-ramp --out data/debug/ramp.jpg --force` | *Admin* → the camera → *Edit counting lines*, *Save* (two machines: copy `config/lines/cam-ramp.json` to the lot box like a slot file, restart `parking-vision-flow`) |
+| How well does it count? | Check the clips, below | |
+
+**Check the clips.** Record an hour, count it by hand, compare:
+
+```bash
+$P record --camera cam-ramp --minutes 60 --out data/recordings          # on the lot box, at the time of day that drifts
+# copy the .mp4 to your own machine (it never goes into the repo), then in a clone of the repo:
+python3 -m http.server 8765 --bind 127.0.0.1                             # open http://127.0.0.1:8765/tools/flow-tally/
+#   press I / O as each car crosses, export the CSV to data/labels/<clip name>.csv
+cd backend && uv run parking evaluate-flow --video ../data/recordings/<clip>.mp4 --camera cam-ramp \
+  --debug-video ../out/eval/<clip>.mp4                                   # TP / FP / FN, accuracy, net error
+```
+
+The target is ≥ 98% of crossings and a net error of at most 2 cars a day ([vision.md §10](design/vision.md#flow-metrics-per-clip)). The debug video shows each miss: cars counted twice or not at all at the same spot mean the lines (move them apart, away from where cars stop or turn); misses at night mean the picture (lighting, `detector.conf`); tailgating cars merged into one mean `flow.min_track_frames`. Try a value with `--lines`, `--conf` or `--min-track-frames` on the same clip before changing `lot.yaml`. Delete the recordings when done.
+
+## Camera shifted
+
+**Symptoms:** the admin alert *Camera … has shifted*; *Admin* shows the camera `degraded` with *camera moved*; the shapes on the annotated snapshot sit beside the spaces. The worker keeps counting, with shapes that now point at the wrong ground. It never clears by itself.
+
+**Check:** *Admin* → the camera → the annotated snapshot. Compare with the reference picture if in doubt (`/opt/parking/data/reference/<camera>.jpg` on the lot box).
+
+| What happened | Fix |
+|---------------|-----|
+| The camera was knocked and can be turned back | Turn it until the shapes sit on the spaces again in a *New snapshot*, tighten the mount, then *Save reference frame* |
+| It stays where it is now (a new mount, a small permanent nudge) | *Edit parking spaces* (or *Edit counting lines*) → *Move all* and drag every shape onto its space, fix single corners, *Save* (two machines: copy the file to the lot box as in [Counts are wrong](#counts-are-wrong-occupancy-camera)), then *Save reference frame* |
+| The shapes are right, the alert is wrong (scaffolding, a parked lorry, snow changed the background) | *Save reference frame* |
+
+*Save reference frame* stores the current picture as the new comparison; from a shell: `curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" $HOST/api/admin/cameras/cam-ground/reference-frame`. The alert clears with the next check (within 5 min). Save it only when the shapes are right: it is what "not shifted" means from then on. Afterwards compare the count with the lot once.
+
+## Deploy a new version / roll back
+
+A version is a release tag (`v0.x.y`): the images in GHCR and the `deploy/` files of that tag ([deployment.md §8](design/deployment.md#8-releases-and-updating)). **Making** a release, from a clone on your own machine: set `version` in `backend/pyproject.toml`, `cd backend && uv lock`, commit, wait for CI on `main` to be green, then `git tag v0.x.y && git push origin v0.x.y` and wait for the *Release* workflow.
+
+**Deploy**, the server first, then the lot box (the API accepts an older worker; unknown fields are ignored both ways):
+
+```bash
+cd /opt/parking/deploy
+grep '^PARKING_VERSION=' .env                             # note the version running now: it is the roll-back
+./backup.sh                                               # server only: a backup from just before
+sudo bash scripts/provision.sh server --version v0.x.y    # lot box: site. Copies that release's deploy/ files; .env, rclone.conf and existing config files are kept
+sed -i 's/^PARKING_VERSION=.*/PARKING_VERSION=v0.x.y/' .env
+$DC pull && $DC up -d
+docker logs --tail 30 parking-api                         # server: migrations run at start-up
+scripts/boot-check.sh server                              # lot box: site. "ready …" = everything healthy, no zone stale
+```
+
+Then open the app: an installed app picks the new version up on its next start (once more if it shows the old one). Read the release notes for anything to add to `.env` or `lot.yaml` (`diff .env.example .env` shows new variables).
+
+**Roll back:** the same commands with the previous tag, on both machines.
+
+| Symptom after a roll-back | Fix |
+|---------------------------|-----|
+| `Can't locate revision` in `docker logs parking-api` | The newer release changed the database. Restore the backup made before the update: `docker stop parking-api`, `./backup.sh restore <that archive>`, `$DC up -d` ([Restore](#restore-from-backup)); what was recorded since is lost |
+| `pull` fails: `manifest unknown` | The tag doesn't exist or its release workflow failed: the *Actions* page. A failed release is fixed with a new tag, tags are never moved |
+
+## Rotate a secret
+
+All secrets are in `/opt/parking/deploy/.env` (mode 600) on the machine that uses them, and in your password manager. Rotate one when it may have leaked, when somebody who knew it leaves, and after a machine is replaced or lost. Edit `.env`, then `$DC up -d` on that machine. The nightly backup copies the server's new `.env` to the encrypted remote; run `./backup.sh` to do it now.
+
+| Secret | How | Consequences |
+|--------|-----|--------------|
+| **Camera password** (`CAM_*_URL`, lot box) | Change it in the camera's web page first, then in the URL in `.env` (special characters URL-encoded, e.g. `@` → `%40`), `$DC up -d`. Check: `$P grab --camera cam-ground --out data/debug/check.jpg --force` | The camera is `down` between the two steps (the zone goes stale after a minute; a flow camera misses the cars that pass: [correct the count](#counts-are-drifting-flow-camera)). Nothing for the users |
+| **Admin password** (`ADMIN_PASSWORD_HASH`, server) | `docker exec -it parking-api /app/backend/.venv/bin/parking admin hash-password`, paste the printed line into `.env` as it is (single quotes included), `$DC up -d` | The old password stops working. Sessions already signed in stay valid until they expire (7 days at most): end them now with the command below |
+| **Admin token** (`ADMIN_TOKEN`, server) | `openssl rand -hex 32` into `.env`, `$DC up -d` | Scripts and saved commands holding the old token get `401`. Sign-ins with the password are not affected |
+| **Worker token** (`WORKER_TOKEN`, **both** machines) | `openssl rand -hex 32`; the same value into both `.env` files; `$DC up -d` on the server, then at once on the lot box | Between the two, the workers' results are refused (`HTTP 401` in their logs) and the admin snapshots fail. Occupancy readings from that gap are dropped (the next one replaces them); entry/exit events wait in the lot box's outbox and are delivered afterwards, so no count is lost |
+| **VAPID keys** (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, server) | Only if the private key leaked. `docker exec parking-api /app/backend/.venv/bin/parking push vapid-keys`, both lines into `.env`, `$DC up -d` | **Every notification subscription stops working**, drivers' and admins', and nobody is told: each person has to open *Alerts* and tap *Enable notifications* again (the app then replaces the old subscription), and admins switch *Receive admin alerts* back on. Until then no reminders and **no admin alerts**: do your own device first. The dead subscriptions delete themselves as the push services refuse them |
+| **Backup storage key / encryption passwords** (`deploy/rclone.conf`, server) | A new access key at the storage provider into `rclone.conf`; `./backup.sh` to check. The two encryption passwords can't be changed for existing archives: for those, start a new remote folder with new passwords and delete the old one after 60 days | A copy of the new `rclone.conf` goes into your password manager, or the backups can't be read by anyone |
+| **VPN keys** (`/etc/wireguard/parking.key`, each machine) | On the machine whose key changes: `sudo rm /etc/wireguard/parking.key`, then `sudo bash scripts/provision.sh server --peer-key <the other machine's key>` (lot box: `site … --endpoint <server address>`); it prints the new public key. On the **other** machine run it again with `--peer-key <new key>`. A machine's current public key: `sudo wg show wg0 public-key` | The link is down between the two runs: zones stale, events queued |
+
+End every admin session (after a password change, or when a signed-in device is lost):
+
+```bash
+docker exec parking-api /app/backend/.venv/bin/python -c "
+import sqlite3; c = sqlite3.connect('/app/data/db/parking.sqlite', timeout=30)
+print(c.execute('delete from admin_session').rowcount, 'sessions ended'); c.commit()"
+```
+
+A secret that was pushed to the public repository counts as leaked even if the commit is removed: rotate it first ([security-privacy.md §3](design/security-privacy.md#3-public-repo-rules)). After any rotation run the [security check](#security-check).
+
+## Add a language / zone / camera
+
+Each of these is a change in the repository, released and deployed like any [new version](#deploy-a-new-version--roll-back), except for the files in `/opt/parking/config/`, which are edited on the machines.
+
+**A language** (say `ro`; [frontend.md §7](design/frontend.md#7-languages-i18n)):
+1. Copy `frontend/src/i18n/locales/en.json` to `ro.json` and translate the values (keys and `{{placeholders}}` stay; plural keys follow the language's own forms, Romanian has `_one`, `_few`, `_other`).
+2. Add it to `RESOURCES` in `frontend/src/i18n/index.ts`.
+3. Zone names: `name: { en: "Ground", ro: "Parter" }` for each zone in `lot.yaml`, on the server; `docker restart parking-api`.
+4. `cd frontend && npm run lint && npm test -- --run`, release, deploy. A phone set to that language gets it by itself; the others fall back to English. Admin alerts stay in English.
+
+**A zone** (a new level or area with its own number; [config.md §1](design/config.md#1-configlotyaml)):
+1. Add it under `zones:` in `lot.yaml`: an `id` (lower case, digits, `-`), `name`, `method` (`slots` = a camera sees the spaces, `flow` = a camera counts cars in and out, then `capacity` is required).
+2. A zone needs a camera that reports on it: add the zone id to an existing camera's `zones` (one occupancy camera can see spaces of two zones; each slot in its slot file names its zone), or add a camera, below.
+3. Same `lot.yaml` on both machines; `docker restart parking-api` on the server and the workers on the lot box. The app shows the new zone by itself; its history starts now.
+
+**A camera:**
+1. Mount and network it like the others ([hardware.md §6](design/hardware.md#6-mounting-checklist)): a fixed address, its own strong password, no internet access.
+2. Its URL goes into the lot box's `.env` under a new name (`CAM_<NAME>_RTSP_URL=…`), never into `lot.yaml` itself.
+3. Add it under `cameras:` in `lot.yaml` on both machines: copy the block of a camera with the same `role`, change `id`, `zones`, `source` (`rtsp:${CAM_<NAME>_RTSP_URL}`), `slots_file` / `lines_file` and `control_url` (`http://10.77.0.2:<the next free port, 9002>`).
+4. A worker for it: in `docker-compose.site.yml` copy the `vision-occupancy` (or `vision-flow`) service, give it a new service name and `container_name: parking-vision-<name>`, `command: ["occupancy", "--camera", "<id>"]` and `ports: ["${VPN_BIND_IP}:9002:9000"]`. The file is replaced by the next update, so make the same change in the repository (also in `docker-compose.yml`) and release it.
+5. `$DC up -d` on the lot box, `docker restart parking-api` on the server. Check: `$P grab --camera <id> --out data/reference/<id>.jpg`, then *Admin* shows the camera `ok`.
+6. Draw its spaces or lines: *Admin* → the camera → *Edit parking spaces* / *Edit counting lines* → *Save* (copy the file to the lot box), then *Save reference frame*. Count by hand once and compare.
+7. Each worker needs about 1 CPU core and 1.2 GB of memory (`VISION_*` / `FLOW_*` in `.env`): watch `docker stats --no-stream` and the *CPU is hot* alert for a day ([hardware.md](design/hardware.md)).
+
+## Rebuild the dev environment
+
+For the dev Pi after a reinstall, or any other development machine (Linux or macOS, x86-64 or ARM64). It never touches production, and on the Pi nothing outside the repository's folder and its own `parking*` containers ([deployment.md §1](design/deployment.md#1-development-on-the-raspberry-pi)).
+
+```bash
+# 1. tools: uv, Node.js 22, Docker with the compose plugin, gh (README → Prerequisites)
+git clone https://github.com/iulian-redinciuc/parking-app.git ~/workspace/parking-app && cd ~/workspace/parking-app
+uv tool install pre-commit && pre-commit install          # gitleaks + ruff before every commit
+
+# 2. backend and frontend, with their checks
+(cd backend && uv sync --extra vision && uv run pytest -m "not slow" -q && uv run ruff check .)
+(cd frontend && npm ci && npm run lint && npm test -- --run)
+
+# 3. the private files git doesn't hold: copy them from the old machine or your own backup
+#    data/samples/ground-01.jpg   the sample photo            data/labels/cam-ground.json   its labels
+#    deploy/.env                  or make a new one, step 5   models/                       or export again, step 4
+
+# 4. models (only for the detector methods; the dev config's `appearance` method needs none)
+(cd backend && uv run parking models export --model yolo11n-seg --imgsz 1280 && uv run parking models export --model yolo11n --imgsz 640)
+
+# 5. the stack: a simulated camera feed from the one photo, then the API and the occupancy worker
+(cd backend && uv run parking simulate-feed --camera cam-ground --base data/samples/ground-01.jpg --frames 200 --seed 1 --day)
+cd deploy
+[ -f .env ] || { cp .env.example .env && chmod 600 .env \
+  && sed -i "s/^WORKER_TOKEN=.*/WORKER_TOKEN=$(openssl rand -hex 32)/; s/^DOCKER_GID=.*/DOCKER_GID=$(getent group docker | cut -d: -f3)/" .env; }
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+docker compose ps && curl -s localhost:8000/api/status | head -c 300
+```
+
+| What | How |
+|------|-----|
+| The app against this API | `cd frontend && VITE_API_BASE=http://localhost:8000 npm run dev` (without the variable it runs on mock data) |
+| On a phone | `deploy/scripts/dev-public.sh up` (a Cloudflare quick tunnel in its own container, and the GitHub Pages preview pointed at it; needs `gh` signed in); `down` afterwards. The address changes at every start: run `up` again after a reboot |
+| Push and the admin screen | In `deploy/.env`: the three `VAPID_*` lines from `uv run parking push vapid-keys`, `ADMIN_PASSWORD_HASH` from `uv run parking admin hash-password`, `ADMIN_TOKEN` from `openssl rand -hex 32`; then `up -d` again. New keys, never production's |
+| The agent loop | [tools/agent-loop](../tools/agent-loop/README.md) |
+| Remove everything | `cd deploy && docker compose --profile quick --profile flow down -v --rmi local`, then delete the folder |
+
+| Symptom | Fix |
+|---------|-----|
+| `set DOCKER_GID in .env` | `getent group docker \| cut -d: -f3` into `DOCKER_GID` |
+| The worker is `unhealthy`, its log says `no images in data/replay/ground-sim` | Step 5's `simulate-feed` wasn't run (the frames are git-ignored) |
+| `simulate-feed` can't find the photo or its labels | Step 3: they are private and not in the repository. Any photo of the lot works after drawing slots and labels for it in [tools/slot-editor](../tools/slot-editor/README.md) |
+| Port 8000 is taken | `API_HOST_PORT` in `.env` |
+| `Permission denied` in `data/` from a container | The containers run as uid 1000: the folder must belong to that user (`id -u`) |
 
 ## Alerts
 

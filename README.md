@@ -11,6 +11,7 @@ Development and testing happen on a Raspberry Pi; production will be deployed el
 - **Plan:** [PLAN.md](PLAN.md): goal, architecture, stack, roadmap
 - **Progress:** [PROGRESS.md](PROGRESS.md): task checklist, decisions, open questions
 - **Docs:** [docs/README.md](docs/README.md): design specs, phase guides, conventions and definition of done
+- **Runbook:** [docs/runbook.md](docs/runbook.md): what to do when something is wrong (a stale camera, wrong counts, the server unreachable), and how to deploy, roll back, restore and rotate secrets
 - **Agent loop** (works through the tasks automatically): [tools/agent-loop](tools/agent-loop/README.md)
 - **Preview site (development):** https://iulian-redinciuc.github.io/parking-app/
 
@@ -21,9 +22,11 @@ Development and testing happen on a Raspberry Pi; production will be deployed el
 | `backend/` | Python package `parking`: CLI, vision workers, API (uv, Python 3.12) |
 | `frontend/` | Vite + React + TypeScript + Tailwind PWA |
 | `config/` | `lot.example.yaml` (template) and `lot.yaml` ([config.md](docs/design/config.md)) |
-| `deploy/` | `.env.example` (copy to the git-ignored `deploy/.env`), `docker-compose.yml` + `docker-compose.dev.yml` (local builds), `scripts/release-notes.sh` (release notes for a tag, [deployment.md §8](docs/design/deployment.md#8-releases-and-updating)), `scripts/dev-public.sh` (dev API over HTTPS for phone testing, [deployment.md §5](docs/design/deployment.md#5-public-access-for-the-api)) |
+| `deploy/` | `.env.example` (copy to the git-ignored `deploy/.env`), the Compose files (`docker-compose.yml` + `docker-compose.dev.yml` for local builds, `docker-compose.server.yml` / `docker-compose.site.yml` for production), `Caddyfile` (public entry), `backup.sh`, and `scripts/` (provisioning, production `.env`, boot / security checks, dev phone testing): [deployment.md](docs/design/deployment.md) |
 | `data/`, `models/` | Camera images, labels and model weights. **Git-ignored**, never committed |
-| `docs/` | Design specs and phase guides |
+| `scripts/` | Tests run from outside against a running system: `load/sse.py` (load test), `resilience/drill.py` (power and network drills): [testing.md](docs/design/testing.md) |
+| `tools/` | `slot-editor/` (draw parking spaces, lines and labels on a picture), `flow-tally/` (count cars in a clip by hand), `agent-loop/` |
+| `docs/` | Design specs, phase guides and the runbook |
 
 ## Prerequisites
 
@@ -32,7 +35,7 @@ Development and testing happen on a Raspberry Pi; production will be deployed el
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
 - **Node.js 22** with npm (e.g. via [nvm](https://github.com/nvm-sh/nvm) or [NodeSource](https://github.com/nodesource/distributions)).
-- **Docker** with the Compose plugin (used from Phase 2 for the full stack; not needed for the steps below).
+- **Docker** with the Compose plugin, for the full stack (not needed for the tests or the frontend in mock mode).
 - Optional: **[pre-commit](https://pre-commit.com/)** for the local gitleaks + ruff hooks (see [Public repo rules](#public-repo-rules)).
 
 ```bash
@@ -51,7 +54,7 @@ uv run ruff format --check .
 uv run parking --version      # the CLI
 ```
 
-The heavy vision dependencies (Ultralytics, NCNN, ONNX Runtime) are an optional extra and are only needed from Phase 1: `uv sync --extra vision`.
+The heavy vision dependencies (Ultralytics, NCNN, ONNX Runtime) are an optional extra, needed to run the detector or a worker outside Docker: `uv sync --extra vision`.
 
 ## Run the frontend in mock mode
 
@@ -92,11 +95,22 @@ curl localhost:8000/api/status
 docker compose down                                     # stop; add -v --rmi local to remove everything
 ```
 
-Only `127.0.0.1:8000` is published. Details and isolation rules: [deployment.md](docs/design/deployment.md).
+Only `127.0.0.1:8000` is published. Details and isolation rules: [deployment.md](docs/design/deployment.md). The sample photo and its labels are private and not in the repository; setting a development machine up from nothing, phone testing included: [runbook → Rebuild the dev environment](docs/runbook.md#rebuild-the-dev-environment).
+
+## Production
+
+Production is not the development Pi: it runs from released, version-pinned images on its own machines (working choice: a small cloud VM for the API and the app, a Raspberry Pi at the lot for the cameras, joined by a private VPN; [deployment.md §3](docs/design/deployment.md#3-production-topologies-to-be-chosen)). It isn't deployed yet: see [PROGRESS.md](PROGRESS.md) for what is waiting on hardware.
+
+| To | Read |
+|----|------|
+| Make a release (`git tag v0.x.y` → multi-arch images in GHCR) | [deployment.md §8](docs/design/deployment.md#8-releases-and-updating) |
+| Set the machines up | [phase guide P8.2–P8.3](docs/phases/phase-8-hardening.md#p82-provision-the-production-machines), [deployment.md §10](docs/design/deployment.md#10-provisioning-the-production-machines-t2) |
+| Update, roll back, restore, rotate a secret, add a camera | [runbook](docs/runbook.md) |
+| Fix something that is broken | [runbook](docs/runbook.md) |
 
 ## CI
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the backend checks, the frontend checks and a gitleaks secret scan on every push and pull request. Details in [testing.md](docs/design/testing.md).
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the backend checks, the frontend checks and a gitleaks secret scan on every push and pull request; [`release.yml`](.github/workflows/release.yml) builds and publishes the images for a `v*` tag. Details in [testing.md](docs/design/testing.md).
 
 ## Public repo rules
 
