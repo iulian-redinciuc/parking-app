@@ -21,7 +21,7 @@ Development and testing happen on a Raspberry Pi; production will be deployed el
 | `backend/` | Python package `parking`: CLI, vision workers, API (uv, Python 3.12) |
 | `frontend/` | Vite + React + TypeScript + Tailwind PWA |
 | `config/` | `lot.example.yaml` (template) and `lot.yaml` ([config.md](docs/design/config.md)) |
-| `deploy/` | `.env.example` (copy to the git-ignored `deploy/.env`), `docker-compose.yml` + `docker-compose.dev.yml` (local builds), `scripts/dev-public.sh` (dev API over HTTPS for phone testing, [deployment.md §5](docs/design/deployment.md#5-public-access-for-the-api)) |
+| `deploy/` | `.env.example` (copy to the git-ignored `deploy/.env`), `docker-compose.yml` + `docker-compose.dev.yml` (local builds), `scripts/release-notes.sh` (release notes for a tag, [deployment.md §8](docs/design/deployment.md#8-releases-and-updating)), `scripts/dev-public.sh` (dev API over HTTPS for phone testing, [deployment.md §5](docs/design/deployment.md#5-public-access-for-the-api)) |
 | `data/`, `models/` | Camera images, labels and model weights. **Git-ignored**, never committed |
 | `docs/` | Design specs and phase guides |
 

@@ -1,0 +1,133 @@
+# Release pipeline (P8.1). Spec: docs/design/deployment.md §2 (multi-arch) and §8 (releases)
+#   git tag v0.x.y && git push origin v0.x.y
+# builds the api and vision images for amd64 + arm64, pushes them to GHCR as :v0.x.y (and :latest),
+# pulls and starts them on an x86 and an ARM runner, then publishes the GitHub release with notes
+# from the commit messages. "Run workflow" (workflow_dispatch) only builds: nothing is pushed.
+# No CUDA variant: the chosen production vision host is a Raspberry Pi (deployment.md §2).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_PREFIX: ghcr.io/iulian-redinciuc/parking
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [api, vision]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the backend version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' backend/pyproject.toml | head -n 1)
+          tag=${GITHUB_REF_NAME#v}
+          if [ "${tag%%-*}" != "$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match backend/pyproject.toml version $version"
+            exit 1
+          fi
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.ref_type == 'tag'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.IMAGE_PREFIX }}-${{ matrix.target }}
+          # :latest follows full releases only, not pre-releases like v0.2.0-rc1
+          flavor: latest=false
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
+            type=ref,event=branch
+          labels: |
+            org.opencontainers.image.title=parking-${{ matrix.target }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.ref_type == 'tag' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  verify:
+    # `docker pull` on both CPU types: x86 here, ARM here and on the dev Pi (by hand, phase guide)
+    needs: images
+    if: github.ref_type == 'tag'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull and start both images
+        run: |
+          for target in api vision; do
+            image="$IMAGE_PREFIX-$target:$GITHUB_REF_NAME"
+            docker pull "$image"
+            arch=$(docker image inspect --format '{{.Architecture}}' "$image")
+            [ "$arch" = "${{ matrix.arch }}" ] || { echo "::error::$image is $arch"; exit 1; }
+            docker run --rm --entrypoint /app/backend/.venv/bin/parking "$image" --version
+          done
+          # the ML stack loads on this CPU type
+          docker run --rm --entrypoint /app/backend/.venv/bin/python "$IMAGE_PREFIX-vision:$GITHUB_REF_NAME" \
+            -c "import torch, ultralytics, ncnn, onnxruntime, cv2; print('torch', torch.__version__)"
+
+  release:
+    needs: verify
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deploy/scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+          prerelease=()
+          case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
+              --notes-file "$RUNNER_TEMP/notes.md" "${prerelease[@]}"
+          fi

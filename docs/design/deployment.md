@@ -62,8 +62,8 @@ ENTRYPOINT ["/app/backend/.venv/bin/parking", "worker"]
 - The build context is the repo root; `.dockerignore` lets in only `backend/` (minus `.venv`, caches and `tests/`), so `data/`, `models/` and `deploy/.env` never reach an image.
 - The working directory is `/app`, so the default `config/lot.yaml` and the relative paths in it resolve against the mounted `/app/config`, `/app/data` and `/app/models`. Containers run as uid 1000 (the owner of the repo folders on the dev Pi).
 - The **api** image stays small (no PyTorch). Only **vision** carries the ML stack (expect ~2 GB).
-- **Multi-arch:** CI builds every image for `linux/amd64` **and** `linux/arm64` with `docker buildx`, so the same version runs on the dev Pi and on any production machine. On PRs, CI only builds them (both CPU types) to catch "works on ARM, breaks on x86" early. On a release tag (`v*`), CI pushes them to **GitHub Container Registry**: `ghcr.io/iulian-redinciuc/parking-api:<version>` and `parking-vision:<version>`.
-- **NVIDIA hosts** (if chosen) need a separate CUDA-based `vision` variant (`parking-vision:<version>-cuda`), built only if that hardware is picked.
+- **Multi-arch:** CI builds every image for `linux/amd64` **and** `linux/arm64` with `docker buildx`, so the same version runs on the dev Pi and on any production machine. On pushes and PRs that touch `backend/`, CI only builds them (the `images` job in `ci.yml`: each CPU type on its own native runner, then `parking --version` in the image) to catch "works on ARM, breaks on x86" early. On a release tag (`v*`), `release.yml` builds both platforms in one go (QEMU) and pushes them to **GitHub Container Registry**: `ghcr.io/iulian-redinciuc/parking-api:<version>` and `parking-vision:<version>` (`<version>` is the tag, e.g. `v0.1.0`; `:latest` moves with every full release). Details in [§8](#8-releases-and-updating).
+- **NVIDIA hosts** (if chosen) need a separate CUDA-based `vision` variant (`parking-vision:<version>-cuda`), built only if that hardware is picked. Not built today: the chosen vision host is a Raspberry Pi 5 (P4.1).
 - Model weights are **not** baked in: they're mounted from `./models`, created on each machine with `parking models export --runtime <runtime>` (the export is tuned to that machine's runtime; see [vision.md §11](vision.md#11-runtimes-and-performance)).
 - `opencv-python-headless` (not `opencv-python`), since there's no GUI in containers.
 
@@ -279,7 +279,13 @@ Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-d
 
 ## 8. Releases and updating
 
-- **Release:** `git tag v0.x.y && git push --tags` → CI builds and pushes multi-arch images to GHCR.
+- **Release:** set `version` in `backend/pyproject.toml` (and `uv lock`) if it changed, then `git tag v0.x.y && git push origin v0.x.y` → `.github/workflows/release.yml`:
+  1. **images**: checks that the tag matches the backend version (`v0.1.0` or `v0.1.0-rc1` ↔ `0.1.0`), then builds `api` and `vision` for `linux/amd64,linux/arm64` (QEMU + buildx) and pushes `ghcr.io/iulian-redinciuc/parking-api:<tag>` and `parking-vision:<tag>`. `:latest` is moved too, except for pre-release tags (a `-` in the tag).
+  2. **verify**: on an x86 runner and on an ARM runner, `docker pull` both images, check the architecture, run `parking --version`, and import the ML stack in the vision image.
+  3. **release**: publishes the GitHub release with notes from the commit messages since the previous `v*` tag, grouped by the phase in the task ID (`deploy/scripts/release-notes.sh <tag>`; the first release lists the whole history). Pre-release tags are marked as pre-releases.
+  *Run workflow* on the Actions page (`workflow_dispatch`) is a dry run: it builds both platforms and pushes nothing.
+- **Pulling:** the packages are linked to this public repo but GHCR creates them **private**; make each one public once (GitHub → profile → Packages → the package → Package settings → Change visibility), or log in on the machine that pulls with a token that has `read:packages` (`docker login ghcr.io -u iulian-redinciuc`).
+- A failed release is fixed with a new tag (`v0.x.y+1`); tags are never moved.
 - **Deploy to production:**
   ```bash
   cd /opt/parking/deploy                       # a checkout of the repo's deploy/ + config/ on that machine

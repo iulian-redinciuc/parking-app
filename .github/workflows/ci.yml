@@ -1,5 +1,5 @@
-# Jobs from docs/design/testing.md §5 (+ Lighthouse CI, P3.10). The multi-arch
-# image build is added in a later task.
+# Jobs from docs/design/testing.md §5 (+ Lighthouse CI, P3.10). Images are only built here;
+# pushing them happens on release tags (release.yml).
 name: CI
 
 on:
@@ -22,6 +22,7 @@ jobs:
       pull-requests: read
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
+      images: ${{ steps.filter.outputs.images }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -31,6 +32,10 @@ jobs:
             backend:
               - 'backend/**'
               - 'deploy/**'
+            images:
+              - 'backend/**'
+              - '.dockerignore'
+              - '.github/workflows/ci.yml'
 
   backend:
     runs-on: ubuntu-latest
@@ -149,3 +154,28 @@ jobs:
       - run: uv run pytest tests/e2e -v -s
         env:
           PARKING_E2E: "1"
+
+  images:
+    # Both images on both CPU types, without pushing: catches "works on the Pi, breaks on x86"
+    # (and the reverse). Native runners per CPU type; the release build is the multi-arch one.
+    needs: changes
+    if: needs.changes.outputs.images == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        target: [api, vision]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: ${{ matrix.target }}
+          push: false
+          load: true
+          tags: parking-${{ matrix.target }}:ci
+      - run: docker run --rm --entrypoint /app/backend/.venv/bin/parking parking-${{ matrix.target }}:ci --version

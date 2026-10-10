@@ -12,12 +12,24 @@ P8.1 release images ─> P8.2 provision ─> P8.3 public entry + frontend ─> P
 ---
 
 ## P8.1: Release pipeline (multi-arch images)
-**Files:** `.github/workflows/release.yml`
+**Files:** `.github/workflows/release.yml`, `deploy/scripts/release-notes.sh`, `.github/workflows/ci.yml` (`images` job)
 
 **Steps**
-1. On tags `v*`: `docker/setup-qemu-action` + `docker/setup-buildx-action` → build `api` and `vision` for `linux/amd64,linux/arm64` → push to `ghcr.io/iulian-redinciuc/parking-api:<tag>` and `parking-vision:<tag>` (plus `:latest`).
-2. If the production vision host is NVIDIA: also build `parking-vision:<tag>-cuda` for that platform only.
-3. Write release notes from the commit messages (task IDs make this easy).
+1. On tags `v*`: `docker/setup-qemu-action` + `docker/setup-buildx-action` → build `api` and `vision` for `linux/amd64,linux/arm64` → push to `ghcr.io/iulian-redinciuc/parking-api:<tag>` and `parking-vision:<tag>` (plus `:latest`, except for pre-release tags). The tag has to match `version` in `backend/pyproject.toml`.
+2. If the production vision host is NVIDIA: also build `parking-vision:<tag>-cuda` for that platform only. (Not needed: P4.1 chose a Raspberry Pi 5.)
+3. Pull and start the pushed images on an x86 and an ARM runner (`verify` job).
+4. Write release notes from the commit messages (task IDs make this easy): `deploy/scripts/release-notes.sh <tag>`, published as the GitHub release.
+5. In CI (`ci.yml`, job `images`): build both images on both CPU types without pushing ([testing.md §5](../design/testing.md#5-ci-githubworkflowsciyml)).
+
+Full description: [deployment.md §8](../design/deployment.md#8-releases-and-updating).
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0        # → Actions: Release
+gh run watch "$(gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+docker buildx imagetools inspect ghcr.io/iulian-redinciuc/parking-vision:v0.1.0   # linux/amd64 + linux/arm64
+docker pull ghcr.io/iulian-redinciuc/parking-api:v0.1.0                           # on the dev Pi and on an x86 machine
+docker pull ghcr.io/iulian-redinciuc/parking-vision:v0.1.0
+```
 
 **Done when:** tagging `v0.1.0` produces both images for both CPU types in GHCR, and `docker pull` works on the dev Pi and on an x86 machine.
 
