@@ -4,10 +4,14 @@ Pick in any order once Phase 8 is done. Each item is a small project; write a sh
 
 ## P9.1: Ground-level slot map
 **Why:** show *which* spaces are free, not just how many.
-**Outline**
-1. `config/maps/ground.svg`: a simple schematic with one `<rect id="G01">` per slot (drawn once, by hand or generated from the slot polygons with a top-down projection).
-2. The frontend colours each rect from `LotStatus.zones[].slots`. Tapping one shows the slot id.
-**Done when:** the map matches reality at a glance.
+**Design note:** [slot-map.md](../design/slot-map.md).
+**Files:** `backend/parking/slot_map.py`, `parking slot-map` (`cli.py`), `GET /api/maps/{zone}` (`api/routes/public.py`), zone `map` (`config.py`, `config/lot.yaml`), `config/maps/ground.svg`; `frontend/src/lib/slotMap.ts`, `src/components/SlotMap.tsx` (on `ZoneCard`), `getSlotMap` + `mockSlotMap`.
+**Steps**
+1. `config/maps/ground.svg`: a simple schematic with one `<rect id="G01">` per slot (drawn once, by hand or generated from the slot polygons with a top-down projection). Generated with `uv run parking slot-map --camera cam-ground` (straight-down cameras; `--check` compares an existing or hand-drawn map with the slot file).
+2. The zone names it in lot.yaml (`map: config/maps/ground.svg`) and the API serves it at `GET /api/maps/ground`.
+3. The frontend colours each rect from `LotStatus.zones[].slots`. Tapping one shows the slot id.
+
+**Done when:** the map matches reality at a glance. Checked on the dev Pi against the simulated feed (slot-map.md §5); to look at it yourself: the Live screen → *Show map* on the Ground card, next to the frame the camera sees (Admin → the camera's snapshot).
 
 ## P9.2: Special spaces
 **Why:** "2 accessible spaces free", "EV charger free".

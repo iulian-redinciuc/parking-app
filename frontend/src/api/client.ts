@@ -3,7 +3,7 @@
 // Admin calls add `Authorization: Bearer <token>` from sessionStorage; a 401 forgets the token,
 // which sends the admin screens back to the login.
 import { API_BASE, IS_MOCK } from './base'
-import { correctMockZone, mockLotInfo, mockStatus } from './mock'
+import { correctMockZone, mockLotInfo, mockSlotMap, mockStatus } from './mock'
 import type {
   ApiError,
   Forecast,
@@ -129,6 +129,32 @@ export function getStatus(options?: RequestOptions): Promise<LotStatus> {
 export function getLot(options?: RequestOptions): Promise<LotInfo> {
   if (IS_MOCK && !options?.base) return Promise.resolve(mockLotInfo())
   return request('/api/lot', isLotInfo, options)
+}
+
+/** `GET /api/maps/<zone>` (slot-map.md): the zone's slot map as SVG text, `null` when it has
+ * none (404). The answer may come from the browser cache (the server allows 5 min). */
+export async function getSlotMap(zoneId: string, options?: RequestOptions): Promise<string | null> {
+  if (IS_MOCK && !options?.base) return mockSlotMap(zoneId)
+  const path = `/api/maps/${encodeURIComponent(zoneId)}`
+  let res: Response
+  try {
+    res = await fetch(apiUrl(path, undefined, options?.base), {
+      headers: { Accept: 'image/svg+xml' },
+      signal: options?.signal,
+    })
+  } catch (err) {
+    if (options?.signal?.aborted) throw err
+    throw new ApiRequestError({ code: 'network', message: String(err) })
+  }
+  if (res.status === 404) return null
+  if (!res.ok) {
+    throw new ApiRequestError({
+      code: 'bad_response',
+      message: `HTTP ${res.status} from ${path}`,
+      status: res.status,
+    })
+  }
+  return res.text()
 }
 
 export interface HistoryQuery {

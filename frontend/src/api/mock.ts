@@ -56,6 +56,44 @@ export function mockLotInfo(): LotInfo {
   return structuredClone(lotInfoJson as LotInfo)
 }
 
+/** The mock lot's slot ids: the zone's initial + a number (`G01` …), for `slots` zones. */
+function mockSlotIds(info: LotInfo['zones'][number]): string[] | null {
+  if (info.method !== 'slots') return null
+  return Array.from(
+    { length: info.capacity },
+    (_, i) => `${info.id[0].toUpperCase()}${String(i + 1).padStart(2, '0')}`,
+  )
+}
+
+// the mock map: rows of this many spaces, in pairs with a driving lane between the pairs
+const MAP_ROW = 10
+const MAP_SLOT = { w: 46, h: 96, pitch: 50, lane: 70 }
+
+/** A slot map for the mock lot (as `GET /api/maps/<zone>` would send), `null` without slots. */
+export function mockSlotMap(zoneId: string): string | null {
+  const ids = mockLotInfo().zones.flatMap((z) => (z.id === zoneId ? (mockSlotIds(z) ?? []) : []))
+  if (ids.length === 0) return null
+  const { w, h, pitch, lane } = MAP_SLOT
+  const width = MAP_ROW * pitch + 16
+  const shapes: string[] = []
+  let y = 10
+  for (let row = 0; row * MAP_ROW < ids.length; row++) {
+    // rows go lane, row, row, lane, row, row …
+    if (row % 2 === 0) {
+      const mid = y + lane / 2
+      shapes.push(`<line x1="20" y1="${mid}" x2="${width - 20}" y2="${mid}"/>`)
+      y += lane
+    }
+    ids.slice(row * MAP_ROW, (row + 1) * MAP_ROW).forEach((id, i) => {
+      shapes.push(
+        `<rect id="${id}" x="${10 + i * pitch}" y="${y}" width="${w}" height="${h}" rx="5"/>`,
+      )
+    })
+    y += h + 4
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${y + 6}">${shapes.join('')}</svg>`
+}
+
 /** mulberry32: small, fast, seedable. */
 export function seededRandom(seed: number): () => number {
   let a = seed >>> 0
@@ -114,13 +152,7 @@ export function createMockLot(
 
   const zones: MockZone[] = lot.zones.map((info) => {
     const occupied = Math.round(info.capacity * (0.5 + random() * 0.4))
-    const slots =
-      info.method === 'slots'
-        ? Array.from(
-            { length: info.capacity },
-            (_, i) => `${info.id[0].toUpperCase()}${String(i + 1).padStart(2, '0')}`,
-          )
-        : null
+    const slots = mockSlotIds(info)
     return {
       info,
       occupied,

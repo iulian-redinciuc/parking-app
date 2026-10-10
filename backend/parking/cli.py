@@ -706,6 +706,74 @@ def bootstrap_slots(
     )
 
 
+@app.command("slot-map")
+def slot_map(
+    camera: Annotated[str, typer.Option(help="Camera id in the config, e.g. cam-ground.")],
+    zone: Annotated[
+        str | None, typer.Option(help="Zone to draw (default: the camera's first zone).")
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help="SVG to write (default: the zone's map, else config/maps/<zone>.svg)."),
+    ] = None,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite an existing file.")] = False,
+    check: Annotated[
+        bool,
+        typer.Option("--check", help="Don't write: compare the existing map with the slot file."),
+    ] = False,
+    snap_deg: Annotated[
+        float, typer.Option(help="Draw spaces turned by less than this upright (0 = never).")
+    ] = 10.0,
+    gap: Annotated[
+        float, typer.Option(help="Space around each rectangle, as a share of a slot's width.")
+    ] = 0.06,
+) -> None:
+    """Draw a zone's slot map from the slot polygons of a straight-down camera (slot-map.md)."""
+    from parking.slot_map import SlotMapError, build_slot_map, compare_slot_map
+
+    if not 0 <= snap_deg <= 45:
+        raise typer.BadParameter("must be between 0 and 45", param_hint="--snap-deg")
+    if not 0 <= gap < 0.5:
+        raise typer.BadParameter("must be between 0 and 0.5", param_hint="--gap")
+
+    lot, cam, root = _occupancy_camera(config, camera, "slot-map")
+    zone_id = zone or cam.zones[0]
+    if zone_id not in cam.zones:
+        _fail(f"camera '{camera}' doesn't report on zone '{zone_id}' ({', '.join(cam.zones)})")
+    slots = _slot_file(cam, root)
+    configured = lot.zone(zone_id).map
+    target = out or _resolve(configured or Path("config") / "maps" / f"{zone_id}.svg", root)
+
+    if check:
+        if not target.is_file():
+            _fail(f"no map at {target}")
+        try:
+            missing, unknown = compare_slot_map(target.read_text(), slots, zone_id)
+        except SlotMapError as e:
+            _fail(f"{target}: {e}")
+        if missing or unknown:
+            _fail(
+                f"{target} doesn't match the slot file: "
+                f"not on the map: {', '.join(missing) or 'none'}; "
+                f"on the map but no slot: {', '.join(unknown) or 'none'}"
+            )
+        typer.echo(f"{target} has every slot of zone '{zone_id}'")
+        return
+
+    if target.exists() and not force:
+        _fail(f"{target} exists; pass --force to overwrite it")
+    try:
+        svg = build_slot_map(slots, zone_id, snap_deg=snap_deg, gap=gap)
+    except SlotMapError as e:
+        _fail(str(e))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(svg)
+    typer.echo(f"{svg.count('<rect ')} slot(s) of zone '{zone_id}' -> {target}")
+    if configured is None:
+        typer.echo(f"Now set `map:` for zone '{zone_id}' in lot.yaml so the API serves it.")
+
+
 def _csv(value: str) -> list[str]:
     return [v.strip() for v in value.split(",") if v.strip()]
 

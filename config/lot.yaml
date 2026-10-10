@@ -19,6 +19,7 @@ zones:
     name: { en: "Ground" }
     method: slots                  # slots | count | flow
     capacity: null                 # null = number of slots in this zone (slots method only)
+    map: config/maps/ground.svg    # optional slot map (slots zones only): `parking slot-map`, slot-map.md
   - id: underground
     name: { en: "Underground" }
     method: flow

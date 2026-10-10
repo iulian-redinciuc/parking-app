@@ -1,5 +1,5 @@
 """Public routes (api.md §2): `/healthz`, `/api/lot`, `/api/status`, `/api/stream`,
-`/api/history`, `/api/forecast`.
+`/api/maps/{zone}`, `/api/history`, `/api/forecast`.
 
 All share the public GET rate limit; zone names follow `?lang=` / `Accept-Language`.
 """
@@ -23,6 +23,7 @@ from parking.db import history as hist
 from parking.db.engine import session_scope
 from parking.db.rollups import TOTAL
 from parking.messages import LotStatus, format_ts
+from parking.slot_map import MAX_BYTES as MAP_MAX_BYTES
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,10 @@ DEFAULT_SPAN = {
     "hour": timedelta(hours=24),
     "day": timedelta(days=30),
 }
+# slot maps change only when someone redraws them
+MAP_CACHE_CONTROL = "public, max-age=300"
+# an SVG opened on its own is a document of this origin: no scripts, nothing loaded
+MAP_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
 FORECAST_AHEAD = timedelta(minutes=30)
 FORECAST_BASIS = f"median of last {hist.FORECAST_WEEKS} same weekday/hour"
 
@@ -119,6 +124,38 @@ async def status(rt: RuntimeDep, lang: LangDep, response: Response) -> LotStatus
     response.headers["Cache-Control"] = "no-cache"
     response.headers["Vary"] = "Accept-Language"
     return rt.store.status(lang)
+
+
+def _read_map(path) -> bytes | None:
+    try:
+        if path.stat().st_size > MAP_MAX_BYTES:
+            log.warning("slot map %s is over %d bytes: not served", path, MAP_MAX_BYTES)
+            return None
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+@router.get("/api/maps/{zone_id}")
+async def zone_map(zone_id: str, rt: RuntimeDep) -> Response:
+    """The zone's slot map as stored (slot-map.md); 404 for a zone without one."""
+    zone = next((z for z in rt.config.zones if z.id == zone_id), None)
+    if zone is None:
+        raise ApiError(404, "not_found", f"unknown zone '{zone_id}'")
+    svg = None
+    if zone.map is not None:
+        svg = await anyio.to_thread.run_sync(_read_map, rt.path(zone.map))
+    if svg is None:
+        raise ApiError(404, "not_found", f"zone '{zone_id}' has no map")
+    return Response(
+        svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": MAP_CACHE_CONTROL,
+            "Content-Security-Policy": MAP_CSP,
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 async def _events(

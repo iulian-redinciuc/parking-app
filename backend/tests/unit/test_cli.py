@@ -441,3 +441,42 @@ def test_grab_errors(tmp_path, monkeypatch):
     assert "not found: is the camera plugged in" in res.output
     res = CliRunner().invoke(app, ["grab", "--camera", "nope"])
     assert res.exit_code == 1 and "not in" in res.output
+
+
+def _slot_map(*args):
+    return runner.invoke(app, ["slot-map", "--camera", "cam-ground", *args])
+
+
+def test_slot_map_writes_checks_and_never_overwrites(tmp_path, monkeypatch):
+    from parking.slot_map import map_slot_ids
+
+    _write_lot(tmp_path, monkeypatch)
+    target = tmp_path / "config" / "maps" / "ground.svg"
+    result = _slot_map()
+    assert result.exit_code == 0, result.output
+    assert "2 slot(s) of zone 'ground' ->" in result.output
+    assert "Now set `map:` for zone 'ground'" in result.output  # lot.yaml doesn't name it yet
+    assert map_slot_ids(target.read_text()) == ["G01", "G02"]
+
+    result = _slot_map()
+    assert result.exit_code == 1 and "exists; pass --force" in result.output
+    assert _slot_map("--force", "--snap-deg", "0", "--gap", "0").exit_code == 0
+
+    result = _slot_map("--check")
+    assert result.exit_code == 0 and "has every slot of zone 'ground'" in result.output
+    target.write_text(target.read_text().replace('id="G02"', 'id="X1"'))
+    result = _slot_map("--check")
+    assert result.exit_code == 1
+    assert "not on the map: G02; on the map but no slot: X1" in result.output
+    target.write_text("<svg")
+    assert "not valid XML" in _slot_map("--check").output
+
+
+def test_slot_map_errors(tmp_path, monkeypatch):
+    _write_lot(tmp_path, monkeypatch)
+    assert "no map at" in _slot_map("--check").output
+    result = _slot_map("--zone", "roof")
+    assert result.exit_code == 1 and "doesn't report on zone 'roof'" in result.output
+    assert _slot_map("--snap-deg", "60").exit_code == 2
+    assert _slot_map("--gap", "0.5").exit_code == 2
+    assert runner.invoke(app, ["slot-map", "--camera", "nope"]).exit_code == 1

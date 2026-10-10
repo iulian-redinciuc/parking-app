@@ -138,6 +138,13 @@ def test_reset_only_for_flow_zones(raw):
     invalid(raw, "reset is only allowed for 'flow' zones")
 
 
+def test_map_only_for_slots_zones(raw):
+    raw["zones"][0]["map"] = "config/maps/ground.svg"
+    assert LotConfig.model_validate(raw).zone("ground").map == Path("config/maps/ground.svg")
+    raw["zones"][1]["map"] = "config/maps/underground.svg"
+    invalid(raw, "map is only allowed for 'slots' zones")
+
+
 def test_reset_cron_and_value_checked(raw):
     raw["zones"][1]["reset"] = {"enabled": True, "cron": "every night"}
     invalid(raw, "not a 5-field crontab expression")

@@ -174,6 +174,35 @@ async def test_lot_info(lot):
         assert (await client.get("/api/lot")).json()["location"] == {"lat": 51.5, "lon": -0.12}
 
 
+async def test_zone_map_is_served_as_stored(lot):
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect id="G01"/></svg>'
+    config = lot / "config" / "lot.yaml"
+    config.write_text(
+        config.read_text().replace("method: slots}", "method: slots, map: config/maps/g.svg}")
+    )
+    async with client_for(make_app(lot)) as client:
+        # named in lot.yaml but not drawn yet
+        r = await client.get("/api/maps/ground")
+        assert r.status_code == 404
+        assert r.json() == {"error": {"code": "not_found", "message": "zone 'ground' has no map"}}
+
+        (lot / "config" / "maps").mkdir()
+        (lot / "config" / "maps" / "g.svg").write_text(svg)
+        r = await client.get("/api/maps/ground", headers={"Origin": "https://app.example"})
+        assert r.status_code == 200 and r.text == svg
+        assert r.headers["content-type"] == "image/svg+xml"
+        assert r.headers["cache-control"] == "public, max-age=300"
+        assert "default-src 'none'" in r.headers["content-security-policy"]
+        assert r.headers["x-content-type-options"] == "nosniff"
+
+        # a zone without `map`, an unknown zone, and a file too big to be a schematic
+        assert (await client.get("/api/maps/underground")).status_code == 404
+        r = await client.get("/api/maps/roof")
+        assert r.status_code == 404 and r.json()["error"]["message"] == "unknown zone 'roof'"
+        (lot / "config" / "maps" / "g.svg").write_text(svg + " " * 200_000)
+        assert (await client.get("/api/maps/ground")).status_code == 404
+
+
 async def test_errors_use_the_error_format(lot):
     async with client_for(make_app(lot)) as client:
         r = await client.get("/nope")

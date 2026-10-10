@@ -45,6 +45,18 @@
     "estimated_flow": "Estimated from entry/exit counts",
     "estimated_camera": "Estimated: the camera view is unclear"
   },
+  "map": {
+    "show": "Show map",
+    "hide": "Hide map",
+    "label": "Map of {{zone}}",
+    "free": "Free",
+    "taken": "Taken",
+    "unknown": "No data",
+    "slot": "Space {{id}}: {{state}}",
+    "hint": "Tap a space to see its number",
+    "off_map_one": "{{count}} space isn't on the map",
+    "off_map_other": "{{count}} spaces aren't on the map"
+  },
   "updated": {
     "just_now": "Updated just now",
     "ago": "Updated {{ago}}"

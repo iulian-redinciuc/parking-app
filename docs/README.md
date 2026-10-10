@@ -27,6 +27,7 @@ Phase guides **link to** the design specs instead of repeating them. If a spec a
 | [design/hardware.md](design/hardware.md) | Cameras, mounting, network, compute hardware (dev Pi, production options), sample-image guidelines |
 | [design/security-privacy.md](design/security-privacy.md) | Threats, controls, secrets, public-repo rules, GDPR checklist |
 | [design/testing.md](design/testing.md) | Test layers, fixtures, CI, evaluation datasets, device matrix |
+| [design/slot-map.md](design/slot-map.md) | The slot map (P9.1): map file format, `parking slot-map`, the map endpoint, how the app draws it |
 
 ## Phase guides
 

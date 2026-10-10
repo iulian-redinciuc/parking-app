@@ -25,6 +25,7 @@ import {
   putCameraConfig,
   saveReferenceFrame,
   setAdminAlerts,
+  getSlotMap,
   setAdminToken,
 } from './client'
 import type { ApiError } from './types'
@@ -161,6 +162,40 @@ describe('API client', () => {
     const result = getStatus({ base: BASE, signal: controller.signal })
     controller.abort()
     await expect(result).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})
+
+describe('slot map client', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('answers the SVG text, null on 404, and fails on anything else', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>'
+    const fetchMock = vi.fn(async () => new Response(svg, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await getSlotMap('ground', { base: BASE })).toBe(svg)
+    expect(fetchMock.mock.calls[0][0 as never]).toBe('http://api.test/api/maps/ground')
+
+    vi.stubGlobal('fetch', reply(404, { error: { code: 'not_found', message: 'no map' } }))
+    expect(await getSlotMap('ground', { base: BASE })).toBeNull()
+
+    vi.stubGlobal('fetch', reply(503, {}))
+    expect(await failure(getSlotMap('ground', { base: BASE }))).toMatchObject({
+      code: 'bad_response',
+      status: 503,
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('failed to fetch')
+      }),
+    )
+    expect((await failure(getSlotMap('ground', { base: BASE }))).code).toBe('network')
+  })
+
+  it('has a map for the mock lot', async () => {
+    expect(await getSlotMap('ground')).toContain('<rect id="G01"')
+    expect(await getSlotMap('underground')).toBeNull()
   })
 })
 

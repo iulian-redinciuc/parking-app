@@ -2,9 +2,11 @@ import { useTranslation } from 'react-i18next'
 import type { ZoneStatus } from '../api/types'
 import { TONE_TEXT, formatFree, isEstimated, levelInfo } from '../lib/status'
 import LevelBar from './LevelBar'
+import SlotMap from './SlotMap'
 import TrendIcon from './TrendIcon'
 
-// One zone: name, free / capacity, trend, a bar with the level word, and a note when estimated.
+// One zone: name, free / capacity, trend, a bar with the level word, a note when estimated, and
+// the slot map where the zone has one (P9.1).
 // `dimmed` greys the numbers: they're old (stale zone, or the connection is down).
 export default function ZoneCard({ zone, dimmed = false }: { zone: ZoneStatus; dimmed?: boolean }) {
   const { t } = useTranslation()
@@ -59,6 +61,7 @@ export default function ZoneCard({ zone, dimmed = false }: { zone: ZoneStatus; d
           {t(zone.method === 'flow' ? 'zone.estimated_flow' : 'zone.estimated_camera')}
         </p>
       )}
+      {zone.slots && <SlotMap zone={zone} />}
     </li>
   )
 }

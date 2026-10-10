@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 588.2 1000" data-zone="ground" data-camera="cam-ground">
+  <!-- Slot map (docs/design/slot-map.md): one shape per space, its id = the slot id. Made by `parking slot-map`; the app colours the shapes, so no styles here. -->
+  <rect id="G01" x="26.1" y="107.4" width="206.3" height="106.2" rx="8.5"/>
+  <rect id="G02" x="23.3" y="217" width="210.5" height="108" rx="8.6"/>
+  <rect id="G03" x="28.8" y="329.7" width="203.9" height="105.4" rx="8.4"/>
+  <rect id="G04" x="24.4" y="441.1" width="203.6" height="102.4" rx="8.2"/>
+  <rect id="G05" x="28.5" y="544.4" width="189.1" height="98.2" rx="7.9"/>
+  <rect id="G06" x="28.4" y="648.7" width="190.4" height="103.1" rx="8.2"/>
+  <rect id="G07" x="29.4" y="755.8" width="186" height="107.1" rx="8.6"/>
+  <rect id="G08" x="23" y="864.7" width="199" height="112.3" rx="9"/>
+  <rect id="G09" x="476.1" y="23" width="86.7" height="100.6" rx="6.9"/>
+  <rect id="G10" x="472.9" y="127.7" width="91.2" height="96.7" rx="7.3"/>
+  <rect id="G11" x="470.7" y="226.8" width="91.1" height="99.6" rx="7.3"/>
+  <rect id="G12" x="468.9" y="329.7" width="94.7" height="93.8" rx="7.5"/>
+  <rect id="G13" x="466.2" y="429.1" width="96.9" height="95.1" rx="7.6"/>
+  <rect id="G14" x="464" y="529.9" width="98.6" height="92.9" rx="7.4"/>
+  <rect id="G15" x="460.3" y="626.4" width="103" height="92.3" rx="7.4"/>
+  <rect id="G16" x="456.8" y="723.7" width="107.7" height="91.7" rx="7.3"/>
+  <rect id="G17" x="454" y="821.1" width="111.1" height="91.6" rx="7.3"/>
+</svg>

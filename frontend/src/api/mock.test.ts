@@ -7,9 +7,11 @@ import {
   createMockLot,
   levelFor,
   mockScenarioFrom,
+  mockSlotMap,
   mockStatus,
   trendFor,
 } from './mock'
+import { parseSlotMap } from '../lib/slotMap'
 import type { LotStatus } from './types'
 import { isLotStatus } from './validate'
 
@@ -241,5 +243,16 @@ describe('mock scenarios (?mock=…)', () => {
     expect(feed.getSnapshot().connection).toBe('live')
     expect(feed.getSnapshot().status).not.toBeNull()
     feed.stop()
+  })
+})
+
+describe('mock slot map', () => {
+  it('has one shape per slot of the mock status, and none for a zone without slots', () => {
+    const ground = mockStatus().zones.find((z) => z.id === 'ground')!
+    const map = parseSlotMap(mockSlotMap('ground')!)!
+    expect([...map.ids].sort()).toEqual(Object.keys(ground.slots!).sort())
+    expect(map.nodes.some((n) => n.tag === 'line')).toBe(true)
+    expect(mockSlotMap('underground')).toBeNull()
+    expect(mockSlotMap('nowhere')).toBeNull()
   })
 })

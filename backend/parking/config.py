@@ -98,9 +98,12 @@ class Zone(Strict):
     method: Literal["slots", "count", "flow"]
     capacity: int | None = Field(default=None, gt=0)
     reset: ResetCfg | None = None
+    map: Path | None = None  # the slot map (docs/design/slot-map.md), `slots` zones only
 
     @model_validator(mode="after")
     def _check(self) -> Self:
+        if self.map is not None and self.method != "slots":
+            raise ValueError(f"zone '{self.id}': map is only allowed for 'slots' zones")
         if self.method in ("count", "flow") and self.capacity is None:
             raise ValueError(f"zone '{self.id}': capacity is required for '{self.method}' zones")
         if self.reset is not None and self.method != "flow":

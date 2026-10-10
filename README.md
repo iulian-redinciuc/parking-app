@@ -21,7 +21,7 @@ Development and testing happen on a Raspberry Pi; production will be deployed el
 |------|------|
 | `backend/` | Python package `parking`: CLI, vision workers, API (uv, Python 3.12) |
 | `frontend/` | Vite + React + TypeScript + Tailwind PWA |
-| `config/` | `lot.example.yaml` (template) and `lot.yaml` ([config.md](docs/design/config.md)) |
+| `config/` | `lot.example.yaml` (template) and `lot.yaml` ([config.md](docs/design/config.md)), `slots/` (the drawn spaces), `maps/` (the slot map, [slot-map.md](docs/design/slot-map.md)) |
 | `deploy/` | `.env.example` (copy to the git-ignored `deploy/.env`), the Compose files (`docker-compose.yml` + `docker-compose.dev.yml` for local builds, `docker-compose.server.yml` / `docker-compose.site.yml` for production), `Caddyfile` (public entry), `backup.sh`, and `scripts/` (provisioning, production `.env`, boot / security checks, dev phone testing): [deployment.md](docs/design/deployment.md) |
 | `data/`, `models/` | Camera images, labels and model weights. **Git-ignored**, never committed |
 | `scripts/` | Tests run from outside against a running system: `load/sse.py` (load test), `resilience/drill.py` (power and network drills): [testing.md](docs/design/testing.md) |

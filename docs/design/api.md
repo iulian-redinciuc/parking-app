@@ -37,7 +37,7 @@ Returned by `GET /api/status` and sent in every SSE `status` event.
 | `name` | Already resolved to the requested language (`?lang=` or `Accept-Language`, falling back to `en`) |
 | `total.confidence` | The lowest zone confidence |
 | `total.stale` | `true` if **any** zone is stale |
-| `slots` | Map slot id → taken, only for `slots` zones (used by the Phase 9 slot map) |
+| `slots` | Map slot id → taken, only for `slots` zones (drawn by the slot map, [slot-map.md](slot-map.md)) |
 | `trend` | `filling` / `emptying` / `steady` (see [vision.md §8](vision.md#8-fusion-confidence-trend-parkingcorefusionpy)) |
 | `updated_at` (zone) | `null` until the zone has received data |
 
@@ -67,6 +67,7 @@ Codes: `bad_request` (400; also 422 for a body or query that fails validation, w
 | GET | `/api/lot` | 2 | Static lot info (below). `location` uses `LOT_LAT`/`LOT_LON` from the settings when set, else lot.yaml; zone `capacity` is the effective one (slot count for `slots` zones) |
 | GET | `/api/status` | 2 | `LotStatus`; `503 unavailable` until the first data since start-up, unless state was restored from the DB (then 200 with `stale: true`). `Cache-Control: no-cache` |
 | GET | `/api/stream` | 2 | SSE (see §3) |
+| GET | `/api/maps/{zone}` | 9 | The zone's slot map ([slot-map.md](slot-map.md)): the SVG file named by the zone's `map` in lot.yaml, as stored, `image/svg+xml`, `Cache-Control: public, max-age=300`, with `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox` and `X-Content-Type-Options: nosniff`. `404 not_found` for an unknown zone, a zone without a map, a missing file or one over 200 KB |
 
 Zone names (`/api/lot`, `/api/status`, `/api/stream`): `?lang=` first, then the `Accept-Language` languages by `q` (primary subtag only: `ro-RO` → `ro`; `q=0` and `*` ignored); the first one that any zone has a name in wins, else `en` (a zone without that name falls back to `en`, then its first name). `/api/lot` and `/api/status` send `Vary: Accept-Language`. `?lang=` longer than 35 characters → 422.
 | GET | `/api/history` | 7 | Query: `zone` (a zone id or `total`, default `total`), `from`, `to` (ISO 8601; naive = UTC; default `to` = now, `from` = `to` − 24 h, or − 30 days for `day`), `bucket=minute\|hour\|day` (default `hour`). Returns `{"zone":"ground","bucket":"hour","from":"…","to":"…","points":[{"t":"…","free_avg":12.4,"free_min":8,"free_max":15,"occupied_avg":27.6}]}`: `minute` from `zone_minute`, `hour` from `zone_hour`, `day` = lot-local days (lot.yaml `timezone`) of `zone_hour` weighted by its `samples`; `t` = bucket start (UTC), buckets from the one holding `from` up to before `to`, empty buckets left out. Unknown zone `404 not_found`; `from` ≥ `to` or more than **2000** buckets `422 bad_request` |
