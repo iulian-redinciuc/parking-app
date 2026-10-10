@@ -2,7 +2,7 @@
 # Build context = the repo root:  docker build -f frontend/Dockerfile -t parking-web .
 # The app is built for the same origin as the API (VITE_BASE=/, empty VITE_API_BASE), so one image
 # fits any hostname: the hostname is PUBLIC_HOST at run time (deploy/Caddyfile).
-FROM --platform=$BUILDPLATFORM node:22-alpine AS build
+FROM --platform=$BUILDPLATFORM node:25-alpine AS build
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
