@@ -79,8 +79,9 @@ The API and the occupancy worker replay the images in `data/replay/ground/` (any
 ```bash
 cd deploy
 cp .env.example .env && sed -i "s/^WORKER_TOKEN=.*/WORKER_TOKEN=$(openssl rand -hex 32)/" .env
+sed -i "s/^DOCKER_GID=.*/DOCKER_GID=$(getent group docker | cut -d: -f3)/" .env   # for parking-autoheal
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build   # builds parking-api / parking-vision-occupancy
-docker compose ps                                       # both "healthy"
+docker compose ps                                       # all "healthy"
 curl localhost:8000/api/status
 docker compose down                                     # stop; add -v --rmi local to remove everything
 ```

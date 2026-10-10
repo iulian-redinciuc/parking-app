@@ -46,11 +46,12 @@ services:
     container_name: parking-e2e-vision-occupancy
     pull_policy: never
     command: ["/app/backend/.venv/bin/parking", "worker", "occupancy", "--camera", "cam-e2e"]
+    environment: { <<: *env, HEARTBEAT_FILE: /tmp/heartbeat }   # the vision image sets it itself
     networks: [e2e]
     depends_on:
       api: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
+      test: ["CMD", "/app/backend/.venv/bin/python", "-m", "parking.workers.heartbeat"]
       interval: 5s
       timeout: 5s
       retries: 3

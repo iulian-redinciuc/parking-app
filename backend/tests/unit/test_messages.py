@@ -37,6 +37,7 @@ HEALTH = {
     "v": 1, "camera_id": "cam-ground", "ts": "2026-10-07T17:05:12.000Z",
     "state": "ok", "issue": None, "fps": 0.2, "last_frame_age_s": 3.1,
     "inference_ms_avg": 151, "unhealthy_ratio": 0.0, "gate_active_ratio": None,
+    "started_at": "2026-10-07T09:00:00.000Z",
 }  # fmt: skip
 LOT_STATUS = {
     "v": 1, "lot": "main", "updated_at": "2026-10-07T17:05:12.000Z",

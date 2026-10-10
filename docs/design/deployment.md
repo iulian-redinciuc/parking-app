@@ -96,7 +96,7 @@ Files:
 |------|----------|
 | `docker-compose.yml` | Base definition (all services, using released images from GHCR) |
 | `docker-compose.dev.yml` | Dev Pi: builds images locally, mounts source for quick iteration |
-| `docker-compose.site.yml` | T2 lot box: vision services only, `API_INTERNAL_URL` = the API's VPN address |
+| `docker-compose.site.yml` | T2 lot box: vision services and `autoheal` only, `API_INTERNAL_URL` = the API's VPN address |
 | `docker-compose.server.yml` | T2 server: API + public entry only (`--profile web`: `parking-web`, Caddy + the frontend; or `--profile public`: the Cloudflare tunnel) |
 
 Base file (abridged):
@@ -145,13 +145,14 @@ services:
     deploy: { resources: { limits: { cpus: "${VISION_CPUS:-1.0}", memory: "${VISION_MEMORY:-1200M}" } } }
     environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
     depends_on: { api: { condition: service_healthy } }
-    healthcheck:                                               # the /control/* server is up
-      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
-      interval: 30s
+    healthcheck:                                               # §4.2: the loop's heartbeat file is fresh
+      test: ["CMD", "/app/backend/.venv/bin/python", "-m", "parking.workers.heartbeat"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 2
       start_period: 60s
       start_interval: 2s
+    labels: { parking.autoheal: "true" }                       # restarted when unhealthy
 
   vision-flow:
     <<: *common
@@ -163,13 +164,18 @@ services:
     deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: "${FLOW_MEMORY:-1200M}" } } }
     environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
     depends_on: { api: { condition: service_healthy } }
-    healthcheck:                                               # same as vision-occupancy
-      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 60s
-      start_interval: 2s
+    healthcheck: …                                             # same as vision-occupancy
+    labels: { parking.autoheal: "true" }
+
+  autoheal:                           # §4.2: restarts unhealthy containers labelled parking.autoheal=true
+    <<: *hardening
+    container_name: parking-autoheal
+    image: willfarrell/autoheal:1.2.0
+    group_add: ["${DOCKER_GID:?…}"]   # the Docker socket's group on this machine
+    environment: { AUTOHEAL_CONTAINER_LABEL: parking.autoheal, AUTOHEAL_INTERVAL: "5", AUTOHEAL_DEFAULT_STOP_TIMEOUT: "10" }
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+    network_mode: none
+    restart: unless-stopped
 
   tunnel:
     <<: *hardening-tunnel             # §4.1: read-only, no capabilities, uid 65532, limits, `tunnel ready` healthcheck
@@ -216,7 +222,7 @@ Every service in every Compose file (base, server, site; the e2e test stack too,
 | Setting | Value | Notes |
 |---------|-------|-------|
 | `restart` | `unless-stopped` | Comes back after a crash, a Docker restart and a reboot; stays down only after `docker compose stop` / `down` |
-| `healthcheck` | API: `/healthz`; workers: the `/control/*` port (P8.5 adds the heartbeat); `parking-web`: port 443; tunnels: `cloudflared tunnel --metrics localhost:20241 ready` (connected to Cloudflare's edge) | `depends_on: service_healthy` uses them when the stack is started with `up` |
+| `healthcheck` | API: `/healthz`; workers: the loop's heartbeat file (§4.2); `parking-autoheal`: the Docker socket answers `/_ping`; `parking-web`: port 443; tunnels: `cloudflared tunnel --metrics localhost:20241 ready` (connected to Cloudflare's edge) | `depends_on: service_healthy` uses them when the stack is started with `up` |
 | `read_only: true` | root filesystem read-only | The only writable places are the mounts (`config/`, `data/`, for Caddy its two volumes) and `/tmp` |
 | `tmpfs` | `/tmp:size=64m` | In memory: counts towards the service's memory limit, empty after a restart. Holds the Ultralytics settings (`HOME=/tmp`) and SQLite's temporary files. The tunnels write nothing and have none |
 | `cap_drop` | `[ALL]`, nothing added back | No service needs a capability |
@@ -236,14 +242,29 @@ Every service in every Compose file (base, server, site; the e2e test stack too,
 | `FLOW_CPUS` / `FLOW_MEMORY` | `1.5` / `1200M` | `parking-vision-flow` | P5.10's dev-Pi reference; raise `FLOW_CPUS` to 2 first if fps is short |
 | `WEB_CPUS` / `WEB_MEMORY` | `1.0` / `256M` | `parking-web` | dev Pi: ~15 MB idle |
 | (fixed) | `0.5` / `128M` | tunnels | dev Pi: ~20 MB |
+| (fixed) | `0.2` / `64M` | `parking-autoheal` | a shell loop with `curl` + `jq` every 5 s |
 
 These are the dev-Pi values; they are tuned on the production machines after P8.2's measurements and P8.10's load test, in each machine's `.env` only.
 
-**Pinned images:** production never runs `latest`. `docker-compose.server.yml` / `docker-compose.site.yml` refuse to start without `PARKING_VERSION`, and `prod-env.sh` accepts only a release tag (`v0.x.y`). Third-party images carry an exact version in the Compose files (`cloudflare/cloudflared:2026.10.0`) and in the Dockerfiles (`caddy:2.11-alpine`, `node:22-alpine`, `python:3.12-slim-bookworm`). Dependabot proposes updates weekly: `docker-compose` in `/deploy`, `docker` in `/backend` and `/frontend`, next to `pip`, `npm` and `github-actions`. The base file keeps `${PARKING_VERSION:-latest}` only as the default for a machine without an `.env`; the dev Pi builds its own images.
+**Pinned images:** production never runs `latest`. `docker-compose.server.yml` / `docker-compose.site.yml` refuse to start without `PARKING_VERSION`, and `prod-env.sh` accepts only a release tag (`v0.x.y`). Third-party images carry an exact version in the Compose files (`cloudflare/cloudflared:2026.10.0`, `willfarrell/autoheal:1.2.0`) and in the Dockerfiles (`caddy:2.11-alpine`, `node:22-alpine`, `python:3.12-slim-bookworm`). Dependabot proposes updates weekly: `docker-compose` in `/deploy`, `docker` in `/backend` and `/frontend`, next to `pip`, `npm` and `github-actions`. The base file keeps `${PARKING_VERSION:-latest}` only as the default for a machine without an `.env`; the dev Pi builds its own images.
 
 **Reboot:** `provision.sh` enables the Docker service (and, on T2, orders it after `wg-quick@wg0`, so the VPN address the ports are published on exists first). At boot Docker starts every container that was running, in no particular order and without `depends_on`: the workers retry until the API answers, Caddy answers 502 for `/api/*` until then. Target: live data again within 3 minutes of power-on with no manual step. `deploy/scripts/boot-check.sh server|site [zone …]`, run right after logging in again, waits until every container of the project is running and healthy and (server) `/api/status` has no stale zone, and prints the seconds since boot (fails above `BOOT_LIMIT_S`, default 180). It only reads; it never starts a container.
 
 Measured on the dev Pi (P8.4, not a reboot: the API and the worker processes ended at the same moment and Docker's restart policy brought them back): see PROGRESS.md → Metrics.
+
+### 4.2 Watchdog for stuck workers (P8.5)
+
+A worker whose loop hangs (a camera read or a model call that never returns) keeps its process, its `/control/*` port and even its health messages (they come from their own thread), so neither Docker's restart policy nor the old port check notices. Three parts close that gap:
+
+1. **Heartbeat file** (`parking/workers/heartbeat.py`). Every time the loop comes round (occupancy: after each frame, healthy or not; flow: every pass, at most one write a second) the worker rewrites `HEARTBEAT_FILE` with the longest silence allowed, `max(3 × interval, 20 s)`, where `interval` is the occupancy worker's own period (the `folder:` source's `interval` or `sample_every_s`) and 0 for the flow worker. The file's modification time is the beat. `HEARTBEAT_FILE=/tmp/heartbeat` is set by the `parking-vision` image (the e2e stack sets it itself, because it runs the worker from the API image); without it, e.g. `parking worker … --print` on a laptop, nothing is written. It says the loop is alive, not that the camera works: a camera that is down is reported through the health messages and a restart wouldn't fix it.
+2. **Healthcheck**: `python -m parking.workers.heartbeat` exits 1 when the file is missing or older than the limit written in it. With `interval: 10s`, `retries: 2` a stuck loop is `unhealthy` 25–40 s after it stopped (at `sample_every_s` ≤ 6; later for slower cameras, by the 3 × rule).
+3. **`parking-autoheal`** (`willfarrell/autoheal`, in the base and the site file; the T2 server has no workers). Docker itself never restarts an unhealthy container. Every 5 s autoheal asks the Docker socket for unhealthy containers labelled **`parking.autoheal=true`** and restarts them (10 s for a clean stop, then killed). Only the two workers carry the label: the label is namespaced so that nothing else on a shared machine (the dev Pi) can ever match, and the API and the public entry are left out on purpose (their healthchecks fail for reasons a restart doesn't fix, like load or the internet being away; the external uptime check of P8.7 covers them).
+
+The Docker socket is root on the host for whoever can talk to it, so this is the only container that gets it, and it gets nothing else: the §4.1 hardening (read-only, no capabilities, uid 1000 plus the socket's group `DOCKER_GID`), **no network** (`network_mode: none`), an exact image version. `DOCKER_GID` is per machine (`getent group docker | cut -d: -f3`); both Compose files refuse to start without it, and `prod-env.sh site` fills it in.
+
+**Restart count:** an autoheal restart doesn't raise Docker's own `RestartCount`. Every health message carries the worker process's `started_at`; the API counts a restart whenever a camera's value changes and shows it in `/healthz` as `restarts` ([api.md §2](api.md#2-public-rest-endpoints)), with a warning in its log.
+
+**Testing it:** `docker compose kill -s USR1 vision-occupancy` (or `vision-flow`). `SIGUSR1` makes the worker's main thread sleep forever inside the signal handler, so the loop stops wherever it was while the other threads go on, which is what a real hang looks like. `docker compose pause` doesn't count: a paused container can't be health-checked. Measured on the dev Pi: PROGRESS.md → Metrics.
 
 ## 5. Public access for the API
 

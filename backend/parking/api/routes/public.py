@@ -63,6 +63,7 @@ async def healthz(rt: RuntimeDep) -> dict:
         "cameras": {
             c.id: health[c.id].state if c.id in health else "unknown" for c in rt.config.cameras
         },
+        "restarts": {c.id: rt.ingestor.restarts.get(c.id, 0) for c in rt.config.cameras},
         "ingest": {
             "observations": stats.observations,
             "flow_events": stats.flow_events,

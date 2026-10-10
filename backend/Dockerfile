@@ -27,5 +27,7 @@ COPY backend/ ./backend/
 RUN cd backend && uv sync --frozen --no-dev $(echo ",${VISION_EXTRAS}" | sed 's/,/ --extra /g')
 # Ultralytics writes its settings under $HOME; the container user has no home of its own
 ENV HOME=/tmp YOLO_CONFIG_DIR=/tmp/Ultralytics
+# the worker loop's heartbeat, read by the healthcheck in the Compose files (deployment.md §4.2)
+ENV HEARTBEAT_FILE=/tmp/heartbeat
 USER 1000:1000
 ENTRYPOINT ["/app/backend/.venv/bin/parking", "worker"]

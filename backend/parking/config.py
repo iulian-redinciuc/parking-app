@@ -481,6 +481,8 @@ class Settings(BaseSettings):
     flow_memory: str | None = None
     web_cpus: float | None = None
     web_memory: str | None = None
+    docker_gid: int | None = None
+    heartbeat_file: Path | None = None  # set by the vision image, not in .env
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -4,9 +4,12 @@
 1. starts the control server (workers/control.py) if a port and `WORKER_TOKEN` are set,
 2. starts a timer thread that sends a health message every `HEALTH_EVERY_S`,
 3. runs `loop()` until it returns or SIGTERM/SIGINT sets the stop flag (the current frame
-   is finished first),
+   is finished first); the loop calls `alive()` every round, which touches the heartbeat file
+   the Docker healthcheck reads (workers/heartbeat.py),
 4. sends a final health `down`, flushes the flow-event outbox for up to `SHUTDOWN_FLUSH_S`
    and closes everything.
+
+SIGUSR1 freezes the loop for good (a debug command to test the watchdog, deployment.md §4.2).
 
 `Schedule` is the loop's clock: runs are `interval` apart on a monotonic grid (next run =
 previous scheduled start + interval), so slow frames don't make it drift; when it's late by
@@ -20,6 +23,7 @@ import signal
 import threading
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +31,7 @@ from parking.config import Camera, ConfigError, LotConfig, Settings, cli_env, lo
 from parking.messages import CameraHealthMsg
 from parking.workers.api_client import ApiClient
 from parking.workers.control import DEFAULT_PORT, ControlServer
+from parking.workers.heartbeat import LoopHeartbeat
 
 log = logging.getLogger(__name__)
 
@@ -128,6 +133,9 @@ class Worker:
         self.control_host = control_host
         self.stop_event = threading.Event()
         self.started = time.monotonic()
+        # sent in every health message: a new value tells the API the worker was restarted
+        self.started_at = datetime.now(UTC)
+        self.loop_heartbeat = LoopHeartbeat(self.settings.heartbeat_file)
         self._control: ControlServer | None = None
         self._heartbeat: threading.Thread | None = None
 
@@ -167,9 +175,24 @@ class Worker:
         # (seen with SIGTERM from `timeout`). Setting it from another thread is safe.
         threading.Thread(target=self.stop, name="stop", daemon=True).start()
 
+    def _on_freeze(self, *_: object) -> None:
+        # Runs on the main thread, so the loop stops where it is and never comes back, like a
+        # hung camera read or model call. The health thread keeps sending.
+        log.warning("%s: SIGUSR1: loop frozen (watchdog test)", self.camera_id)
+        while True:
+            time.sleep(3600)
+
     def install_signal_handlers(self) -> None:
         signal.signal(signal.SIGTERM, self._on_signal)
         signal.signal(signal.SIGINT, self._on_signal)
+        signal.signal(signal.SIGUSR1, self._on_freeze)
+
+    def alive(self, interval: float = 0.0) -> None:
+        """Call once per loop round; `interval` = the loop's own period (0 = every frame)."""
+        try:
+            self.loop_heartbeat.beat(interval)
+        except OSError:
+            log.exception("%s: heartbeat file not written", self.camera_id)
 
     def run(self, max_frames: int | None = None, handle_signals: bool = True) -> None:
         if handle_signals:

@@ -129,6 +129,20 @@ scripts/boot-check.sh server                                         # server: a
 2. Docker doesn't restart *unhealthy* containers by itself. Add a `parking-autoheal` container (`willfarrell/autoheal`, limited to containers labelled `autoheal=true`), or a tiny cron script: `docker ps --filter health=unhealthy --filter name=parking- -q | xargs -r docker restart`.
 3. The API exposes a `restarts` count per worker in `/healthz` (from health messages).
 
+How it works and why: [deployment.md §4.2](../design/deployment.md#42-watchdog-for-stuck-workers-p85). **Files:** `backend/parking/workers/heartbeat.py` (the file + `python -m parking.workers.heartbeat`), `workers/base.py` (`alive()`, `SIGUSR1` freeze, `started_at`), `api/ingest.py` + `routes/public.py` (`restarts`), `backend/Dockerfile` (`HEARTBEAT_FILE`), `deploy/docker-compose.yml` + `docker-compose.site.yml` (worker healthcheck, label, `autoheal`), `deploy/.env.example` + `prod-env.sh` (`DOCKER_GID`).
+
+As built: the limit is `max(3 × interval, 20 s)`; the label is `parking.autoheal=true` (namespaced, so nothing else on a shared machine matches); the debug command is `SIGUSR1`. An existing `.env` needs one new line: `echo "DOCKER_GID=$(getent group docker | cut -d: -f3)" >> .env`.
+
+**Commands** (any machine that runs workers; in production with a release tagged after this task, lot box: add `-f docker-compose.site.yml`):
+```bash
+cd deploy
+docker compose ps                                              # parking-autoheal and the workers "healthy"
+docker compose kill -s USR1 vision-occupancy                   # freeze the loop (log: "SIGUSR1: loop frozen")
+watch -n 2 docker compose ps vision-occupancy                  # unhealthy after ~40 s, "Up … seconds" again within ~1 min
+docker logs --tail 3 parking-autoheal                          # "found to be unhealthy - Restarting container now"
+curl -s localhost:8000/healthz                                 # on the API machine: "restarts":{"cam-ground":1,…}
+```
+
 **Done when:** freezing a worker (`docker compose pause vision-occupancy` doesn't count; use a debug command that blocks the loop) gets it restarted automatically within ~1 min.
 
 ## P8.6: Backups and restore

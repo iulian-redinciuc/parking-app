@@ -183,6 +183,7 @@ class FlowWorker(Worker):
                         log.info("%s: source has no more frames", self.camera_id)
                         break
                     self.stop_event.wait(POLL_S)
+                self.alive()
                 if time.monotonic() >= next_summary:
                     self._log_summary()
                     next_summary += SUMMARY_EVERY_S
@@ -344,6 +345,7 @@ class FlowWorker(Worker):
                 round(now - self._last_frame_at, 1) if self._last_frame_at is not None else None
             ),
             unhealthy_ratio=round(self.health.unhealthy_ratio, 3),
+            started_at=self.started_at,
             **self.window_stats(now),
         )
 

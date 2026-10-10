@@ -358,3 +358,16 @@ def test_debug_capture_is_off_by_default(lot):
     w.loop()
     assert w.observations == 2
     assert not (lot / "data" / "debug").exists()
+
+
+def test_loop_beats_the_heartbeat_file_and_health_says_when_it_started(lot, tmp_path):
+    from parking.workers.heartbeat import check
+
+    path = tmp_path / "heartbeat"
+    w, _ = make_worker(lot, settings=Settings(heartbeat_file=path))
+    assert not check(path)[0]
+    w.loop(max_frames=2)
+    assert check(path)[0] and path.read_text() == "20\n"
+    msg = w.health_message()
+    assert msg.started_at == w.started_at and msg.started_at.tzinfo is not None
+    assert json.loads(msg.model_dump_json())["started_at"].endswith("Z")

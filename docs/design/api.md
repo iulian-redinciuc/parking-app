@@ -63,7 +63,7 @@ Codes: `bad_request` (400; also 422 for a body or query that fails validation, w
 
 | Method | Path | Phase | Description |
 |--------|------|-------|-------------|
-| GET | `/healthz` | 2 | `{"status":"ok","db":true,"cameras":{"cam-ground":"ok","cam-ramp":"unknown"},"ingest":{"observations":n,"flow_events":n,"health":n,"rejected":n,"db_errors":n},"stream":{"clients":n,"published":n,"dropped":n}}`. `unknown` = no health message since start-up; counters since start-up (`stream.dropped` = events dropped from full SSE client queues). HTTP 200 even when cameras are down, because the API itself is alive |
+| GET | `/healthz` | 2 | `{"status":"ok","db":true,"cameras":{"cam-ground":"ok","cam-ramp":"unknown"},"restarts":{"cam-ground":0,"cam-ramp":0},"ingest":{"observations":n,"flow_events":n,"health":n,"rejected":n,"db_errors":n},"stream":{"clients":n,"published":n,"dropped":n}}`. `unknown` = no health message since start-up; `restarts` = times each camera's worker came back as a new process since the API started (a new `started_at` in its health messages; the watchdog of [deployment.md §4.2](deployment.md#42-watchdog-for-stuck-workers-p85) or a crash); counters since start-up (`stream.dropped` = events dropped from full SSE client queues). HTTP 200 even when cameras are down, because the API itself is alive |
 | GET | `/api/lot` | 2 | Static lot info (below). `location` uses `LOT_LAT`/`LOT_LON` from the settings when set, else lot.yaml; zone `capacity` is the effective one (slot count for `slots` zones) |
 | GET | `/api/status` | 2 | `LotStatus`; `503 unavailable` until the first data since start-up, unless state was restored from the DB (then 200 with `stale: true`). `Cache-Control: no-cache` |
 | GET | `/api/stream` | 2 | SSE (see §3) |
@@ -251,9 +251,11 @@ Server: `parking/workers/control.py` (P2.3), stdlib `http.server` in a thread; `
   "v": 1, "camera_id": "cam-ground", "ts": "…",
   "state": "ok", "issue": null,
   "fps": 0.2, "last_frame_age_s": 3.1, "inference_ms_avg": 151, "unhealthy_ratio": 0.0,
-  "gate_active_ratio": null
+  "gate_active_ratio": null,
+  "started_at": "2026-10-07T09:00:00.000Z"
 }
 ```
+`started_at` (P8.5, optional): when this worker process started. A different value than in the camera's previous message means the worker was restarted; the API counts it (`restarts` in `/healthz`). Messages without it are never counted.
 `gate_active_ratio` (flow workers only, P5.6, else `null`): share of the last 10 s of frames the motion gate let through to the detector. A flow worker's `fps` is frames processed per second over the last 10 s and `inference_ms_avg` the mean gate + detector + tracker time of the frames the gate let through (`null` while the ramp is quiet). Its frame-health check runs once a second without the `frozen` check (a quiet ramp looks the same for minutes); no new frame for 5 s is `connect_failed`.
 `state`: `ok | degraded | down`. `issue`: `null | black | frozen | blurry | shifted | connect_failed`. A `shifted` camera (vision.md §6) is `degraded` (unless `down`) and reports `issue: shifted` while its frames are otherwise healthy.
 

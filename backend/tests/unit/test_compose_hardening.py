@@ -1,4 +1,5 @@
-"""Compose hardening + deploy/scripts/boot-check.sh (deployment.md §4.1, P8.4)."""
+"""Compose hardening + deploy/scripts/boot-check.sh (deployment.md §4.1, P8.4) and the watchdog
+(§4.2, P8.5)."""
 
 import os
 import re
@@ -67,7 +68,60 @@ def test_image_tags_are_pinned(file, name):
         if file != "docker-compose.yml":  # production files: no default at all
             assert "latest" not in tag
     else:
-        assert re.fullmatch(r"cloudflare/cloudflared:\d{4}\.\d+\.\d+", image)
+        assert re.fullmatch(r"(cloudflare/cloudflared|willfarrell/autoheal):\d+\.\d+\.\d+", image)
+
+
+WORKERS = [
+    pytest.param(f, s, id=f"{f}:{s}")
+    for f in (*RUNTIME_FILES, "docker-compose.test.yml")
+    for s in _services(f)
+    if s.startswith("vision-")
+]
+
+
+@pytest.mark.parametrize(("file", "name"), WORKERS)
+def test_worker_healthcheck_is_the_loop_heartbeat(file, name):
+    worker = _services(file)[name]
+    check = worker["healthcheck"]
+    assert check["test"] == [
+        "CMD",
+        "/app/backend/.venv/bin/python",
+        "-m",
+        "parking.workers.heartbeat",
+    ]
+    if file != "docker-compose.test.yml":
+        # stuck -> stale after >= 20 s -> unhealthy two checks later -> restarted: about a minute
+        assert (check["interval"], check["retries"]) == ("10s", 2)
+        assert worker["labels"] == {"parking.autoheal": "true"}
+
+
+def test_the_vision_image_writes_the_heartbeat_where_the_check_reads_it():
+    from parking.workers.heartbeat import DEFAULT_PATH
+
+    dockerfile = (ROOT / "backend" / "Dockerfile").read_text()
+    assert f"ENV HEARTBEAT_FILE={DEFAULT_PATH}" in dockerfile
+    env = _services("docker-compose.test.yml")["vision-occupancy"]["environment"]
+    assert env["HEARTBEAT_FILE"] == str(DEFAULT_PATH)
+
+
+@pytest.mark.parametrize("file", ["docker-compose.yml", "docker-compose.site.yml"])
+def test_autoheal_restarts_only_labelled_parking_containers(file):
+    services = _services(file)
+    autoheal = services["autoheal"]
+    assert autoheal["container_name"] == "parking-autoheal"
+    assert autoheal["environment"]["AUTOHEAL_CONTAINER_LABEL"] == "parking.autoheal"
+    assert autoheal["network_mode"] == "none" and "profiles" not in autoheal
+    assert autoheal["volumes"] == ["/var/run/docker.sock:/var/run/docker.sock"]
+    assert autoheal["group_add"][0].startswith("${DOCKER_GID:?")
+    labelled = {n for n, s in services.items() if "parking.autoheal" in s.get("labels", {})}
+    assert labelled == {"vision-occupancy", "vision-flow"}
+
+
+def test_no_docker_socket_anywhere_else():
+    for file in (*RUNTIME_FILES, "docker-compose.test.yml"):
+        for name, service in _services(file).items():
+            if name != "autoheal":
+                assert "docker.sock" not in str(service), f"{file}:{name}"
 
 
 def test_dependabot_watches_the_images():

@@ -114,10 +114,11 @@ def test_prod_env_server_has_fresh_secrets(tmp_path):
 
 def test_prod_env_site_takes_the_servers_worker_token(tmp_path):
     token = "ab" * 32
-    r = _prod_env(tmp_path, "site", PARKING_VERSION="v0.1.0", WORKER_TOKEN=token)
+    r = _prod_env(tmp_path, "site", PARKING_VERSION="v0.1.0", WORKER_TOKEN=token, DOCKER_GID="993")
     assert r.returncode == 0, r.stderr
     env = _read_env(tmp_path / ".env")
     assert env["WORKER_TOKEN"] == token and token not in r.stdout
+    assert env["DOCKER_GID"] == "993"  # parking-autoheal reads the Docker socket with it
     assert env["API_INTERNAL_URL"] == "http://10.77.0.1:8000" and env["VPN_BIND_IP"] == "10.77.0.2"
     # the API's secrets stay off the lot box
     assert env["ADMIN_TOKEN"] == env["VAPID_PRIVATE_KEY"] == env["ADMIN_PASSWORD_HASH"] == ""
@@ -200,7 +201,7 @@ def test_site_compose_has_only_the_workers_on_the_vpn_address():
     compose = _compose("docker-compose.site.yml")
     assert compose["name"] == "parking"
     services = compose["services"]
-    assert set(services) == {"vision-occupancy", "vision-flow"}
+    assert set(services) == {"vision-occupancy", "vision-flow", "autoheal"}
     assert services["vision-flow"]["profiles"] == ["flow"]
     for name, host_port in (("vision-occupancy", 9000), ("vision-flow", 9001)):
         (port,) = services[name]["ports"]

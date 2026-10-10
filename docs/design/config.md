@@ -245,8 +245,11 @@ Git-ignored. One row per count during the drift test (P5.11): ISO time (no offse
 | `LOG_LEVEL` | `INFO` | all |
 | `PARKING_VERSION` | `latest` (dev) or `v0.x.y` (pinned in production) | compose (image tag) |
 | `VPN_BIND_IP` | empty (dev); T2 production: this machine's own VPN address, `10.77.0.1` on the server, `10.77.0.2` on the lot box | compose (`docker-compose.server.yml` / `docker-compose.site.yml` publish the API / the workers' control ports on it; [deployment.md §9](deployment.md#9-workers-and-api-on-different-machines-t2)) |
+| `DOCKER_GID` | empty; the id of the machine's `docker` group (`getent group docker \| cut -d: -f3`); `prod-env.sh site` fills it in | compose (`parking-autoheal` reads the Docker socket with it, [deployment.md §4.2](deployment.md#42-watchdog-for-stuck-workers-p85); the base and the site file refuse to start without it) |
 | `API_CPUS`, `VISION_CPUS`, `FLOW_CPUS`, `WEB_CPUS` | `1.0`, `1.0`, `1.5`, `1.0` | compose (CPU limit per container, per machine; [deployment.md §4.1](deployment.md#41-hardening-p84)) |
 | `API_MEMORY`, `VISION_MEMORY`, `FLOW_MEMORY`, `WEB_MEMORY` | `512M`, `1200M`, `1200M`, `256M` | compose (memory limit per container, `/tmp` included) |
+
+Not in `.env`: `HEARTBEAT_FILE` (the file a worker's loop touches for its Docker healthcheck) is set to `/tmp/heartbeat` by the `parking-vision` image; unset = no heartbeat file.
 
 Frontend build-time variables (not secrets, because they end up in public JS; set per build: preview or production):
 

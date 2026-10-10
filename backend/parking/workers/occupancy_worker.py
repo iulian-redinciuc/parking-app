@@ -224,6 +224,7 @@ class OccupancyWorker(Worker):
             if not schedule.wait():
                 break
             self.step()
+            self.alive(self.interval)
             if getattr(self._setup.source, "exhausted", False):
                 log.info("%s: source has no more frames", self.camera_id)
                 break
@@ -365,6 +366,7 @@ class OccupancyWorker(Worker):
             ),
             inference_ms_avg=round(sum(ms) / len(ms), 1) if ms else None,
             unhealthy_ratio=round(self.health.unhealthy_ratio, 3),
+            started_at=self.started_at,
         )
 
     @property

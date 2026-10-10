@@ -79,6 +79,10 @@ class Ingestor:
         self._lock = asyncio.Lock()
         # camera id -> store-clock time its last health message arrived
         self._health_seen: dict[str, datetime] = {}
+        # camera id -> `started_at` of the worker process that sent its last health message
+        self._worker_started: dict[str, datetime] = {}
+        # camera id -> worker restarts seen since the API started (`/healthz`)
+        self.restarts: dict[str, int] = {}
 
     def health_seen(self, camera_id: str) -> datetime | None:
         """Store-clock time the camera's last health message arrived (None = never)."""
@@ -157,10 +161,21 @@ class Ingestor:
             changes = self.store.apply_health(msg)
             self._health_seen[msg.camera_id] = self.store.clock.now()
             self.stats.health += 1
+            self._note_start(msg)
             if before is None or (before.state, before.issue) != (msg.state, msg.issue):
                 issue = f" ({msg.issue})" if msg.issue else ""
                 log.info("camera %s: %s%s", msg.camera_id, msg.state, issue)
             await self._commit(_Pending(changes=changes, health=[msg]))
+
+    def _note_start(self, msg: CameraHealthMsg) -> None:
+        """Count a restart when a camera's worker reports a new `started_at`."""
+        if msg.started_at is None:  # a worker older than P8.5
+            return
+        previous = self._worker_started.get(msg.camera_id)
+        self._worker_started[msg.camera_id] = msg.started_at
+        if previous is not None and previous != msg.started_at:
+            n = self.restarts[msg.camera_id] = self.restarts.get(msg.camera_id, 0) + 1
+            log.warning("camera %s: worker restarted (%d since the API started)", msg.camera_id, n)
 
     async def tick(self) -> None:
         """Once a second: cameras silent for 30 s go `down`, zones go stale, trends move."""

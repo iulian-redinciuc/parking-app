@@ -33,6 +33,16 @@ x-hardening-tunnel: &hardening-tunnel
     start_period: 30s
     start_interval: 2s
 
+# Workers (P8.5, deployment.md §4.2): healthy while the loop's heartbeat file is fresh. A stuck loop is
+# unhealthy within ~40 s and `autoheal` restarts the container.
+x-worker-healthcheck: &worker-healthcheck
+  test: ["CMD", "/app/backend/.venv/bin/python", "-m", "parking.workers.heartbeat"]
+  interval: 10s
+  timeout: 5s
+  retries: 2
+  start_period: 60s
+  start_interval: 2s
+
 x-common: &common
   <<: *hardening
   env_file: .env
@@ -69,13 +79,8 @@ services:
     environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
     depends_on:
       api: { condition: service_healthy }
-    healthcheck:                                               # the /control/* server is up
-      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 60s
-      start_interval: 2s
+    healthcheck: *worker-healthcheck
+    labels: { parking.autoheal: "true" }                       # restarted when unhealthy (autoheal)
 
   vision-flow:
     <<: *common
@@ -88,13 +93,33 @@ services:
     environment: { OMP_NUM_THREADS: "2", API_INTERNAL_URL: "${API_INTERNAL_URL:-http://api:8000}" }
     depends_on:
       api: { condition: service_healthy }
-    healthcheck:                                               # the /control/* server is up
-      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
+    healthcheck: *worker-healthcheck
+    labels: { parking.autoheal: "true" }                       # restarted when unhealthy (autoheal)
+
+  # Docker never restarts an unhealthy container by itself. This one does, for the containers
+  # labelled parking.autoheal=true only. It talks to the Docker socket, so: pinned, no network.
+  autoheal:
+    <<: *hardening
+    container_name: parking-autoheal
+    image: willfarrell/autoheal:1.2.0
+    group_add: ["${DOCKER_GID:?set DOCKER_GID in .env to the docker group's id (getent group docker | cut -d: -f3)}"]
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: parking.autoheal
+      AUTOHEAL_INTERVAL: "5"
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "10"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    network_mode: none
+    restart: unless-stopped
+    deploy: { resources: { limits: { cpus: "0.2", memory: 64M } } }
+    healthcheck:                                               # the Docker socket answers
+      test: ["CMD", "curl", "-sf", "--max-time", "3", "--unix-socket", "/var/run/docker.sock", "http://localhost/_ping"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 60s
+      start_period: 10s
       start_interval: 2s
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
 
   tunnel:
     <<: *hardening-tunnel

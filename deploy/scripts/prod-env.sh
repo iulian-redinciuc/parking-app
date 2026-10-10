@@ -68,6 +68,9 @@ if [ "$ROLE" = server ]; then
 else
   [[ "${WORKER_TOKEN:-}" =~ ^[0-9a-f]{64}$ ]] || die "set WORKER_TOKEN to the value in the server's .env (64 hex characters)"
   set_var VPN_BIND_IP "$VPN_SITE_IP"
+  gid=${DOCKER_GID:-$(getent group docker | cut -d: -f3 || true)}
+  [[ "$gid" =~ ^[0-9]+$ ]] || die "no docker group on this machine: run provision.sh first (or set DOCKER_GID)"
+  set_var DOCKER_GID "$gid"
   set_var WORKER_TOKEN "$WORKER_TOKEN"
   set_var API_INTERNAL_URL "http://$VPN_SERVER_IP:8000"
   todo="LOT_LAT / LOT_LON (same as the server), CAM_GROUND_SNAPSHOT_URL / CAM_GROUND_RTSP_URL,

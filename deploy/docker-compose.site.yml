@@ -30,13 +30,16 @@ x-worker: &worker
   environment:
     OMP_NUM_THREADS: "2"
     API_INTERNAL_URL: "${API_INTERNAL_URL:?set API_INTERNAL_URL to http://<server-vpn-address>:8000}"
-  healthcheck:                                                 # the /control/* server is up
-    test: ["CMD", "python", "-c", "import socket;socket.create_connection(('localhost',9000),3)"]
-    interval: 30s
+  # P8.5, deployment.md §4.2: healthy while the loop's heartbeat file is fresh. A stuck loop is unhealthy
+  # within ~40 s and `autoheal` restarts the container.
+  healthcheck:
+    test: ["CMD", "/app/backend/.venv/bin/python", "-m", "parking.workers.heartbeat"]
+    interval: 10s
     timeout: 5s
-    retries: 3
+    retries: 2
     start_period: 60s
     start_interval: 2s
+  labels: { parking.autoheal: "true" }                         # restarted when unhealthy (autoheal)
   logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
 
 services:
@@ -54,6 +57,31 @@ services:
     profiles: ["flow"]                                         # enabled from Phase 5
     ports: ["${VPN_BIND_IP:?set VPN_BIND_IP to this machine's VPN address}:9001:9000"]
     deploy: { resources: { limits: { cpus: "${FLOW_CPUS:-1.5}", memory: "${FLOW_MEMORY:-1200M}" } } }
+
+  # Docker never restarts an unhealthy container by itself. This one does, for the containers
+  # labelled parking.autoheal=true only. It talks to the Docker socket, so: pinned, no network.
+  autoheal:
+    <<: *hardening
+    container_name: parking-autoheal
+    image: willfarrell/autoheal:1.2.0
+    group_add: ["${DOCKER_GID:?set DOCKER_GID in .env to the docker group's id (getent group docker | cut -d: -f3)}"]
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: parking.autoheal
+      AUTOHEAL_INTERVAL: "5"
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "10"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    network_mode: none
+    restart: unless-stopped
+    deploy: { resources: { limits: { cpus: "0.2", memory: 64M } } }
+    healthcheck:                                               # the Docker socket answers
+      test: ["CMD", "curl", "-sf", "--max-time", "3", "--unix-socket", "/var/run/docker.sock", "http://localhost/_ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
 
 networks:
   egress: {}

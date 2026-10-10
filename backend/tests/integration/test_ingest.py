@@ -228,6 +228,28 @@ def test_health_upserted_and_camera_down_after_30s(lot, clock, caplog):
     assert (row["camera_id"], row["state"]) == ("cam-ground", "down")
 
 
+def test_worker_restarts_counted_from_started_at(lot, clock, caplog):
+    def beat(started_at=None, camera="cam-ground"):
+        body = health(camera) | ({"started_at": started_at} if started_at else {})
+        assert client.post("/internal/health", json=body, headers=AUTH).status_code == 204
+
+    with make_client(lot, clock) as client:
+        assert client.get("/healthz").json()["restarts"] == {"cam-ground": 0, "cam-ramp": 0}
+        beat()  # a worker older than P8.5: no started_at, never counted
+        beat("2026-10-08T17:00:00Z")
+        beat("2026-10-08T17:00:00Z")
+        beat("2026-10-08T17:00:00Z", camera="cam-ramp")
+        assert client.get("/healthz").json()["restarts"] == {"cam-ground": 0, "cam-ramp": 0}
+        caplog.set_level(logging.WARNING, logger="parking.api.ingest")
+        beat("2026-10-08T17:59:30Z")  # the same camera from a new process
+        beat("2026-10-08T17:59:30Z")
+        beat()
+        assert client.get("/healthz").json()["restarts"] == {"cam-ground": 1, "cam-ramp": 0}
+        assert "camera cam-ground: worker restarted (1 since the API started)" in caplog.text
+        beat("2026-10-08T17:59:55Z")
+        assert client.get("/healthz").json()["restarts"]["cam-ground"] == 2
+
+
 def test_restart_restores_state_as_stale(lot, clock):
     with make_client(lot, clock) as client:
         client.post("/internal/observations", json=obs({"G01", "G03"}), headers=AUTH)

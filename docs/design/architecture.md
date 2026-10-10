@@ -84,7 +84,8 @@ backend/
 │   │   ├── bootstrap.py         # propose slots from detections
 │   │   └── evaluate.py          # metrics for occupancy and flow
 │   ├── workers/
-│   │   ├── base.py              # loop, heartbeat, graceful shutdown
+│   │   ├── base.py              # loop, health messages, graceful shutdown, SIGUSR1 freeze (watchdog test)
+│   │   ├── heartbeat.py         # loop heartbeat file + `python -m parking.workers.heartbeat` (Docker healthcheck)
 │   │   ├── api_client.py        # HTTP client to the API: retries, outbox for flow events
 │   │   ├── control.py           # tiny internal HTTP server: /control/snapshot, /reload, /save-reference
 │   │   ├── occupancy_worker.py

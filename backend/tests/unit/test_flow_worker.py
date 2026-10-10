@@ -258,3 +258,14 @@ def test_cli_worker_flow(repo, monkeypatch):
     assert [e["direction"] for m in msgs if "events" in m for e in m["events"]] == ["in", "out"]
     result = CliRunner().invoke(app, [*args, "--print", "--max-frames", "-1"])
     assert result.exit_code == 2
+
+
+def test_loop_beats_the_heartbeat_file(repo, tmp_path):
+    from parking.workers.heartbeat import LoopHeartbeat, check
+
+    w, _ = make_worker(repo)
+    path = tmp_path / "heartbeat"
+    w.loop_heartbeat = LoopHeartbeat(path)
+    w.run(handle_signals=False)
+    assert check(path)[0] and path.read_text() == "20\n"
+    assert w.health_message().started_at == w.started_at
