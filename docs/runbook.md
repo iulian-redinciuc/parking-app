@@ -2,7 +2,7 @@
 
 What to do when the running system misbehaves: symptoms → checks (commands) → fix. Production paths are used (`/opt/parking`, [deployment.md §10](design/deployment.md#10-provisioning-the-production-machines-t2)); "server" is the API machine, "lot box" the vision host.
 
-> Started in P8.6 with backups and restore; the alerts table is from P8.7, the security check from P8.8. The other sections (stale camera, drifting count, tunnel down, full disk, updates, secret rotation, …) are written in [P8.12](phases/phase-8-hardening.md#p812-runbook-and-readme).
+> Started in P8.6 with backups and restore; the alerts table is from P8.7, the security check from P8.8, the drills from P8.11. The other sections (stale camera, drifting count, tunnel down, full disk, updates, secret rotation, …) are written in [P8.12](phases/phase-8-hardening.md#p812-runbook-and-readme).
 
 ## Alerts
 
@@ -119,3 +119,23 @@ deploy/scripts/security-check.sh repo                           # gitleaks over 
 | `CORS: … is allowed` | `CORS_ORIGINS` in `.env` must be exactly `https://<PUBLIC_HOST>` |
 | `publishes port … on every interface` / `open TCP ports besides …` | A `ports:` entry without the loopback or VPN address, or a firewall rule too many: `docker ps`, `sudo ufw status` |
 | `gitleaks found something` | **Rotate that secret first**, then remove it from the history ([security-privacy.md §3](design/security-privacy.md#3-public-repo-rules)) |
+
+## Power and network drills
+
+After a change to a machine, the VPN, the lot's network or a camera, and before go-live ([testing.md §9](design/testing.md#9-power-and-network-drills-p811-on-the-production-machines)). From your own machine, in a clone of the repo; start one, wait for `live: pull the plug now`, cut, restore, wait for the verdict, and log in nowhere meanwhile:
+
+```bash
+cd backend
+uv run python ../scripts/resilience/drill.py power-server https://<PUBLIC_HOST>    # the server off for 1 min
+uv run python ../scripts/resilience/drill.py power-site https://<PUBLIC_HOST>      # the lot box off for 1 min
+uv run python ../scripts/resilience/drill.py internet https://<PUBLIC_HOST>        # the lot's internet off for 10 min
+ADMIN_TOKEN=… uv run python ../scripts/resilience/drill.py camera https://<PUBLIC_HOST> --zone ground   # a camera's cable out for 10 min
+```
+
+| Not passed because | Look at |
+|--------------------|---------|
+| `did not come back by itself` / `back after … s` | On the machine that was cut: `deploy/scripts/boot-check.sh server\|site` says what is still waiting (a container not started: Docker not enabled or `restart:` missing; on the lot box the VPN: `sudo wg show`) |
+| `the API was unreachable during the drill` | The server must not depend on the lot: its own logs (`docker logs parking-api`), and whether the drill machine was on the lot's network |
+| `other zones went stale too` | Both cameras hang on the same cable, switch port or worker: `docker ps` on the lot box, the switch |
+| `no admin alert` | `GET /api/admin/alerts` shows the issue but not `active`: the cut was shorter than the grace time (about 3 min); `available: false`: no VAPID keys |
+| `… flow events arrived after the reconnect` | No car crossed the ramp during the cut, or the outbox isn't kept: `ls data/outbox/` on the lot box while the link is down |

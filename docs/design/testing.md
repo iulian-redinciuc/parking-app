@@ -93,3 +93,25 @@ cd backend && uv run python ../scripts/load/sse.py https://<PUBLIC_HOST> --ssh <
 - **Server side:** every `--sample` (10 s) `/healthz` (`stream.clients`, `stream.published`, `stream.dropped`) and, with `--docker NAME` (local) or `--ssh HOST` (runs `docker stats` for `parking-api` there), the API container's memory and CPU.
 - **Verdict** (exit 0 = passed, 1 = not, with the reasons): all clients connected; enough status changes; p95 delay < `--p95` (2 s); **no errors**: refused or failed connects (`http_<status>`, `connection`), `disconnected`, `stalled` (nothing for 45 s, i.e. three missed pings), `malformed`, `undelivered` (an event that didn't reach every connected client), `clients_behind` (clients that 5 s after the end still don't have the last event the server published), `dropped_by_server` (`stream.dropped` grew), `healthz`; and **memory stable**: median of the last quarter of the measurement's samples vs the first quarter, growth allowed up to max(`--mem-growth-mb` 16 MB, `--mem-growth-pct` 10%). Without memory samples the run doesn't pass.
 - `--insecure` accepts a test certificate (Caddy's own, `PUBLIC_HOST=localhost`); `--json` / `--out FILE` give the full result (counts, delay p50/p95/p99/max, errors with the first one of each kind, memory, CPU). The result has no secrets; it lives in the git-ignored `out/`.
+
+## 9. Power and network drills (P8.11, on the production machines)
+
+`scripts/resilience/drill.py` (httpx; run with the backend's environment, from **outside** the machines under test) watches the app while someone at the lot pulls a plug and puts it back. It never changes anything: it reads `/healthz` and `/api/status` every `--interval` (2 s; 60 of the 120 public requests a minute an address may make) and, with `ADMIN_TOKEN` in the environment, `/api/admin/alerts`.
+
+```bash
+cd backend && uv run python ../scripts/resilience/drill.py <scenario> https://<PUBLIC_HOST> [--zone ID] [--out ../out/drill/<scenario>.json]
+```
+
+| Scenario | What is cut, for how long | The fault, as the script sees it | Extra conditions |
+|----------|---------------------------|----------------------------------|------------------|
+| `power-server` | Power of the API machine, 1 min | `/healthz` doesn't answer (3 looks in a row; 1–2 failed reads are the network) | Reports whether stale was shown before live |
+| `power-site` | Power of the lot box, 1 min | Any zone stale (or `/api/status` without data) | The API keeps answering |
+| `internet` | The lot's internet, 10 min (T2) | As `power-site` | The API keeps answering; `ingest.flow_events` in `/healthz` grew by at least `--min-flow` (1) between the last look before the cut and the end: a car has to cross the ramp during the cut, the worker's outbox delivers it afterwards. `--min-flow 0` for a lot without a flow camera |
+| `internet-t1` | The same, everything on one machine at the lot (T1) | As `power-server` | |
+| `camera` | One camera's network cable, 10 min; `--zone` = its zone | That zone stale | The API keeps answering; no other zone stale at any time; an **active** `camera_down` or `stale` issue in `/api/admin/alerts` while it is out (active = past its grace time, i.e. the push was sent; about 3 min after the unplug, [notifications.md §5.1](notifications.md#51-admin-alerts-p78-p87)) and none left at the end. Needs `ADMIN_TOKEN` |
+
+- **Every run:** the app is live at the start (otherwise exit 2, nothing watched) → the fault is seen within `--fault-wait` (300 s) → every zone is live again and stays live for `--settle` (60 s) → all of it within `--max-outage` counted from the first look that saw the fault: 300 s for the 1 min cuts (the cut + the 3 min boot limit of [deployment.md §4.1](deployment.md#41-hardening-p84) + a margin), 780 s for the 10 min ones. A relapse restarts the settle time; the outage is counted to the last time the app became live.
+- **Verdict:** exit 0 = passed, 1 = not passed with the reasons (`the fault was never seen`, `did not come back by itself`, `back after … s`, `the API was unreachable during the drill`, `other zones went stale too`, `no admin alert`, `the alert is still open at the end`, `… flow events arrived after the reconnect`). The state changes are printed as they happen and again with the verdict; `--out FILE` writes them as JSON (no secrets; the git-ignored `out/`).
+- **"No manual help"** is the operator's part: between pulling the plug and the verdict nobody logs in to a machine. The script can't see that.
+- **UPS (optional):** with one in place, the 5 min power cut should not be noticed at all: run `power-site --fault-wait 360`, cut the mains for 5 min, and the expected result is `NOT PASSED: the fault was never seen` with a timeline that is only `live`.
+- **What a zone going stale needs:** 30 s without a health message from its camera's worker (worker or link gone) or `stale_after_s` (60 s) without a healthy frame (camera gone), so a cut shorter than that isn't seen.

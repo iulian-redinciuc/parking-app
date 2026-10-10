@@ -305,13 +305,35 @@ echo $?                                   # 0 = passed (prints PASSED, or NOT PA
 *Status (P8.10):* the script is built and tested. Still open, because it needs the production public entry (P8.2/P8.3): the run itself. Dev Pi figures are in PROGRESS.md → Metrics; they say the software holds 500 clients, not that the production VM and its network do.
 
 ## P8.11: Power and network resilience
+**Files:** `scripts/resilience/drill.py` (what it watches and the verdict's rules: [testing.md §9](../design/testing.md#9-power-and-network-drills-p811-on-the-production-machines)), `backend/tests/unit/test_resilience_drill.py`
+
 **Steps**
 1. Cut power to each production machine for 1 min → everything comes back by itself; the app shows stale, then live.
 2. Cut the lot's internet for 10 min → **T2:** counting continues on site and flow events arrive after reconnect (outbox); **T1:** the app is unreachable, then recovers by itself.
 3. Unplug one camera for 10 min → its zone shows stale; the other zones stay live; an admin alert fires; it recovers by itself.
 4. Optional UPS for the vision host, switch and router; test a 5 min outage.
 
+As built: the drill script watches the public entry and gives the verdict; one person at the lot (and, for the server, in the cloud provider's console: *power off*, wait, *power on*) does the cutting and nothing else. Between the cut and the verdict nobody logs in to a machine.
+
+**Commands** (from the dev Pi or a laptop on another network than the lot's; after P8.3, with the cameras live). Start one, wait for `live: pull the plug now`, cut for the time given, restore, wait for `PASSED`:
+```bash
+cd ~/workspace/parking-app/backend
+drill() { uv run python ../scripts/resilience/drill.py "$@" --out ../out/drill/$1.json; }
+drill power-server https://<PUBLIC_HOST>                  # 1. the cloud VM: power off 1 min, power on
+drill power-site   https://<PUBLIC_HOST>                  # 1. the lot box: pull its power plug 1 min
+drill internet     https://<PUBLIC_HOST>                  # 2. the lot's router/modem off 10 min; drive a car over
+                                                          #    the ramp meanwhile (no flow camera yet: --min-flow 0)
+export ADMIN_TOKEN=…                                      # 3. from the server's .env, for reading the alerts
+drill camera https://<PUBLIC_HOST> --zone ground          # 3. Camera B's cable out 10 min; then again with
+drill camera https://<PUBLIC_HOST> --zone underground     #    Camera A's (also check the push on the admin phone)
+drill power-site https://<PUBLIC_HOST> --fault-wait 360   # 4. only with a UPS: mains off 5 min, expected is
+                                                          #    "the fault was never seen" (nothing noticed)
+```
+Topology T1 (everything on one machine at the lot): `power-server` for the power cut and `internet-t1` for the internet cut.
+
 **Done when:** all scenarios pass with no manual help.
+
+*Status (P8.11):* the script is built and tested, and the four scenarios passed on the dev Pi against a throwaway two-zone stack (containers killed and started again, workers taken off the network, a camera's frames removed; figures in PROGRESS.md → Metrics). That says the software recovers by itself, not that the production machines, the VPN and the cameras do. Still open, because it needs the production machines, the lot's network and the cameras (P8.2/P8.3, P4, P5): the drills themselves.
 
 ## P8.12: Runbook and README
 **Files:** `docs/runbook.md`, `README.md`
