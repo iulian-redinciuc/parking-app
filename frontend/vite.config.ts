@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
-import { searchForWorkspaceRoot } from 'vite'
+import { loadEnv, searchForWorkspaceRoot, type Plugin } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vitest/config'
 
@@ -12,13 +12,52 @@ const base = process.env.VITE_BASE ?? '/parking-app/'
 // (types in src/types/slot-editor.d.ts), so both stay one implementation.
 const slotEditor = fileURLToPath(new URL('../tools/slot-editor', import.meta.url))
 
-export default defineConfig({
+// Strict CSP as a <meta> in the built index.html (docs/design/security-privacy.md §2): scripts,
+// styles and workers only from our own origin, requests and images also from the API origin.
+// Not in `vite dev`, whose React refresh needs an inline script. `frame-ancestors` can't be set
+// in a <meta>: the production proxy sends it as a header (deploy/Caddyfile).
+export function contentSecurityPolicy(apiBase: string | undefined): string {
+  let api = ''
+  try {
+    if (apiBase && apiBase !== 'mock') api = ` ${new URL(apiBase).origin}`
+  } catch {
+    // a relative or empty base: the API is on our own origin
+  }
+  return [
+    "default-src 'self'",
+    `connect-src 'self'${api}`,
+    `img-src 'self' data: blob:${api}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; ')
+}
+
+function cspMeta(apiBase: string | undefined): Plugin {
+  return {
+    name: 'parking-csp-meta',
+    apply: 'build',
+    transformIndexHtml: () => [
+      {
+        tag: 'meta',
+        attrs: {
+          'http-equiv': 'Content-Security-Policy',
+          content: contentSecurityPolicy(apiBase),
+        },
+        injectTo: 'head-prepend',
+      },
+    ],
+  }
+}
+
+export default defineConfig(({ mode }) => ({
   base,
   resolve: { alias: { '@slot-editor': `${slotEditor}/editor.js` } },
   server: { fs: { allow: [searchForWorkspaceRoot(process.cwd()), slotEditor] } },
   plugins: [
     react(),
     tailwindcss(),
+    cspMeta(process.env.VITE_API_BASE ?? loadEnv(mode, process.cwd()).VITE_API_BASE),
     // PWA (frontend.md §5): our own service worker in src/sw.ts, the plugin injects the precache
     // list and writes the manifest. Registered by the injected registerSW.js; not active in `vite dev`.
     VitePWA({
@@ -54,4 +93,4 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     setupFiles: ['src/test/setup.ts'],
   },
-})
+}))

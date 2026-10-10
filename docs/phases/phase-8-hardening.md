@@ -239,7 +239,25 @@ Go through [security-privacy.md §2](../design/security-privacy.md#2-threats-and
 - [ ] Dependabot alerts at zero high/critical
 - [ ] From outside: only the public HTTPS entry answers (`nmap` the production address(es))
 
+**Files:** `deploy/scripts/security-check.sh` (the checks, [security-privacy.md §2.1](../design/security-privacy.md#21-checking-the-controls-p88)), `frontend/vite.config.ts` (the CSP `<meta>`), `frontend/e2e/csp.spec.ts`, `deploy/Caddyfile` (`frame-ancestors`), [runbook.md → Security check](../runbook.md#security-check).
+
+**Commands** (production, after P8.3; needs a release tagged after this task):
+```bash
+# on the dev Pi, once: what the dev secrets look like (hashes only), copied to both machines
+cd deploy && scripts/security-check.sh fingerprints > /tmp/dev.fp && scp /tmp/dev.fp <server>:/tmp/ && scp /tmp/dev.fp <lot box>:/tmp/
+# on the server and on the lot box
+cd /opt/parking/deploy && DEV_FINGERPRINTS=/tmp/dev.fp scripts/security-check.sh server      # lot box: site
+# from outside (the dev Pi or a laptop, not over the VPN); the extra address is the lot's public one
+ADMIN_PASSWORD='…' deploy/scripts/security-check.sh outside https://<PUBLIC_HOST> <lot public address>
+# the repository (needs gitleaks and gh)
+deploy/scripts/security-check.sh repo
+# cameras: from a device on the lot's normal network (not the camera VLAN, not the lot box)
+nc -vz -w 3 <camera address> 554; nc -vz -w 3 <camera address> 80       # both must fail
+```
+
 **Done when:** every item is ticked, and the results are noted in PROGRESS.md.
+
+*Status (P8.8):* the review found three gaps, fixed here: the CSP `<meta>` was specified but never built into the page; Dependabot **alerts** are switched off on the repository (a setting only Iulian changes; the lockfiles were audited by hand instead: `pip-audit` and `npm audit` clean); the dev `.env` was mode 664. Checked on the dev Pi, on a throwaway API + `parking-web` pair with fresh secrets: every `outside` check except the port-80 redirect and the port scan (neither exists there), and every `server` check; gitleaks over the full history is clean. The boxes above stay unticked: they are about the production machines (P8.2/P8.3) and the camera VLAN (P4.2), which don't exist yet.
 
 ## P8.9: Privacy deliverables
 **Steps**

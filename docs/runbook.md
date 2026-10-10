@@ -2,7 +2,7 @@
 
 What to do when the running system misbehaves: symptoms → checks (commands) → fix. Production paths are used (`/opt/parking`, [deployment.md §10](design/deployment.md#10-provisioning-the-production-machines-t2)); "server" is the API machine, "lot box" the vision host.
 
-> Started in P8.6 with backups and restore; the alerts table is from P8.7. The other sections (stale camera, drifting count, tunnel down, full disk, updates, secret rotation, …) are written in [P8.12](phases/phase-8-hardening.md#p812-runbook-and-readme).
+> Started in P8.6 with backups and restore; the alerts table is from P8.7, the security check from P8.8. The other sections (stale camera, drifting count, tunnel down, full disk, updates, secret rotation, …) are written in [P8.12](phases/phase-8-hardening.md#p812-runbook-and-readme).
 
 ## Alerts
 
@@ -81,3 +81,23 @@ Because `.env` came back with its VAPID keys and tokens, push subscriptions, the
 | Counts stay stale after the restore | `scripts/boot-check.sh server`; on the lot box `docker compose -f docker-compose.site.yml ps` | The workers can't reach the API: VPN (`ping 10.77.0.1` from the lot box), `WORKER_TOKEN` equal on both machines |
 
 **Restore drill** (do it again after big changes, and once with a real production backup): the commands are in the [phase guide P8.6](phases/phase-8-hardening.md#p86-backups-and-restore); they restore into a scratch folder and start the API without network, so the drill can run on any machine with Docker and rclone without touching a running stack.
+
+## Security check
+
+After every change to the public entry, the firewall, `.env` or the Compose files, and once a quarter ([security-privacy.md §2.1](design/security-privacy.md#21-checking-the-controls-p88)):
+
+```bash
+cd /opt/parking/deploy && scripts/security-check.sh server      # on the server (site on the lot box)
+# from your own machine, in a clone of the repo:
+ADMIN_PASSWORD='…' deploy/scripts/security-check.sh outside https://<PUBLIC_HOST> <the lot's public address>
+deploy/scripts/security-check.sh repo                           # gitleaks over the full history + Dependabot alerts
+```
+
+| Failed check | Fix |
+|--------------|-----|
+| `.env mode` | `chmod 600 /opt/parking/deploy/.env` |
+| `… is the dev machine's` / `… is missing or shorter than 32 random bytes` | New value in `.env` (`openssl rand -hex 32`; password hash: `parking admin hash-password`), the same `WORKER_TOKEN` on both machines, then `docker compose … up -d` |
+| `… through the public entry` isn't 404 | The proxy forwards more than `/api/*` and `/healthz`: compare the running `parking-web` with `deploy/Caddyfile` (a tunnel: its ingress rules) |
+| `CORS: … is allowed` | `CORS_ORIGINS` in `.env` must be exactly `https://<PUBLIC_HOST>` |
+| `publishes port … on every interface` / `open TCP ports besides …` | A `ports:` entry without the loopback or VPN address, or a firewall rule too many: `docker ps`, `sudo ufw status` |
+| `gitleaks found something` | **Rotate that secret first**, then remove it from the history ([security-privacy.md §3](design/security-privacy.md#3-public-repo-rules)) |

@@ -13,6 +13,9 @@
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options nosniff
+		# no other site may put the app in a frame (a <meta> CSP can't say this; the rest of the
+		# policy is the <meta> in index.html)
+		Content-Security-Policy "frame-ancestors 'none'"
 		Referrer-Policy strict-origin-when-cross-origin
 		-Server
 	}
