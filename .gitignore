@@ -28,3 +28,6 @@ frontend/test-results/
 *.jpeg
 !frontend/public/**/*.jpg
 !backend/tests/fixtures/**/*.jpg
+# AI-generated sample images (not real photos, so public is fine)
+!samples/generated/*.jpg
+!samples/generated/*.jpeg
