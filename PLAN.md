@@ -28,7 +28,7 @@ A mobile-friendly web app that shows **how many parking spaces are free, in real
 | | **Development / testing** | **Production** |
 |---|---|---|
 | Machine | Iulian's **Raspberry Pi 5** (8 GB, ARM64, CPU only) | **The cloud or another Raspberry Pi** (exact setup chosen before real cameras go in, Phase 4); deployed in Phase 8 |
-| Purpose | Build and test everything; run the still-image, replay-feed and recorded-clip tests | Run the real system for real users |
+| Purpose | Build and test everything; the **PoC runs here on images** (still photo, simulated and generated frames, recorded clips). Stays the test bed after go-live | Run the real system for real users. Set up when going live ([docs/go-live.md](docs/go-live.md)) |
 | Rules | The app is **isolated** from everything else on the Pi: own containers, networks and data; nothing existing is used or changed ([deployment.md §1](docs/design/deployment.md#1-development-on-the-raspberry-pi)) | Its own dedicated environment |
 | Frontend | **Preview** on GitHub Pages: https://iulian-redinciuc.github.io/parking-app/ | Served by the production server's reverse proxy, same origin as the API (chosen in P8.3, [deployment.md §6](docs/design/deployment.md#6-frontend-hosting)) |
 
@@ -80,11 +80,12 @@ Alternatives and reasons: [architecture.md](docs/design/architecture.md), [deplo
 
 ## 6. Roadmap
 
-### MVP
-**The MVP is Phases 0–3:** a phone web app showing the live number of free spaces, fed by a simulated camera that replays the sample photo, end to end (vision → API → live updates → installable web app). It uses only what exists today: one straight-down sample photo, the dev Pi, and working assumptions for the open questions. It needs **no input from Iulian**: technical choices are made and recorded in the decision log as the work goes.
+### PoC and going live
+**The PoC is the whole app working end to end in the dev environment, with images standing in for the cameras** (the real sample photo, the simulated feed made from it, generated images, a synthetic ramp clip): vision → API → live updates → installable web app → notifications → admin → stats. Every phase is built and checked this way. Technical choices are made as the work goes and recorded in the decision log; **nothing waits on Iulian**.
 
-**Build order** (the agent loop follows PROGRESS.md top to bottom): MVP (0 → 1 → 2 → 3), then the phases that need no hardware (6 notifications, 7 admin + stats), then the ones that need the real cameras or production machines (4, 5, 8; their software parts are built against recordings and simulations, and only the on-site checks wait for hardware), then 9.
+**Going live is a separate track** that never blocks the PoC: real cameras, the production environment and real users. [docs/go-live.md](docs/go-live.md) has the two environments (dev and prod, and what keeps them apart), the step-by-step switch from the dev Pi to production (G1–G12), and every real-world check that was moved out of a task.
 
+**Order** (the agent loop follows PROGRESS.md top to bottom): 0 → 1 → 2 → 3 (the first usable app), 6, 7, then 4, 5, 8 in PoC mode, then 9.
 
 | Phase | Guide | Outcome | Runs on | Hardware? |
 |-------|-------|---------|---------|-----------|
@@ -110,7 +111,7 @@ flowchart LR
   P7 --> P8 --> P9
 ```
 
-Phases 1–3 (the MVP), 6 and 7 need no camera hardware, so they're built first. Phases 4, 5 and 8 need the real cameras and production machines for their final checks.
+No phase needs camera hardware for the PoC: all are checked on images in the dev environment. The checks on the real cameras and production machines are in docs/go-live.md.
 
 ## 7. Risks (top)
 
@@ -130,4 +131,4 @@ Phases 1–3 (the MVP), 6 and 7 need no camera hardware, so they're built first.
 
 ## 8. Open questions
 
-Tracked in [PROGRESS.md → Open questions](PROGRESS.md#open-questions). **None of them block the MVP**: undecided ones use the working assumptions recorded there. Needed only later: the real camera position (Phase 4) and where production runs (Phase 8).
+Tracked in [PROGRESS.md → Open questions](PROGRESS.md#open-questions). **None of them block the PoC**: undecided ones use the working assumptions recorded there. Needed only later: the real camera position (Phase 4) and where production runs (Phase 8).

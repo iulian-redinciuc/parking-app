@@ -1,0 +1,51 @@
+# Going live: from the PoC to the real thing
+
+The **PoC** is the whole app working end to end in the **dev environment**, with **images standing in for the cameras**. Going live (real cameras, a production environment, real users) is this separate track. **Nothing here blocks the PoC or the agent loop**: these steps start when Iulian decides to, and they need things only he can provide (permission, hardware, accounts).
+
+- Tasks and their PoC status: [../PROGRESS.md](../PROGRESS.md)
+- How production is built: [design/deployment.md](design/deployment.md) · Day-to-day operation: [runbook.md](runbook.md)
+
+## 1. Two environments
+
+| | **Dev** (now) | **Prod** (later) |
+|---|---|---|
+| Purpose | Build, test and demo everything. Stays as the test bed for good | Real users, real counts |
+| Machine | The dev Raspberry Pi 5 | Not bought yet. A standalone box at the lot for the cameras ([hardware.md §4.6](design/hardware.md)), and either the same box (T1) or a small cloud VM (T2) for the API ([deployment.md §3](design/deployment.md#3-production-topologies-to-be-chosen)) |
+| "Cameras" | Images: the real sample photo, the simulated feed made from it (`parking simulate-feed`), generated images in `samples/generated/`, a synthetic ramp clip | A camera on the box (`picamera:` / `device:`), or network cameras (`snapshot:` / `rtsp:`) if access is ever granted |
+| Code and images | Built locally from the checkout (`docker-compose.dev.yml`) | **Released images only** (`ghcr.io/…:v0.x.y`, built by CI for x86-64 and ARM64); never `latest`, never a local build |
+| Config | `config/lot.yaml` with `folder:`/`file:`/`video:` sources; `deploy/.env` with dev tokens | Its own `lot.yaml` (camera sources, slot/line files drawn on the real views) and its own `.env` with **fresh secrets** from `deploy/scripts/prod-env.sh`. Nothing secret is ever copied from dev |
+| Data | Disposable test data | Its own database, backed up nightly ([deployment.md §7](design/deployment.md#7-backups)) |
+| Public address | The preview on GitHub Pages + a temporary quick tunnel (`deploy/scripts/dev-public.sh`) | Its own hostname, HTTPS, the frontend served from the same origin as the API ([deployment.md §5–§6](design/deployment.md#5-public-access-for-the-api)) |
+| How changes arrive | Every commit on `main` (the agent loop works here) | A version tag: test on dev → `git tag v0.x.y` → CI builds the images → production pulls that version ([deployment.md §8](design/deployment.md#8-releases-and-updating)); roll back by deploying the previous tag |
+
+**The rule that keeps them apart:** dev and prod share the code and the image format and **nothing else**. Everything that differs is configuration (`lot.yaml`, `.env`, which Compose files), so moving off the Pi is a configuration job, not a rewrite.
+
+### Rehearsal (prod on the dev Pi, before any hardware)
+A **production rehearsal** is the production setup started on the dev Pi next to the dev stack: Compose project `parking-rehearsal`, the production Compose files, its own `.env` from `prod-env.sh`, its own data folder, loopback ports only, image feeds as cameras. It is how the PoC checks everything about production that doesn't need the real machines (start-up from released images, migrations, backups and restore, the security check, the load test, restart behaviour), and it is torn down after each check. The dev Pi itself is never rebooted or reconfigured for it.
+
+## 2. Switching from the dev Pi to production
+
+In order. Each step links to where the detail already is.
+
+| # | Step | Who | Detail |
+|---|------|-----|--------|
+| G1 | **Permission** to point a camera at the car park and run the service; signs; the private GDPR notes | Iulian | [security-privacy.md §4](design/security-privacy.md), [hardware.md §4.6](design/hardware.md) |
+| G2 | **Decide the layout:** one box doing everything (T1: cheapest, one machine, public entry through a tunnel) or box + cloud VM (T2: the app stays reachable when the lot's link drops). Ground level only at first, or the ramp camera too | Iulian (the default written down is T2, ground first) | [deployment.md §3](design/deployment.md#3-production-topologies-to-be-chosen) |
+| G3 | **Buy** the box (Pi 5, camera, 4G modem + SIM) and, for T2, rent the VM. A domain name | Iulian | [hardware.md §4.5–§4.6](design/hardware.md) |
+| G4 | **Provision** each machine: `provision.sh server\|site` (updates, Docker, SSH keys, firewall, VPN) | Iulian runs the script; the loop can do the rest over SSH if it is given access | [deployment.md §10](design/deployment.md#10-provisioning-the-production-machines-t2), phase guide P8.2 |
+| G5 | **Release** a version (`git tag v0.x.y`) and write the production `.env` with `prod-env.sh` (fresh secrets) | Loop / Iulian | [deployment.md §8](design/deployment.md#8-releases-and-updating) |
+| G6 | **Mount the camera**, switch `cam-ground.source` from the image folder to the camera, grab a frame, **redraw the spaces** on the real view, save the reference image | Iulian mounts; the rest is the admin slot editor | phase guide P4.2–P4.5, [runbook](runbook.md#add-a-language--zone--camera--lot) |
+| G7 | **Public entry and frontend:** hostname, HTTPS (tunnel or reverse proxy), the web app served by production | Iulian (DNS/tunnel account), loop | [deployment.md §5–§6](design/deployment.md#5-public-access-for-the-api), P8.3 |
+| G8 | **Backups, monitoring, alerts** on the production machines | Loop; Iulian for the storage and uptime-monitor accounts | P8.6, P8.7 |
+| G9 | **Measure on the real view:** collect and label ~200 frames, evaluate, tune or train the per-space classifier; health thresholds over a day and a night | Loop + Iulian's eyes on the labels | P4.4, P4.8–P4.10 |
+| G10 | **Security and privacy checks, load test, power/network drills** on production | Loop | P8.8–P8.11 |
+| G11 | **Staging week**, then share the address | Iulian + testers | [runbook](runbook.md#staging-week-and-go-live), P8.13 |
+| G12 | Later: the ramp camera for the underground level (needs a place to mount it), real phones for the notification matrix | Iulian | Phase 5, P6.8 |
+
+**Moving production to different hardware later** (another Pi, a PC, a different cloud): provision the new machine (G4), restore the latest backup onto it ([runbook](runbook.md#restore-from-backup)), deploy the same version with the same `.env` and config, point the hostname at it. The images already exist for both CPU types; only the AI runtime setting may change ([vision.md §11](design/vision.md#11-runtimes-and-performance)).
+
+## 3. Live checks moved out of the tasks
+
+Each task's check that needs the real camera, the lot or the production machines is listed here by task ID when the task is closed in PoC mode: what was checked in the PoC, and what remains to be checked for real. Tick them during G6–G12.
+
+<!-- The agent loop appends one "### Pn.m …" entry per task below. -->

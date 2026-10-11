@@ -173,6 +173,21 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
 
 **Done when:** 200 frames exist with labels, `parking evaluate` on them is recorded, and the app on the dev stack (and the phone preview) shows the ground count changing as the simulated cars come and go.
 
+## P2.13: Generated images as the ground camera
+**Files:** `samples/generated/` (committed, AI-generated, not real photos), `data/labels/` and `data/replay/` (git-ignored), tests if code changes, docs
+
+**Why:** images are the temporary camera until a real one is connected. Iulian adds AI-generated pictures of the lot with different cars to `samples/generated/` on GitHub.
+
+**Steps**
+1. `git pull`, list `samples/generated/`. If there are **no images yet**, do steps 4–6 with what exists (the real photo and the simulated feed), say so in the session log, and finish; the images get picked up by re-running the command of step 5 later.
+2. For each image: does it match the reference view (`data/reference/cam-ground.jpg`) closely enough for `config/slots/cam-ground.json`? Check by aligning it to the reference (feature matching / homography, the P4.6 shift code) and by looking at the slot overlay. Small shifts: warp the image onto the reference framing. A different view (other angle, other number of spaces): don't force it; list it as "not usable with this slot file" with the reason.
+3. Label the usable ones by eye (overlay with slot ids → taken list) into `data/labels/cam-ground-generated.json`; mark doubtful spaces `unsure`.
+4. `parking evaluate` on them with the current settings; record slot accuracy and the misses in PROGRESS.md → Metrics, **marked as generated images**. If the appearance scorer fails on them for a reason that would also hit a real camera (other car colours, shadows), improve it; if the reason is an artefact of the generated image, note it and move on.
+5. A small command or documented one-liner that builds the dev replay folder from all the sources (real photo, simulated frames, usable generated images), so the feed can be rebuilt when more images arrive; rebuild it and restart the dev stack (`deploy/scripts/dev-public.sh up`).
+6. Check through the API that the ground count follows the frames.
+
+**Done when:** every image in `samples/generated/` is either in the replay feed with labels and an evaluate result, or listed as unusable with the reason; the dev stack and the phone preview run on the rebuilt feed.
+
 ---
 
 ## Exit criteria

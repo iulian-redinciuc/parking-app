@@ -8,6 +8,7 @@ Start with [../PLAN.md](../PLAN.md) for the big picture. Track status in [../PRO
 |--------|--------------|-------------|
 | `design/` | **Specs**: the single source of truth for contracts, formats, algorithms and decisions | You need to know *what exactly* to build (payload shapes, file formats, thresholds) |
 | `phases/` | **Step-by-step guides**, one per phase, split into numbered tasks | You're implementing. Pick the next unticked task in PROGRESS.md and open its phase file |
+| [`go-live.md`](go-live.md) | **Going live**: the dev and prod environments, the switch from the dev Pi to production, and the real-world checks moved out of the tasks | You're planning the real cameras or production |
 | [`runbook.md`](runbook.md) | **Runbook**: symptoms → checks → fix for the running system, and the routine jobs (deploy, roll back, restore, rotate a secret, add a language / zone / camera, rebuild the dev environment) | Something is broken in production, or you are about to change it |
 
 Phase guides **link to** the design specs instead of repeating them. If a spec and a phase guide disagree, the spec wins. Fix the guide.
