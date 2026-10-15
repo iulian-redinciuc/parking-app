@@ -218,13 +218,18 @@
           <button id="next">Next ▶</button>
           <label
             >Conditions (comma separated)
-            <input id="conditions" type="text" list="condition-list" placeholder="day, dry"
+            <input id="conditions" type="text" list="condition-list" placeholder="noon, dry, busy"
           /></label>
+          <!-- the P4.8 validation tags: time of day, weather, occupancy (+ optional hard cases) -->
           <datalist id="condition-list">
-            <option>day, dry</option>
-            <option>night</option>
+            <option>morning, dry, busy</option>
+            <option>noon, dry, busy</option>
+            <option>evening, dry, busy</option>
+            <option>night, dry, empty</option>
             <option>rain</option>
-            <option>dusk</option>
+            <option>empty</option>
+            <option>full</option>
+            <option>glare</option>
             <option>snow</option>
           </datalist>
           <button id="mark-labelled" title="Record this image even if every space is free">

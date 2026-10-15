@@ -28,6 +28,7 @@
 | `vision/flow.py` | synthetic tracks: a→b = in; b→a = out; touches a then reverses = nothing; jitter on a line = nothing; one event per track; short tracks ignored; `in_direction` flip |
 | `vision/simulate.py` | on a **synthetic base image** (drawn pavement, lines and cars; one row cut off by the image edge): same seed → same frames; every frame reads as its labels with the appearance scorer (emptied = pavement, filled = car); only the asked slots change; cut-off slots get cut-off donors and no mirror across the cut; at most two changes per frame, cars stay ≥ 4 frames; the day curve has a nearly empty and a nearly full stretch; `simulate-feed` CLI + `evaluate` on its output |
 | `vision/lighting.py` | on a synthetic textured frame: phase by hour (day / dusk / IR night); dusk darker than noon, night grey at the IR level and softer than noon, night rain softer still; same seed → same frame; the lens cover reads `black` at the default threshold; `light-feed` CLI writes the frames, `lighting.json` and the cover, and refuses a bad `--rain` |
+| `workers/timelapse.py`, `vision/blur.py`, `validation` CLI | timelapse: every frame through `FrameHealth` + the analysis + `DebugCapture` at simulated times (captures `scan` back with the truth's names and tags, slot errors counted against the truth, rain spells repeatable by seed); `pick --labels-from` adds the picks' truth and never overwrites a hand label; `blur`: boxes grown and blurred only inside, hand-drawn boxes from JSON, nothing blurred twice, bad box file refused |
 | `vision/health.py` | black, frozen (N frames), blurry thresholds on generated numpy frames |
 | `vision/shift.py` | translate a synthetic textured image by 0/5/20 px → detection matches |
 | `vision/replay.py` | on synthetic scenes: the same view with other cars → `aligned`; shifted 22 px and turned 1° → `warped` and back within 2 px; over 10% off or another shape → `different`; a featureless image → `unmeasured`; stills ordered up and down; `parking build-replay` on a made-up repo: frame names, merged labels, unlabelled and different images left out, `evaluate` 100% on the feed, a rebuild removes only its own frames |
@@ -52,7 +53,7 @@ Use `core/clock.py` (`Clock` protocol with `now()` returning aware UTC; `SystemC
 | Set | Contents | Built in |
 |-----|----------|----------|
 | `data/samples/` + `data/labels/cam-ground.json` | Your Phase 1 sample images | P1.8 |
-| `data/validation/cam-ground/` + labels | ~200 frames from the live camera across conditions (`parking validation pick` / `check`) | P4.8 |
+| `data/validation/cam-ground/` + labels | ~200 frames from the live camera across conditions (`parking validation pick` / `check`); until there is one, picked from `parking validation timelapse` captures and labelled from its truth (`pick --labels-from`) | P4.8 |
 | `data/recordings/` + `data/labels/<clip>.csv` | 3 × 1-hour ramp clips with hand tallies | P5.9 |
 | `data/yolo/<camera>/` | The validation frames as a detector training set; its `images/val` + `holdout.json` are the held-out frames a trained detector is judged on ([detector-training.md](detector-training.md)) | P9.4 |
 

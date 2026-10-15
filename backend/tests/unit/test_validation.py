@@ -123,3 +123,115 @@ def test_cli_pick_without_captures(tmp_path, monkeypatch):
     result = runner.invoke(app, ["validation", "pick", "--camera", "cam-ground"])
     assert result.exit_code == 1
     assert "no captures" in result.output
+
+
+def _slot(i, taken):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(id=f"G{i:02d}", score=0.9 if taken else 0.1, taken=taken)
+
+
+def test_timelapse_makes_worker_captures_with_truth(tmp_path):
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    import cv2
+    import numpy as np
+
+    from parking.vision.health import FrameHealth
+    from parking.workers import timelapse as tl
+
+    feed = tmp_path / "feed"
+    feed.mkdir()
+    rng = np.random.default_rng(0)
+    for n in ("a.jpg", "b.jpg"):  # textured, so night IR frames aren't "blurry"
+        cv2.imwrite(str(feed / n), rng.integers(60, 200, (60, 80, 3), np.uint8))
+    truth_in = _labels({"a.jpg": {"taken": ["G00"]}, "b.jpg": {"taken": ["G00", "G01"]}})
+
+    def analyse(image):  # always guesses "G00 taken": right on a.jpg, one slot off on b.jpg
+        slots = [_slot(0, True), _slot(1, False)]
+        return SimpleNamespace(
+            camera_id="cam-ground", frame_size=(80, 60), inference_ms=5.0, detections=[],
+            slots=slots, zone_counts={},
+        )  # fmt: skip
+
+    files = sorted(feed.iterdir())
+    res = tl.run(
+        files, truth_in, analyse, FrameHealth(check_frozen=False), root=tmp_path,
+        camera_id="cam-ground", lot_id="main", tz="Europe/Bucharest",
+        start=datetime(2026, 10, 1), days=2, every_min=30, capture_every_min=60,
+    )  # fmt: skip
+    assert res.frames == 96 and not res.unhealthy
+    assert res.saved == 48  # every hour (= a.jpg's turn), no flips: the guess never changes
+    assert res.slots == 96 and res.slot_errors == 0
+    caps = va.scan(tmp_path / "data" / "debug" / "cam-ground")
+    assert len(caps) == 48 and caps[0].out_name == "2026-10-01_000000_000.jpg"
+    assert {c.out_name for c in caps} == set(res.truth)
+    tags = res.truth["2026-10-01_000000_000.jpg"].conditions
+    assert tags[0] == "night" and tags[-1] == "simulated" and tags[2] == "busy"
+    res = tl.run(
+        files[1:], truth_in, analyse, FrameHealth(check_frozen=False), root=tmp_path / "b",
+        camera_id="cam-ground", lot_id="main", tz="UTC", start=datetime(2026, 10, 1),
+        days=1, every_min=60,
+    )  # fmt: skip
+    assert res.saved == 24 and res.slot_errors == 24  # G01 missed on every b.jpg frame
+    assert res.truth["2026-10-01_120000_000.jpg"].conditions[:3] == ["noon", "dry", "full"]
+    assert tl.rain_spells(14, 1) == tl.rain_spells(14, 1) != tl.rain_spells(14, 2)
+    assert all(0 <= a < b <= 14 * 24 + 5 for a, b in tl.rain_spells(14, 1))
+
+
+def test_cli_pick_labels_from_truth_keeps_existing_labels(tmp_path, monkeypatch):
+    _write_lot(tmp_path, monkeypatch)
+    debug = tmp_path / "data" / "debug" / "cam-ground"
+    for h in range(4):
+        _capture(debug, "2026-10-01", f"{h * 6:02d}0000", taken=h)
+    names = [f"2026-10-01_{h * 6:02d}0000_000.jpg" for h in range(4)]
+    truth = tmp_path / "truth.json"
+    truth.write_text(
+        _labels({n: {"conditions": ["night"], "taken": ["G01"]} for n in names}).model_dump_json()
+    )
+    labels = tmp_path / "data" / "labels" / "cam-ground-validation.json"
+    labels.parent.mkdir(parents=True)
+    labels.write_text(_labels({names[0]: {"conditions": ["fixed"]}}).model_dump_json())
+    args = ["validation", "pick", "--camera", "cam-ground", "--labels-from", str(truth)]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert "3 label(s) added" in result.output and "(4 in all)" in result.output
+    images = LabelFile.model_validate_json(labels.read_text()).images
+    assert images[names[0]].conditions == ["fixed"]  # a hand-made label wins
+    assert images[names[1]].taken == ["G01"]
+
+    truth.write_text(_labels({}).model_dump_json())
+    result = runner.invoke(app, args)
+    assert result.exit_code == 1 and "not in" in result.output
+
+
+def test_blur_boxes_and_cli_manual_boxes_once(tmp_path, monkeypatch):
+    import cv2
+    import numpy as np
+
+    from parking.vision import blur as bl
+
+    assert bl.grow((10, 10, 30, 50), (40, 100, 3)) == (7, 4, 33, 40)
+    _write_lot(tmp_path, monkeypatch)
+    folder = tmp_path / "data" / "validation" / "cam-ground"
+    folder.mkdir(parents=True)
+    img = np.random.default_rng(1).integers(0, 255, (100, 200, 3), np.uint8)
+    cv2.imwrite(str(folder / "a.png"), img)
+    cv2.imwrite(str(folder / "b.png"), img)
+    boxes = tmp_path / "plates.json"
+    boxes.write_text('{"a.png": [[20, 20, 60, 40]]}')
+    args = ["validation", "blur", "--camera", "cam-ground", "--no-detect", "--boxes", str(boxes)]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert "1 hand-drawn box(es); blurred 1" in result.output
+    out = cv2.imread(str(folder / "a.png"))
+    assert out[22:38, 22:58].std() < img[22:38, 22:58].std() / 3  # blurred inside
+    assert (out[80:, 150:] == img[80:, 150:]).all()  # untouched outside
+    assert (cv2.imread(str(folder / "b.png")) == img).all()
+    log = bl.load_log(folder)
+    assert log == {"a.png": [{"by": "manual", "box": [20, 20, 60, 40]}]}
+    result = runner.invoke(app, args)  # nothing new: not blurred twice
+    assert "blurred 0" in result.output and (cv2.imread(str(folder / "a.png")) == out).all()
+    boxes.write_text('{"a.png": [[1, 2, 3]]}')
+    assert runner.invoke(app, args).exit_code == 1

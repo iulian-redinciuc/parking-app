@@ -175,6 +175,8 @@ Names are `<HHMMSS>_<ms>-<reasons>.jpg|json` (lot-local time, reasons `periodic`
 
 A `debug-prune` thread deletes files under `data/debug/<camera>/` whose mtime is older than `DEBUG_RETENTION_HOURS` (24) and then empty date folders, at start and every 5 min (at most ¼ of the retention). It runs **even with capture off**, so turning capture off still clears what an earlier run left. The captures are the raw material for the validation set (P4.8): copy frames out of `data/debug/` before they expire.
 
+**On images (until there is a camera).** `parking validation timelapse --camera ID [--days 14] [--every-min 20]` (`parking/workers/timelapse.py`) makes weeks of captures from the labelled replay feed: each frame is lit for its lot-local hour (`lighting.light`, rain in random 1–5 h spells, ~0.8 a day, any time of day), checked by `FrameHealth`, analysed by the camera's real `analyze_frame` and handed to the worker's own `DebugCapture` with a simulated clock, so the files are exactly what a worker writes. Since every frame comes from a labelled replay frame, the run also writes the truth as a label file (`data/labels/<camera>-timelapse.json`, keyed by the names `validation pick` gives the copies, tags = time of day, `dry|rain`, `empty|busy|full` from the true count, `dusk`, `simulated`); `validation pick --labels-from` that file then labels the picks instead of a person. A PoC stand-in: the real captures and hand labels replace it (go-live.md §3, P4.8).
+
 ## 7. Entry/exit counting
 
 ### 7.1 Frame pipeline (flow worker)

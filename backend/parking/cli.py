@@ -1973,6 +1973,112 @@ def drift_report(
         raise typer.Exit(1)
 
 
+@validation_app.command("timelapse")
+def validation_timelapse(
+    camera: Annotated[str, typer.Option(help="Occupancy camera id in the config.")],
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    frames: Annotated[
+        Path, typer.Option(help="Folder of labelled daytime frames (the replay feed).")
+    ] = Path("data/replay/ground-feed"),
+    labels: Annotated[
+        Path | None, typer.Option(help="Their labels (default data/labels/<camera>-feed.json).")
+    ] = None,
+    days: Annotated[int, typer.Option(min=1, help="Days of captures to make.")] = 14,
+    start: Annotated[
+        str | None, typer.Option(help="Lot-local first day, YYYY-MM-DD (default: today - days).")
+    ] = None,
+    every_min: Annotated[float, typer.Option(help="Minutes between analysed frames.")] = 15.0,
+    capture_every_min: Annotated[
+        float, typer.Option(help="DEBUG_CAPTURE_EVERY_MIN of the simulated worker.")
+    ] = 10.0,
+    truth: Annotated[
+        Path | None,
+        typer.Option(help="Truth labels to write (default data/labels/<camera>-timelapse.json)."),
+    ] = None,
+    seed: Annotated[int, typer.Option(help="Same seed, same light and rain.")] = 1,
+    force: Annotated[
+        bool, typer.Option("--force", help="Delete captures already in data/debug/<camera>.")
+    ] = False,
+) -> None:
+    """Make weeks of debug captures from labelled images (lit by the hour, with rain), analysed
+    like the worker does, plus their truth labels: the P4.8 PoC stand-in for a real camera."""
+    import shutil
+    from datetime import date, datetime, timedelta
+
+    from parking.config import ConfigError, LabelFile, load_labels
+    from parking.vision.health import FrameHealth
+    from parking.vision.pipeline import analyze_frame
+    from parking.workers import timelapse as tl
+    from parking.workers.debug_capture import debug_dir
+
+    if every_min <= 0 or capture_every_min <= 0:
+        raise typer.BadParameter("minutes must be positive")
+    lot, cam, root = _occupancy_camera(config, camera, "validation timelapse")
+    try:
+        first = date.fromisoformat(start) if start else date.today() - timedelta(days=days)
+    except ValueError:
+        raise typer.BadParameter("YYYY-MM-DD", param_hint="--start") from None
+    src = _resolve(frames, root)
+    files = sorted(f for f in src.glob("*") if f.suffix.lower() in {".jpg", ".jpeg", ".png"})
+    if not files:
+        _fail(f"no images in {src}")
+    labels_path = _resolve(labels or Path(f"data/labels/{camera}-feed.json"), root)
+    try:
+        label_file = load_labels(labels_path)
+    except (ConfigError, ValueError) as e:
+        _fail(f"labels {labels_path}: {e}")
+    missing = [f.name for f in files if f.name not in label_file.images]
+    if missing:
+        _fail(f"{len(missing)} frame(s) not labelled in {labels_path}, e.g. {missing[0]}")
+    out_dir = debug_dir(root, camera)
+    old = [d for d in out_dir.iterdir() if d.is_dir()] if out_dir.is_dir() else []
+    if old and not force:
+        _fail(f"{out_dir} already has captures (--force deletes them)")
+    for d in old:
+        shutil.rmtree(d)
+
+    slot_file = _slot_file(cam, root)
+    capacities = {z: lot.zone_capacity(z, [slot_file]) for z in cam.zones}
+    occ = cam.occupancy
+    detector = _yolo_detector(cam.detector, root) if occ.uses_detector else None
+    reference, classifier = _reference(occ, root), _classifier(occ, root)
+
+    def analyse(image):
+        return analyze_frame(image, cam, slot_file, detector, capacities, reference, classifier)
+
+    def progress(i: int, total: int) -> None:
+        if i % 200 == 0 or i == total:
+            typer.echo(f"  {i}/{total} frames", err=True)
+
+    result = tl.run(
+        files,
+        label_file,
+        analyse,
+        FrameHealth(cam.health, check_frozen=False),
+        root=root,
+        camera_id=camera,
+        lot_id=lot.lot.id,
+        tz=lot.lot.timezone,
+        start=datetime.combine(first, datetime.min.time()),
+        days=days,
+        every_min=every_min,
+        capture_every_min=capture_every_min,
+        seed=seed,
+        progress=progress,
+    )
+    truth_path = _resolve_out(truth or Path(f"data/labels/{camera}-timelapse.json"), root)
+    truth_path.parent.mkdir(parents=True, exist_ok=True)
+    truth_file = LabelFile(version=1, camera_id=camera, images=result.truth)
+    truth_path.write_text(truth_file.model_dump_json(indent=1) + "\n")
+    bad = ", ".join(f"{n} {k}" for k, n in sorted(result.unhealthy.items())) or "none"
+    acc = 1 - result.slot_errors / result.slots if result.slots else 0.0
+    typer.echo(
+        f"{result.frames} frame(s) over {days} day(s) from {first}: {result.saved} captured -> "
+        f"{out_dir}, unhealthy: {bad}; slots right {acc:.1%} ({result.slots - result.slot_errors}"
+        f"/{result.slots}); truth -> {truth_path}"
+    )
+
+
 @validation_app.command("pick")
 def validation_pick(
     camera: Annotated[str, typer.Option(help="Occupancy camera id in the config.")],
@@ -1985,6 +2091,13 @@ def validation_pick(
         Path | None, typer.Option(help="Folder to copy to (default data/validation/<camera>).")
     ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Only print the picks.")] = False,
+    labels_from: Annotated[
+        Path | None,
+        typer.Option(
+            help="Known truth for the captures (`validation timelapse`): add the picks' labels "
+            "to data/labels/<camera>-validation.json instead of labelling them by hand."
+        ),
+    ] = None,
 ) -> None:
     """Copy debug captures spread over time of day x occupancy into the validation folder."""
     import shutil
@@ -2021,8 +2134,35 @@ def validation_pick(
         f"{len(chosen)} of {len(captures)} capture(s) picked, {verb} "
         f"{len(chosen) - skipped if dry_run else copied}, {skipped} already there -> {out_dir}"
     )
-    if not dry_run:
+    if dry_run:
+        return
+    if labels_from is None:
         typer.echo("Label them in tools/slot-editor (label mode, tag the conditions).")
+        return
+    from parking.config import ConfigError, LabelFile, load_labels
+
+    try:
+        truth = load_labels(_resolve(labels_from, root))
+    except (ConfigError, ValueError) as e:
+        _fail(f"labels {labels_from}: {e}")
+    unknown = [c.out_name for c in chosen if c.out_name not in truth.images]
+    if unknown:
+        _fail(f"{len(unknown)} pick(s) not in {labels_from}, e.g. {unknown[0]}")
+    target = root / "data" / "labels" / f"{camera}-validation.json"
+    try:
+        current = load_labels(target) if target.is_file() else None
+    except (ConfigError, ValueError) as e:
+        _fail(f"labels {target}: {e}")
+    images = dict(current.images) if current else {}
+    added = 0
+    for c in chosen:
+        if c.out_name not in images:  # never overwrite a label someone made or fixed
+            images[c.out_name] = truth.images[c.out_name]
+            added += 1
+    target.parent.mkdir(parents=True, exist_ok=True)
+    merged = LabelFile(version=1, camera_id=camera, images=dict(sorted(images.items())))
+    target.write_text(merged.model_dump_json(indent=1) + "\n")
+    typer.echo(f"{added} label(s) added from {labels_from} -> {target} ({len(images)} in all)")
 
 
 @validation_app.command("check")
@@ -2064,6 +2204,89 @@ def validation_check(
     if not cov.ok:
         _fail(f"not enough yet (need {min_images} images and {min_per_tag} per required tag)")
     typer.echo("ok")
+
+
+@validation_app.command("blur")
+def validation_blur(
+    camera: Annotated[str, typer.Option(help="Occupancy camera id in the config.")],
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+    folder: Annotated[
+        Path | None, typer.Option(help="Images to blur (default data/validation/<camera>).")
+    ] = None,
+    boxes: Annotated[
+        Path | None,
+        typer.Option(help='Hand-drawn boxes (plates): {"<image>.jpg": [[x1, y1, x2, y2], ...]}.'),
+    ] = None,
+    model: Annotated[Path, typer.Option(help="Detector for `person` boxes.")] = Path(
+        "models/yolo11n_ncnn_model"
+    ),
+    conf: Annotated[float, typer.Option(help="Confidence for a `person` box.")] = 0.25,
+    imgsz: Annotated[int, typer.Option(help="Detector input size.")] = 1280,
+    no_detect: Annotated[
+        bool, typer.Option("--no-detect", help="Only the hand-drawn boxes, no detector.")
+    ] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Only print the boxes.")] = False,
+) -> None:
+    """Blur people (detector) and plates (hand-drawn boxes) in the validation images, in place
+    (P4.8 step 4); `blurred.json` remembers what was done."""
+    import cv2
+
+    from parking.vision import blur as bl
+
+    _, _, root = _occupancy_camera(config, camera, "validation blur")
+    src = _resolve(folder, root) if folder else root / "data" / "validation" / camera
+    images = sorted(f for f in src.glob("*") if f.suffix.lower() in {".jpg", ".jpeg", ".png"})
+    if not images:
+        _fail(f"no images in {src}")
+    try:
+        manual = bl.load_manual(_resolve(boxes, root)) if boxes else {}
+    except (OSError, ValueError) as e:
+        _fail(f"boxes {boxes}: {e}")
+    detector = None
+    if not no_detect:
+        from parking.vision.detector import YoloDetector
+
+        path = _resolve(model, root)
+        if not path.exists():
+            _fail(f"model {path} not found; run `parking models export` or pass --no-detect")
+        detector = YoloDetector(str(path), imgsz, conf, ["person"], use_masks=False)
+    log = bl.load_log(src)
+    people = hand = touched = 0
+    for f in images:
+        done = log.get(f.name, [])
+        done_manual = {tuple(e["box"]) for e in done if e["by"] == "manual"}
+        new_manual = [b for b in manual.get(f.name, []) if tuple(b) not in done_manual]
+        detect = detector is not None and not any(e["by"] == "detector" for e in done)
+        if not (new_manual or detect):
+            continue
+        image = cv2.imread(str(f))
+        if image is None:
+            _fail(f"can't read {f}")
+        entries = []
+        if detect:
+            found = [d for d in detector.detect(image) if d.cls == "person"]
+            entries += [
+                {"by": "detector", "box": [round(v) for v in d.box], "conf": round(d.conf, 2)}
+                for d in found
+            ] or [{"by": "detector", "box": None}]  # checked, nobody in it
+        entries += [{"by": "manual", "box": list(b)} for b in new_manual]
+        regions = [bl.grow(e["box"], image.shape) for e in entries if e["box"] is not None]
+        people += sum(1 for e in entries if e["by"] == "detector" and e["box"] is not None)
+        hand += len(new_manual)
+        for r in regions:
+            typer.echo(f"{f.name}: blur {r}")
+        if not dry_run:
+            if regions and not cv2.imwrite(str(f), bl.blur_boxes(image, regions)):
+                _fail(f"can't write {f}")
+            log[f.name] = done + entries
+            touched += bool(regions)
+    if not dry_run:
+        bl.save_log(src, log)
+    verb = "would blur" if dry_run else "blurred"
+    typer.echo(
+        f"{len(images)} image(s): {people} person box(es), {hand} hand-drawn box(es); "
+        f"{verb} {touched if not dry_run else people + hand} -> {src}"
+    )
 
 
 @worker_app.command("occupancy")
