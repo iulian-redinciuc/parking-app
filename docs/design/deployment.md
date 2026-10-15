@@ -72,7 +72,7 @@ ENTRYPOINT ["/app/backend/.venv/bin/parking", "worker"]
 
 Pick one before Phase 4 hardware goes in (open question #2). The code supports all three; only configuration differs.
 
-**Chosen in P4.1 (2026-10-09): T2.** The lot hardware is listed in [hardware.md §4.5](hardware.md#45-chosen-in-p41-to-order); the cloud VM is picked and provisioned in P8.2.
+**Chosen in P4.1 (2026-10-09, confirmed 2026-10-15): T2.** The lot hardware (the standalone box at a window: a Raspberry Pi 5 with a Camera Module 3 Wide) is listed in [hardware.md §4.5](hardware.md#45-chosen-in-p41-to-order); the cloud VM is picked and provisioned in P8.2.
 
 | | **T1: one Raspberry Pi at the lot** | **T2: Pi at the lot + cloud** (recommended) | **T3: all in the cloud** |
 |---|---|---|---|

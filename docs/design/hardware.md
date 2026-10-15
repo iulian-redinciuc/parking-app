@@ -74,26 +74,25 @@ Pick by measuring: record clips from the real cameras (P5.2), then run `parking 
 - Optional: a UPS for the vision host, switch and router.
 
 ### 4.5 Chosen in P4.1 (to order)
-Topology **T2** ([deployment.md §3](deployment.md#3-production-topologies-to-be-chosen)): a Raspberry Pi 5 at the lot runs the vision workers; the API runs on a small cloud VM (ordered in P8.2, not now). Any equivalent model with the same must-haves (§2) is fine.
+Topology **T2** ([deployment.md §3](deployment.md#3-production-topologies-to-be-chosen)): a Raspberry Pi 5 at the lot runs the vision workers; the API runs on a small cloud VM (ordered in P8.2, not now). Since 2026-10-10 the lot's cameras and network can't be used, so the ground camera is the **standalone box at a window** of §4.6; the PoE camera below is kept for the day wired access is granted. Any equivalent model with the same must-haves is fine.
 
 | Item | Choice | Why |
 |------|--------|-----|
-| Camera B (occupancy) | **Reolink RLC-811A**: 8 MP (3840×2160), PoE, motorized 5× varifocal 2.7–13.5 mm, RTSP + ONVIF + HTTP snapshot, IR + spotlight, WDR, IP66. Alternative: Hikvision DS-2CD2646G2-IZS (4 MP, 2.8–12 mm motorized, IK10) | The final position isn't surveyed, so a **motorized varifocal** frames both rows from wherever it ends up (the fixed 2.8 mm/4 mm choice of §2 can't be corrected after mounting). 8 MP keeps the farthest car well above 60 px; the worker can still ask for 2560×1440 (P4.2). An HTTP snapshot URL is what the occupancy worker uses (P4.3) |
-| Camera B mount | Where the sample photo was taken (open question #4): **≥ 5 m high** on the building wall/window, looking down at **≥ 45°** (near top-down is fine), covering both rows of ground spaces. Wall or pole bracket, no swaying | Phase 1 showed that a steep, near top-down view has no occlusion and the appearance scorer reached 34/34 on it; the YOLO detector needs an angled view, so it's the fallback, not the target |
-| Vision host | **Raspberry Pi 5 8 GB** + official Active Cooler + official 27 W USB-C PSU + **M.2 HAT+ with a 256 GB NVMe SSD** (boot from it) + a case that fits both. No AI HAT+ yet | Same CPU type as the dev Pi (no surprises, NCNN numbers from P1.10 apply: occupancy 158 ms, `yolo11n` @ 640 83 ms). The SSD avoids SD-card wear from logs and the flow outbox. The AI HAT+ is decided in P5.10 only if the flow camera needs it |
-| PoE switch | **TP-Link TL-SG1005P** (5 ports, 4 × PoE 802.3af/at, 65 W) or any switch with ≥ 4 PoE ports and ≥ 30 W budget | Camera B + Camera A (Phase 5) + uplink + the Pi |
-| Cabling | Outdoor-rated Cat6 for each camera run, RJ45 waterproof glands | §6 |
-| Internet at the lot | The existing wired line if there is one; otherwise a 4G router with a data SIM | T2 sends only a few MB per day |
-| Optional | A small UPS for the Pi, switch and router | §4.4 |
+| Vision host | **Raspberry Pi 5 8 GB** + official Active Cooler + official 27 W USB-C PSU + **M.2 HAT+ with a 256 GB NVMe SSD** (boot from it) + a case that fits both. No AI HAT+ yet | Same CPU type as the dev Pi, so the dev Pi's numbers apply (P1.10: occupancy 158 ms, `yolo11n` @ 640 83 ms; P4.1: 0.63 s for a 12 MP frame). The SSD avoids SD-card wear from logs and the flow outbox. The AI HAT+ is decided in P5.10 only if the flow camera needs it |
+| Camera B (occupancy, ground) | **Raspberry Pi Camera Module 3 Wide** (Sony IMX708, 12 MP 4608×2592, 102° × 67°, autofocus, fixed at infinity with `focus=0`) on the Pi's CSI port, 300 mm ribbon cable. **Module 3 (standard, 66° × 41°)** instead if the farthest space is more than ~35 m away. Fallback: a 4K USB webcam (`device:`) | No network camera, PoE or cabling through the building (§4.6). The wide lens covers both rows from close up; 12 MP keeps the farthest space far above the size the scorer needs (sizing below). `picamera:` source (P4.12) |
+| Lens and mount | At the window the sample photo was taken from (open question #4): **≥ 5 m above the lot** (2nd floor or higher), looking down at **≥ 45°** (near top-down is fine) over both rows; lens close to the pane with a dark hood against reflections; no IR (it reflects off the glass); a rigid bracket or a stand fixed to the sill, not a suction mount | Phase 1 showed that a steep, near top-down view has no occlusion and the appearance scorer reached 34/34 on it; the YOLO detector needs an angled view, so it's the fallback, not the target. A camera that moves triggers shift detection (P4.6) |
+| Internet at the lot | A 4G/5G USB modem or small router with a data SIM (§4.6) | T2 sends only a few MB per day |
+| Optional | A small UPS for the Pi and the modem | §4.4 |
+| If wired access is granted | **Reolink RLC-811A** (8 MP, PoE, motorized 2.7–13.5 mm varifocal, RTSP + ONVIF + HTTP snapshot, IR, WDR, IP66; alternative Hikvision DS-2CD2646G2-IZS) + **TP-Link TL-SG1005P** PoE switch (≥ 30 W budget) + outdoor Cat6 with RJ45 glands; Camera A (Phase 5) a 4 MP PoE fixed-lens camera such as the Reolink RLC-510A, 4 mm | A motorized varifocal frames both rows from wherever it ends up; an HTTP snapshot is what the occupancy worker prefers (P4.3) |
 
-Camera A (flow, Phase 5) can be ordered at the same time to save a trip: a 4 MP PoE fixed-lens camera from the same brand (e.g. Reolink RLC-510A, 4 mm), placed per §2 in P5.1.
+**Sizing the resolution (P4.1 PoC check on images).** The appearance scorer was run on the whole replay feed (284 frames, 4828 spaces: simulated, real and generated) shrunk step by step: it stays at **100% down to 1/16 of the sample's size**, where a space's short side is **13–30 px**, and the first misses appear at 1/25 (8–19 px: 99.6%). Shrinking a clean photo is kinder than a real lens behind glass with noise and compression, so the target for the real camera keeps the §2 rule of thumb, **≥ 60 px across the farthest space**, about 4× that margin. For a space 2.5 m wide at distance *d* the Module 3 Wide gives about 4608 × 2.5 / (2 · tan 51° · *d*) ≈ **4660 / *d* px** in the middle of the frame (the standard Module 3: ≈ 8860 / *d*), and roughly half that at the edges of the wide lens: ≥ 60 px up to ~35 m from the window (~70 m with the standard module). At 12 MP the dev Pi (the vision host's hardware) needs **0.63 s per frame** (93 ms JPEG decode + 536 ms scoring, 17 spaces), about 13% of one core at one frame every 5 s; `?width=2304&height=1296` (the sensor's binned mode) is a quarter of that if needed.
 
 ### 4.6 Default from 2026-10-10: standalone box (no access to the lot's cameras or network)
-The lot's existing cameras and the building's network can't be used. So the default is one self-contained box at a **window overlooking the lot** (like the spot the sample photo was taken from), replacing the wired PoE camera and switch of §4.5 for the ground level:
+The lot's existing cameras and the building's network can't be used. So the default is one self-contained box at a **window overlooking the lot** (like the spot the sample photo was taken from), replacing a wired PoE camera and switch for the ground level (the choice of P4.1, §4.5):
 
 | Item | Choice | Why |
 |------|--------|-----|
-| Computer | Raspberry Pi 5 8 GB + Active Cooler + 27 W PSU + SSD (as §4.5) | Runs the vision worker next to the camera; frames never leave it |
+| Computer | Raspberry Pi 5 8 GB + Active Cooler + 27 W PSU + SSD (§4.5) | Runs the vision worker next to the camera; frames never leave it |
 | Camera | **Raspberry Pi Camera Module 3 Wide** (12 MP, autofocus) on the Pi, or a 4K USB webcam; behind glass: lens close to the pane, a dark hood against reflections, no IR | No network camera, no PoE, no cabling through the building (`picamera:` / `device:` source, P4.12) |
 | Internet | A 4G/5G USB modem or small router with a data SIM | Outbound only, a few MB per day (numbers, not video); nothing touches the building's network |
 | Power | One mains socket | |
@@ -109,7 +108,7 @@ The lot's existing cameras and the building's network can't be used. So the defa
 
 First check on the real box, before anything else: `parking grab --camera cam-ground --out out/grab.jpg` (it prints the frame's size, or why there is none: device missing, no permission, busy, no camera detected), then look at the picture: every space visible, in focus, no reflection of the room. Update the *Tested* column with the model and the resolution that worked.
 
-The PoE cameras of §4.5 stay the choice **if** wired access is ever granted. The underground level (Camera A at the ramp) has no window, so it waits for that access, or the app runs **ground level only** at first.
+The PoE cameras at the end of §4.5 stay the choice **if** wired access is ever granted. The underground level (Camera A at the ramp) has no window, so it waits for that access, or the app runs **ground level only** at first.
 
 **Permission is still needed** from the lot's owner / building management to film the car park, even from inside (security-privacy.md §4): the points in its favour are that nothing connects to their network, frames are processed in memory and never stored or sent, and only counts leave the box.
 

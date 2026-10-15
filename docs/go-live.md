@@ -62,3 +62,9 @@ PoC: every expected cell of the matrix (notifications.md §6) passes live on emu
 - [ ] **iPhone, Safari, not installed:** §6.2 step 5 (install hint, no button; Tier 1 banner).
 - [ ] **Desktop Firefox** (Mozilla's push service): §6.2 steps 1, 3, 4; any desktop with Firefox.
 - [ ] **Tier 1 for real:** drive or walk into the radius with the app open (phase 6 exit criterion "a drive test"); `LOT_LAT`/`LOT_LON` of the real lot in the production `.env`.
+
+### P4.1 Production layout, camera and vision host
+PoC: the choices are recorded (T2; Raspberry Pi Camera Module 3 Wide on a Raspberry Pi 5 8 GB + SSD at the sample photo's window, hardware.md §4.5), and on images the scorer needs far fewer pixels than the camera gives: 100% on the replay feed down to spaces 13–30 px across (the target for the real camera is ≥ 60 px), and a 12 MP frame takes 0.63 s on the dev Pi, the vision host's hardware. Shrunk photos are not a real lens behind glass.
+- [ ] **Confirm the window:** height above the lot (≥ 5 m), that both rows are in view, the distance to the farthest space (Module 3 Wide up to ~35 m, else the standard Module 3), power socket at the window, 4G signal there. Needs Iulian on site, and permission (G1).
+- [ ] **Order** the shopping list of hardware.md §4.5 (Pi 5 8 GB, Active Cooler, 27 W PSU, M.2 HAT+ + 256 GB NVMe SSD, case, Camera Module 3 Wide + 300 mm cable, 4G modem + data SIM, optional UPS). Cheapest first step: an old phone at the window as the camera (§4.6) to prove the view before buying. Needs Iulian (payment), step G3.
+- [ ] **On the real camera:** `parking grab --camera cam-ground`, measure the farthest space's width in px (≥ 60), check focus and reflections behind the glass; then P4.5 and P4.8–P4.9 on its frames (G6, G9).

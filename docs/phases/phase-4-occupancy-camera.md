@@ -1,7 +1,7 @@
 # Phase 4: Live occupancy camera
 
 **Goal:** replace the replay feed with the real Camera B, reaching the accuracy targets in all conditions.
-**Needs hardware:** Camera B, PoE switch, cabling, and the **production vision host** (or, temporarily, any machine on the camera network that can record).
+**Needs hardware:** Camera B and the **production vision host** (chosen in P4.1: the standalone box at a window, [hardware.md §4.5–§4.6](../design/hardware.md#45-chosen-in-p41-to-order); with wired access a PoE camera, switch and cabling instead).
 **Where the work happens:** code is developed and tested on the **dev Pi** using recordings and snapshots from the real camera. The live soak test runs on the vision host at the lot.
 **Specs used:** [hardware.md](../design/hardware.md), [vision.md §2–3, §5–6, §9–10](../design/vision.md), [config.md](../design/config.md), [security-privacy.md §4](../design/security-privacy.md#4-privacy-and-gdpr-checklist).
 
@@ -21,6 +21,8 @@
 4. Record the topology, camera model, lens, mount position and vision host in the Decision log.
 
 **Done when:** the decisions are recorded and the hardware is ordered.
+
+**PoC check (2026-10-15):** decisions recorded (PROGRESS.md decision log, [hardware.md §4.5](../design/hardware.md#45-chosen-in-p41-to-order)): **T2**; Camera B a **Raspberry Pi Camera Module 3 Wide** (12 MP, 102°) on the box at the sample photo's window, ≥ 5 m up, ≥ 45° down, focus fixed at infinity; vision host a **Raspberry Pi 5 8 GB** + NVMe SSD; the PoE camera only if wired access is granted. Checked on images on the dev Pi: `parking evaluate --camera cam-ground --labels data/labels/cam-ground-feed.json` on the 284-frame replay feed shrunk to 1, 1/2, 1/4, 1/6, 1/8, 1/12, 1/16 of its size gives 100% (4828/4828) every time, at 1/25 99.6% (spaces 8–19 px across): the chosen camera's ≥ 60 px target has about 4× margin over the smallest size that worked. `parking benchmark --runtimes ''` on a 12 MP (3000×4000) frame: scorer 536 ms median (p95 601 ms, 200 MB peak RSS), decode 93 ms, 58 °C, so one frame every 5 s uses ~13% of a core on the vision host's hardware. Nothing was ordered (moved to go-live), and nothing was measured on a real camera or lens.
 
 ## P4.2: Install and network
 **Steps**
