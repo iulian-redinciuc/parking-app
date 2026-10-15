@@ -171,3 +171,34 @@ def test_items_never_ok_are_listed_not_counted():
 def test_api_never_answering_fails():
     r = soak.report(_parsed(_week(api_ok=False)), interval=600)
     assert r["reasons"] == ["the API never answered"]
+
+
+def test_shortened_run_scales_the_memory_windows(tmp_path, capsys):
+    run = [_sample(m / 4) for m in range(0, 20 * 4 + 1)]  # 20 min, every 15 s
+    for i, s in enumerate(run):  # +60 MB in 20 min
+        s["containers"]["parking-vision-occupancy"]["mem_mb"] = 200 + 60 * i / len(run)
+    p = _write(tmp_path, run)
+    args = ["report", str(p), "--days", "0.0135", "--interval", "15"]
+    assert soak.main(args) == 0  # the default 1 h warm-up / 24 h windows see no growth
+    capsys.readouterr()
+    assert soak.main([*args, "--warmup-min", "3", "--window-h", "0.1"]) == 1
+    out = capsys.readouterr().out
+    assert "first 0.1 h after 3 min warm-up" in out
+    assert "memory grew: parking-vision-occupancy" in out
+
+
+def test_reconnects_counted_for_renamed_workers(monkeypatch):
+    def fake_run(args, timeout=20):
+        if args[1] == "inspect":
+            return json.dumps({"State": {"Status": "running", "StartedAt": "a"}}) + "\n"
+        if args[1] == "stats":
+            return ""
+        return (
+            "rtsp: camera back after 3 failed attempt(s)\n"
+            "picamera: camera back after 1 failed attempt(s)\n"
+            "snapshot: connect_failed\n"
+        )
+
+    monkeypatch.setattr(soak, "_run", fake_run)
+    _, reconnects = soak.containers_sample(("parking-rh-api", "parking-rh-vision-occupancy"), 1.0)
+    assert reconnects == {"parking-rh-vision-occupancy": 2}

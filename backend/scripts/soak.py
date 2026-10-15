@@ -1,4 +1,4 @@
-"""Soak-test sampler and report (P4.11, docs/design/testing.md §8).
+"""Soak-test sampler and report (P4.11, docs/design/testing.md §7).
 
 Standard library only, so it runs with the host's `python3` next to the Compose stack (it needs
 `docker` on the host and `/sys/class/thermal`, which the containers don't see):
@@ -7,6 +7,8 @@ Standard library only, so it runs with the host's `python3` next to the Compose 
     nohup python3 backend/scripts/soak.py sample --out out/soak/soak.jsonl --interval 60 &
     # any time (also while it runs); exit 0 = passed, 1 = not (yet)
     python3 backend/scripts/soak.py report out/soak/soak.jsonl [--days 7] [--json]
+    # a shortened run (the PoC rehearsal): scale the span and the memory windows down
+    python3 backend/scripts/soak.py report FILE --days 0.0139 --warmup-min 3 --window-h 0.1
 
 Each sample: CPU temperature, `vcgencmd get_throttled` (if present), load, free host memory;
 for every `parking-*` container its state, restart count, start time, memory and CPU (docker
@@ -15,7 +17,8 @@ and how many times each worker logged "camera back after …" since the last sam
 
 The report's verdict (the guide's Done-when) is **passed** when the samples span `--days`,
 nothing is still down at the last sample (no unrecovered outage) and no container's memory
-grew: the median of the last 24 h vs the median of the first 24 h after a 1 h warm-up, growth
+grew: the median of the last 24 h vs the median of the first 24 h after a 1 h warm-up (`--window-h`,
+`--warmup-min`), growth
 allowed up to max(`--mem-growth-mb` 25 MB, `--mem-growth-pct` 10%).
 """
 
@@ -35,9 +38,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 CONTAINERS = ("parking-api", "parking-vision-occupancy", "parking-tunnel")
-WORKERS = ("parking-vision-occupancy", "parking-vision-flow")
 THERMAL = Path("/sys/class/thermal/thermal_zone0/temp")
-RECONNECT = re.compile(r"(snapshot|rtsp): camera back after")
+RECONNECT = re.compile(r"(snapshot|rtsp|device|picamera): camera back after")
 _UNITS = {
     "b": 1,
     "kib": 1024,
@@ -114,7 +116,7 @@ def containers_sample(names: tuple[str, ...], since: float | None) -> tuple[dict
             out[s["Name"]]["cpu_pct"] = float(cpu) if re.fullmatch(r"[\d.]+", cpu) else None
     reconnects: dict[str, int] = {}
     for name in present:
-        if name in WORKERS and since is not None:
+        if "vision" in name and since is not None:  # the workers, also under other names
             logs = _run(["docker", "logs", "--since", f"{since:.0f}", name])
             reconnects[name] = len(RECONNECT.findall(logs or ""))
     return out, reconnects
@@ -250,7 +252,13 @@ def _slope_mb_per_day(points: list[tuple[datetime, float]]) -> float | None:
     )
 
 
-def memory(samples: list[dict], growth_mb: float, growth_pct: float) -> dict[str, dict]:
+def memory(
+    samples: list[dict],
+    growth_mb: float,
+    growth_pct: float,
+    warmup: timedelta = WARMUP,
+    window: timedelta = WINDOW,
+) -> dict[str, dict]:
     first_t, last_t = samples[0]["_t"], samples[-1]["_t"]
     names = sorted({n for s in samples for n in s["containers"]})
     out = {}
@@ -262,9 +270,9 @@ def memory(samples: list[dict], growth_mb: float, growth_pct: float) -> dict[str
         ]
         if not pts:
             continue
-        warm = [(t, m) for t, m in pts if t >= first_t + WARMUP] or pts
-        base = _median([m for t, m in warm if t < warm[0][0] + WINDOW])
-        final = _median([m for t, m in warm if t > last_t - WINDOW])
+        warm = [(t, m) for t, m in pts if t >= first_t + warmup] or pts
+        base = _median([m for t, m in warm if t < warm[0][0] + window])
+        final = _median([m for t, m in warm if t > last_t - window])
         allowed = max(growth_mb, base * growth_pct / 100)
         restarts = [
             c["restarts"] for s in samples if "restarts" in (c := s["containers"].get(name, {}))
@@ -294,12 +302,14 @@ def report(
     interval: float = 60,
     growth_mb: float = 25,
     growth_pct: float = 10,
+    warmup: timedelta = WARMUP,
+    window: timedelta = WINDOW,
 ) -> dict:
     if not samples:
         return {"passed": False, "reasons": ["no samples"]}
     span = samples[-1]["_t"] - samples[0]["_t"]
     outs, never_ok = outages(samples, timedelta(seconds=max(5 * interval, 300)))
-    mem = memory(samples, growth_mb, growth_pct)
+    mem = memory(samples, growth_mb, growth_pct, warmup, window)
     temps = sorted(t for s in samples if (t := s["host"].get("temp_c")) is not None)
     throttled = sorted(
         {t for s in samples if (t := s["host"].get("throttled")) not in (None, "0x0")}
@@ -327,6 +337,8 @@ def report(
         "days": round(span.total_seconds() / 86400, 2),
         "samples": len(samples),
         "memory": mem,
+        "warmup_min": round(warmup.total_seconds() / 60, 1),
+        "window_h": round(window.total_seconds() / 3600, 2),
         "temp_c": {
             "median": _median(temps),
             "p95": temps[int(0.95 * (len(temps) - 1))] if temps else None,
@@ -355,7 +367,8 @@ def format_report(r: dict) -> str:
         ),
         "reconnects: "
         + (", ".join(f"{n} {c}" for n, c in r["reconnects"].items()) or "none logged"),
-        "memory (median first 24 h after 1 h warm-up → last 24 h):",
+        f"memory (median first {r['window_h']:g} h after {r['warmup_min']:g} min warm-up"
+        f" → last {r['window_h']:g} h):",
     ]
     for name, m in r["memory"].items():
         lines.append(
@@ -378,7 +391,13 @@ def format_report(r: dict) -> str:
 
 def cmd_report(args: argparse.Namespace) -> int:
     r = report(
-        load(Path(args.file)), args.days, args.interval, args.mem_growth_mb, args.mem_growth_pct
+        load(Path(args.file)),
+        args.days,
+        args.interval,
+        args.mem_growth_mb,
+        args.mem_growth_pct,
+        timedelta(minutes=args.warmup_min),
+        timedelta(hours=args.window_h),
     )
     print(json.dumps(r, indent=2) if args.json else format_report(r))
     return 0 if r["passed"] else 1
@@ -401,6 +420,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--interval", type=float, default=60, help="the sampler's interval")
     r.add_argument("--mem-growth-mb", type=float, default=25)
     r.add_argument("--mem-growth-pct", type=float, default=10)
+    r.add_argument("--warmup-min", type=float, default=60, help="ignored at the start")
+    r.add_argument("--window-h", type=float, default=24, help="first/last window compared")
     r.add_argument("--json", action="store_true")
     r.set_defaults(func=cmd_report)
     args = p.parse_args(argv)
