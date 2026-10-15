@@ -50,7 +50,7 @@ class ShiftMeasure:
     transform: np.ndarray | None = field(default=None, compare=False, repr=False)
 
 
-def _gray(image: np.ndarray, width: int) -> np.ndarray:
+def work_gray(image: np.ndarray, width: int) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
     h, w = gray.shape[:2]
     if w != width:
@@ -92,7 +92,7 @@ class ShiftDetector:
         self.ref_size = (reference.shape[1], reference.shape[0])
         self.work_width = min(WORK_WIDTH, self.ref_size[0])
         self.scale = self.ref_size[0] / self.work_width  # work px → reference px
-        ref = _gray(reference, self.work_width)
+        ref = work_gray(reference, self.work_width)
         self.mask = background_mask(slot_file, (ref.shape[1], ref.shape[0]))
         self._orb = cv2.ORB_create(ORB_FEATURES)
         self._matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
@@ -112,7 +112,7 @@ class ShiftDetector:
         """Median displacement of `image` against the reference (no state change)."""
         if (image.shape[1], image.shape[0]) != self.ref_size:
             image = cv2.resize(image, self.ref_size, interpolation=cv2.INTER_AREA)
-        cur = _gray(image, self.work_width)
+        cur = work_gray(image, self.work_width)
         kp, des = self._orb.detectAndCompute(cur, self.mask)
         if des is None or self._ref_des is None or len(kp) < 2 or len(self._ref_kp) < 2:
             return ShiftMeasure(None, 0, 0)

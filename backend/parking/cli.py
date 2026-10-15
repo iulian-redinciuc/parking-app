@@ -826,12 +826,30 @@ def bootstrap_slots(
             "(also env PARKING_FAKE_DETECTOR=1).",
         ),
     ] = False,
+    carry_from: Annotated[
+        Path | None,
+        typer.Option(
+            help="Carry this slot file's spaces over onto the image (matched with its reference "
+            "image) instead of detecting vehicles."
+        ),
+    ] = None,
+    carry_ref: Annotated[
+        Path | None,
+        typer.Option(help="The image --carry-from was drawn on (default: its reference_image)."),
+    ] = None,
 ) -> None:
-    """Draft a slot file from detected vehicles (vision.md §4); fix it in tools/slot-editor."""
+    """Draft a slot file from detected vehicles or an older slot file (vision.md §4); fix it in
+    tools/slot-editor."""
     import cv2
 
-    from parking.config import SlotFile
-    from parking.vision.bootstrap import format_json, propose_slots, slot_file
+    from parking.config import SlotFile, load_slots
+    from parking.vision.bootstrap import (
+        CarryError,
+        carry_slots,
+        format_json,
+        propose_slots,
+        slot_file,
+    )
     from parking.vision.detector import FakeDetector
 
     if footprint not in ("box_bottom", "box"):
@@ -851,21 +869,47 @@ def bootstrap_slots(
     if frame is None:
         _fail(f"can't read image {path}")
 
-    # vision.md §4: masks on, 1280 px, a low confidence to find as many vehicles as possible
-    masks = cam.detector.type == "yolo"  # YOLOX gives boxes only
-    det_cfg = cam.detector.model_copy(update={"imgsz": imgsz, "conf": conf, "use_masks": masks})
-    if _fake_detector_on(fake_detector):
-        sidecar = path.with_suffix(".json")
-        if not sidecar.is_file():
-            _fail(f"fake detector: no sidecar {sidecar}")
-        detector = FakeDetector(sidecar, conf=det_cfg.conf, classes=det_cfg.classes)
-    else:
-        detector = _yolo_detector(det_cfg, root)
-
     zone = cam.zones[0]
-    slots = propose_slots(detector.detect(frame), zone, footprint)
-    if not slots:
-        _fail(f"no vehicles found in {path}; draw the slots by hand in tools/slot-editor")
+    if carry_from is not None:
+        old_path = _resolve(carry_from, root)
+        if not old_path.is_file():
+            _fail(f"slot file {old_path} not found")
+        old = load_slots(old_path)
+        if carry_ref is None and old.reference_image is None:
+            _fail(f"{old_path} names no reference_image; pass --carry-ref")
+        ref_path = _resolve(carry_ref or Path(old.reference_image or ""), root)
+        if ref_path.resolve() == path.resolve():
+            _fail(
+                f"--carry-ref {ref_path} is the new image itself (did `parking grab --force` "
+                "replace it?); pass the image the old slots were drawn on"
+            )
+        old_ref = cv2.imread(str(ref_path))
+        if old_ref is None:
+            _fail(f"can't read --carry-ref image {ref_path}")
+        try:
+            carried = carry_slots(old, old_ref, frame)
+        except CarryError as e:
+            _fail(f"can't carry the slots over: {e}; draw them by hand in tools/slot-editor")
+        slots = carried.slots
+        how = f"carried from {old_path.name} ({carried.inliers} of {carried.matches} matches agree)"
+        if carried.outside:
+            how += f"; partly outside the image, clipped: {', '.join(carried.outside)}"
+    else:
+        # vision.md §4: masks on, 1280 px, a low confidence to find as many vehicles as possible
+        masks = cam.detector.type == "yolo"  # YOLOX gives boxes only
+        det_cfg = cam.detector.model_copy(update={"imgsz": imgsz, "conf": conf, "use_masks": masks})
+        if _fake_detector_on(fake_detector):
+            sidecar = path.with_suffix(".json")
+            if not sidecar.is_file():
+                _fail(f"fake detector: no sidecar {sidecar}")
+            detector = FakeDetector(sidecar, conf=det_cfg.conf, classes=det_cfg.classes)
+        else:
+            detector = _yolo_detector(det_cfg, root)
+
+        slots = propose_slots(detector.detect(frame), zone, footprint)
+        if not slots:
+            _fail(f"no vehicles found in {path}; draw the slots by hand in tools/slot-editor")
+        how = f"in zone '{zone}'"
 
     try:
         reference = path.resolve().relative_to(root.resolve()).as_posix()
@@ -875,10 +919,12 @@ def bootstrap_slots(
     SlotFile.model_validate(data)  # what load_slots() checks
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(format_json(data))
-    typer.echo(
-        f"{len(slots)} slot(s) in zone '{zone}' -> {target}\n"
-        "Now fix it in tools/slot-editor: add the empty spaces and adjust the corners."
+    hint = (
+        "check every space covers its ground area (where the tyres are)"
+        if carry_from is not None
+        else "add the empty spaces and adjust the corners"
     )
+    typer.echo(f"{len(slots)} slot(s) {how} -> {target}\nNow fix it in tools/slot-editor: {hint}.")
 
 
 @app.command("export-yolo")

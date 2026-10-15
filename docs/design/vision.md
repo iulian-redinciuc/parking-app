@@ -126,6 +126,14 @@ For a quick first draft of the slot file from an image taken when the lot is bus
 4. Write the slot file (config.md §2; `reference_image` = the image path relative to the repo root, `count_zones: []`) in the slot editor's JSON layout, so importing and exporting it in the editor changes nothing. `--out` defaults to the camera's `slots_file`; an existing file is **never overwritten unless `--force`** is given. With no vehicles found nothing is written (exit 1). `--fake-detector` reads `<image>.json` like `analyze`.
 5. **Then fix it by hand in the slot editor** (empty spaces won't have been detected; angles will be rough).
 
+**Carrying an old slot file over** (`--carry-from SLOTS [--carry-ref IMAGE]`, `carry_slots`, P4.5). For a view of a place that already has a slot file (the real camera at the sample photo's window, a camera that was moved or replaced), instead of detecting vehicles:
+1. ORB features (4000) of the old reference image (`--carry-ref`, default the old file's `reference_image`) and of the new image, both scaled to 1280 px wide; on the old one only outside its slot polygons (§6's background mask), since cars come and go. Ratio test 0.75.
+2. A RANSAC homography (`cv2.findHomography`, 4 px at work size). The spaces lie on one plane, the ground, so a homography maps them exactly between two views of it, from any mount; a similarity (the shift check's) would not follow a change of tilt. Fewer than 25 matches, or fewer than 25 agreeing on one view → `CarryError`, nothing written ("is it the same lot?"), and no features at all (a black frame) likewise.
+3. Every polygon goes old slot-file pixels → old reference pixels → homography → new image pixels, corners rounded and **clipped** to the new image; the slots with a corner outside are listed in the output. Ids, zones and types are kept, `image_size` and `reference_image` are the new image's.
+4. `--carry-ref` resolving to the new image itself is refused (a `parking grab --force` replaced the old reference: keep a copy first, phase guide P4.5).
+
+On the replay feed warped to another mount (turned 4°, tilted, zoomed out 8%, 1944×2592) the 17 carried spaces were within 1.8 px of the true ones (IoU ≥ 0.978), while the detector drafted 1 slot of 14 cars from that top-down view. Then check them in the slot editor all the same: spaces the old view didn't have are missing, and a non-flat lot (a ramp, kerbs) is only approximately one plane.
+
 ## 5. Frame health (`parking/vision/health.py`)
 
 Run on every frame before detection. Unhealthy frames are skipped and reported in the `health` message.

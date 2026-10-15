@@ -84,7 +84,7 @@ backend/
 │   │   ├── annotate.py          # draw slots, detections, lines, totals on a frame
 │   │   ├── lines.py             # line-file checks + A/B/IN overlay (`parking lines-check`)
 │   │   ├── motion.py            # MotionGate (MOG2 on the ROI, 2 s hold-over) + `motion-check` stats
-│   │   ├── bootstrap.py         # propose slots from detections
+│   │   ├── bootstrap.py         # propose slots from detections, or carry an old slot file over
 │   │   └── evaluate.py          # metrics for occupancy and flow
 │   ├── workers/
 │   │   ├── base.py              # loop, health messages, graceful shutdown, SIGUSR1 freeze (watchdog test)
@@ -182,7 +182,7 @@ frontend/
 | `parking evaluate --images DIR --labels FILE --camera ID [--sweep 0.1:0.6:0.05] [--mode both]` | 1 | Accuracy metrics, threshold sweep |
 | `parking analyze` / `evaluate` `--method detector\|appearance\|classifier\|ensemble [--classifier FILE]` | 4 | Override `occupancy.method` / `occupancy.classifier.model` (per-slot classifier, [vision.md §9](vision.md#9-per-slot-classifier), P4.10); training: `backend/scripts/train_slot_classifier.py` (not a `parking` command, GPU machine) |
 | `parking grab --camera ID [--source URI] [--out FILE] [--timeout 20] [--force]` | 4 | Save one full-resolution frame from the camera's `source` (default `data/reference/<camera>.jpg`), e.g. the slot reference image (P4.5) |
-| `parking bootstrap-slots --image PATH --camera ID [--out FILE] [--force]` | 1 | Suggest slot polygons (vision.md §4) |
+| `parking bootstrap-slots --image PATH --camera ID [--out FILE] [--force] [--carry-from SLOTS [--carry-ref IMAGE]]` | 1, 4 | Suggest slot polygons from detected vehicles, or carry an older slot file of the same place over onto the image (vision.md §4, P4.5) |
 | `parking benchmark --image PATH [--runs 20] [--warmup 3] [--runtimes pytorch,ncnn] [--imgsz 640,1280] [--models yolo11n,yolo11n-seg] [--camera cam-ground]` | 1 | Median/p95 ms and peak RSS per runtime × size × model, plus the appearance scorer ([vision.md §11](vision.md#11-runtimes-and-performance)) |
 | `parking worker occupancy --camera ID [--print] [--fake-detector] [--control-port 9000] [--control-host 0.0.0.0] [--max-frames N]` | 2 | Run the occupancy worker (`--print`: JSON lines to stdout, nothing sent; `--fake-detector` / `PARKING_FAKE_DETECTOR=1`: `<image>.json` sidecars next to replayed images) |
 | `parking lines-check --camera ID [--image FILE] [--out FILE]` | 5 | Check a flow camera's line file (config.md §3) and draw ROI, A/B and the IN arrow on the reference frame (default `out/lines/<camera>.jpg`); exit 1 lists what to fix (P5.1) |

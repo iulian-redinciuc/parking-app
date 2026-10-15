@@ -219,7 +219,7 @@ Relative paths resolve against the repo root. `folder:` reads `.jpg`/`.jpeg`/`.p
 
 ## 2. Slot file: `config/slots/<camera>.json`
 
-Made by the slot editor (`tools/slot-editor`) or `parking bootstrap-slots`.
+Made by the slot editor (`tools/slot-editor`) or `parking bootstrap-slots` (from detected vehicles, or `--carry-from` an older slot file of the same place: [vision.md §4](vision.md#4-bootstrapping-slots-parking-bootstrap-slots)).
 
 ```json
 {

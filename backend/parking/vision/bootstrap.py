@@ -1,23 +1,34 @@
-"""First draft of a slot file from vehicle detections (docs/design/vision.md §4).
+"""First draft of a slot file (docs/design/vision.md §4).
 
-Each detected vehicle becomes one 4-point slot: its footprint, shrunk 10%, named in reading
-order. Empty spaces aren't found and angles are rough, so the result is fixed by hand in
-`tools/slot-editor`.
+From vehicle detections: each detected vehicle becomes one 4-point slot, its footprint shrunk
+10%, named in reading order. Empty spaces aren't found and angles are rough.
+
+Or carried over from an existing slot file (`carry_slots`, P4.5): the old view's reference
+image is matched with the new one and every polygon is moved through the homography between
+them. The spaces lie on one plane (the ground), so a homography maps them exactly wherever the
+match is good; a new camera at the same window starts from the slots drawn on the sample photo.
+
+Either way the result is checked and fixed by hand in `tools/slot-editor`.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from statistics import median
 from typing import Any, Literal
 
+import cv2
+import numpy as np
 import shapely
 from shapely import affinity
 from shapely.geometry import Polygon
 
+from parking.config import SlotFile
 from parking.geometry import box_bottom
 from parking.vision.detector import Detection
+from parking.vision.shift import RATIO, WORK_WIDTH, background_mask, work_gray
 
 Footprint = Literal["box_bottom", "box"]
 
@@ -77,6 +88,69 @@ def propose_slots(
         {"id": f"{prefix}{n:02d}", "zone": zone, "polygon": _corners(p), "type": "standard"}
         for n, p in enumerate(reading_order(kept), start=1)
     ]
+
+
+CARRY_FEATURES = 4000  # ORB features per image (more than the shift check: any view, one-off)
+CARRY_RANSAC_PX = 4.0  # reprojection threshold at work size
+CARRY_MIN_INLIERS = 25
+
+
+class CarryError(ValueError):
+    """The two views don't match well enough to carry the slots over."""
+
+
+@dataclass(frozen=True)
+class Carried:
+    slots: list[dict[str, Any]]
+    inliers: int
+    matches: int
+    homography: np.ndarray  # old slot-file pixels → new image pixels
+    outside: list[str]  # slots with a corner outside the new image (clipped to it)
+
+
+def carry_slots(old: SlotFile, old_reference: np.ndarray, image: np.ndarray) -> Carried:
+    """Move `old`'s slots (drawn on `old_reference`) onto `image`, another view of the lot.
+
+    ORB features of both images at `WORK_WIDTH` px, the old one only on the background (outside
+    its slot polygons, where cars come and go), ratio test, then a RANSAC homography. Ids,
+    zones and types are kept; corners are rounded and clipped to the new image.
+    """
+    rw = old_reference.shape[1]
+    nw, nh = image.shape[1], image.shape[0]
+    ref = work_gray(old_reference, min(WORK_WIDTH, rw))
+    cur = work_gray(image, min(WORK_WIDTH, nw))
+    orb = cv2.ORB_create(CARRY_FEATURES)
+    ref_kp, ref_des = orb.detectAndCompute(ref, background_mask(old, (ref.shape[1], ref.shape[0])))
+    kp, des = orb.detectAndCompute(cur, None)
+    if ref_des is None or des is None or len(ref_kp) < 2 or len(kp) < 2:
+        raise CarryError("no features to match (a blank or black image?)")
+    good = [
+        pair[0]
+        for pair in cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(ref_des, des, k=2)
+        if len(pair) == 2 and pair[0].distance < RATIO * pair[1].distance
+    ]
+    if len(good) < CARRY_MIN_INLIERS:
+        raise CarryError(f"only {len(good)} matching features: is it the same lot?")
+    src = np.float32([ref_kp[m.queryIdx].pt for m in good])
+    dst = np.float32([kp[m.trainIdx].pt for m in good])
+    h_work, inl = cv2.findHomography(src, dst, cv2.RANSAC, CARRY_RANSAC_PX)
+    n = 0 if inl is None else int(inl.sum())
+    if h_work is None or n < CARRY_MIN_INLIERS:
+        raise CarryError(f"only {n} of {len(good)} matches agree on one view: is it the same lot?")
+
+    sw, sh = old.image_size
+    slot_to_ref_work = np.diag([ref.shape[1] / sw, ref.shape[0] / sh, 1.0])
+    cur_work_to_image = np.diag([nw / cur.shape[1], nh / cur.shape[0], 1.0])
+    homography = cur_work_to_image @ h_work @ slot_to_ref_work
+    slots: list[dict[str, Any]] = []
+    outside: list[str] = []
+    for s in old.slots:
+        pts = cv2.perspectiveTransform(np.float64([s.polygon]), homography)[0]
+        if (pts < 0).any() or (pts[:, 0] > nw - 1).any() or (pts[:, 1] > nh - 1).any():
+            outside.append(s.id)
+        pts = np.clip(np.round(pts), 0, [nw - 1, nh - 1]).astype(int)
+        slots.append({"id": s.id, "zone": s.zone, "polygon": pts.tolist(), "type": s.type})
+    return Carried(slots, n, len(good), homography, outside)
 
 
 def slot_file(

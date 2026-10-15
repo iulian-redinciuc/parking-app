@@ -82,16 +82,33 @@ Put the suggested values in `cameras[].health` in `lot.yaml` (check the night an
 
 ## P4.5: Calibrate slots on the real view
 **Steps**
-1. Grab a full-resolution frame at a busy time → `data/reference/cam-ground.jpg` (`--force` replaces an older grab; without `--source` it reads the camera's `source` from `lot.yaml`). Use the main stream's 2560×1440, not the sub-stream:
+1. Keep the image the current slots were drawn on, then grab a full-resolution frame at a busy time → `data/reference/cam-ground.jpg` (`--force` replaces the older grab; without `--source` it reads the camera's `source` from `lot.yaml`). Use the main stream's full resolution (a network camera's snapshot, the box's `picamera:`), not the RTSP sub-stream (if `source` is the sub-stream, add `--source "snapshot:<url>"`):
    ```bash
-   docker compose run --rm --no-deps --entrypoint sh vision-occupancy -c \
-     '/app/backend/.venv/bin/parking grab --camera cam-ground --source "snapshot:$CAM_GROUND_SNAPSHOT_URL"'
+   cp ../data/reference/cam-ground.jpg ../data/reference/cam-ground-old.jpg
+   docker compose run --rm --no-deps --entrypoint /app/backend/.venv/bin/parking vision-occupancy \
+     grab --camera cam-ground --force
    ```
-2. `parking bootstrap-slots` → refine in the slot editor → `config/slots/cam-ground.json`.
-3. Check the polygons cover the **ground area of each space** (where tyres are), not the space's air above.
-4. Commit the slot file. Restart the worker (or send `reload`).
+2. Draft the slot file, then refine it in the slot editor (`tools/slot-editor`, or the admin screen's slot editor) → `config/slots/cam-ground.json`:
+   - **Same place as an existing slot file** (the real camera at the sample photo's window, a camera that was moved or replaced): carry the old spaces over ([vision.md §4](../design/vision.md#4-bootstrapping-slots-parking-bootstrap-slots)). The two views are matched and every polygon moves through the ground plane's homography; ids, zones and types stay:
+     ```bash
+     docker compose run --rm --no-deps --entrypoint /app/backend/.venv/bin/parking vision-occupancy \
+       bootstrap-slots --image data/reference/cam-ground.jpg --camera cam-ground \
+       --carry-from config/slots/cam-ground.json --carry-ref data/reference/cam-ground-old.jpg --force
+     ```
+     It refuses (nothing written) when the views don't match (another place, a black frame); then draw by hand.
+   - **A new place, angled view:** `parking bootstrap-slots --image data/reference/cam-ground.jpg --camera cam-ground` drafts a slot per detected car; add the empty spaces by hand. (Seen from above the detector finds almost no cars: draw by hand.)
+3. Check the polygons cover the **ground area of each space** (where tyres are), not the space's air above. Add spaces the old view didn't have; delete ones now out of view (the command lists spaces it had to clip at the image edge).
+4. **Empty-lot reference** (`occupancy.appearance.reference_empty`) for the new view: grab a quiet frame (few cars), label it in the slot editor (*Label* mode), and let `simulate-feed` paint its cars out:
+   ```bash
+   parking simulate-feed --camera cam-ground --base data/reference/cam-ground-quiet.jpg \
+     --labels data/labels/cam-ground.json --frames 1 --out out/sim --labels-out out/sim.json \
+     --empty-reference data/reference/cam-ground-empty.jpg
+   ```
+5. Commit the slot file. Restart the worker (or send `reload`; saving in the admin slot editor does both the write and the reload). The worker's camera-shift check uses the new `data/reference/cam-ground.jpg` from then on.
 
 **Done when:** `parking analyze` on a live snapshot (`--image` of a fresh grab) gives the hand count.
+
+**PoC check (2026-10-15):** production rehearsal on the dev Pi (project `parking-rehearsal`: `docker-compose.yml` + `docker-compose.fake-camera.yml`, the dev Pi's locally built images with this commit's code mounted and container names changed in a scratch override, `.env` from `prod-env.sh server`, `config/` and data in `/tmp`, API on loopback :18000). The "real view" was a camera **mounted differently from the sample photo**: six replay-feed frames (simulated, the real `ground-02` photo, a generated image; 2–14 of 17 taken) warped by one fixed homography (turned 4°, top edge 7% narrower, zoomed out 8%, moved; 1944×2592), served by `fake_rtsp.py` as a digest-protected snapshot at `10.99.20.11`, 25 s per image; `cam-ground.source` = `snapshot:${CAM_GROUND_SNAPSHOT_URL}`. **Before:** with the committed slot file and reference frame (the sample photo's view) the worker flagged `shifted` (88.1 px, `degraded`) after its 3 checks, and `parking evaluate` on the six frames scored 78.4% of spaces right (count within 1 on 2 of 6). **Steps 1–5:** grab in the vision container (1944×2592, the 14-taken frame, old reference kept as `cam-ground-old.jpg`); `bootstrap-slots --carry-from` (new, [vision.md §4](../design/vision.md#4-bootstrapping-slots-parking-bootstrap-slots)): 883 of 902 matches agree, 17 spaces within **1.8 px** of the true warped polygons (IoU ≥ 0.978), checked by eye on an overlay: each covers its painted bay, so nothing was moved by hand; for comparison the detector draft (`--footprint box`) found 1 slot for the 14 cars; empty-lot reference re-made with `simulate-feed` from the 2-taken frame; saved with the admin `PUT …/slots` → `reloaded: true`. **After:** `parking evaluate` 100% (102/102) on the six frames (also 100% with the old, misframed empty reference); **Done when:** three fresh grabs at other moments → `parking analyze` **15 / 12 / 5 free = the hand count** (2, 5, 12 taken), every space's taken/free as labelled; the API's `ground` count at the end of each image shown = the hand count for **12 of 12** images over 5 min after the reload, health back to `ok` (shift check restarted on the new reference). Torn down afterwards. The committed `config/slots/cam-ground.json` is unchanged: it still matches the dev replay feed. Not checked: a real camera's view (a real lens, a mount that also sees things the photo didn't, a lot that isn't one flat plane), drawing by hand in the editor, a hand count at the lot (go-live.md §3).
 
 ## P4.6: Camera shift detection
 **Files:** `parking/vision/shift.py`, tests, worker integration

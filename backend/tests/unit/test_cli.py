@@ -480,3 +480,79 @@ def test_slot_map_errors(tmp_path, monkeypatch):
     assert _slot_map("--snap-deg", "60").exit_code == 2
     assert _slot_map("--gap", "0.5").exit_code == 2
     assert runner.invoke(app, ["slot-map", "--camera", "nope"]).exit_code == 1
+
+
+def test_bootstrap_slots_carry_from(tmp_path, monkeypatch):
+    """P4.5: the old slot file carried over onto a new grab of the same place."""
+    import json
+
+    import cv2
+    import numpy as np
+
+    from parking.config import load_slots
+
+    _write_lot(tmp_path, monkeypatch)
+    rng = np.random.default_rng(7)
+    old = np.full((100, 200, 3), 90, np.uint8)
+    for _ in range(150):
+        x, y, s = int(rng.integers(0, 200)), int(rng.integers(0, 100)), int(rng.integers(3, 9))
+        cv2.rectangle(
+            old, (x, y), (x + s, y + s), tuple(int(c) for c in rng.integers(0, 256, 3)), -1
+        )
+    big = cv2.resize(old, (1600, 800), interpolation=cv2.INTER_NEAREST)
+    cv2.imwrite(str(tmp_path / "old.png"), big)
+    cv2.imwrite(str(tmp_path / "new.png"), np.roll(big, 40, axis=1))  # moved 40 px right
+    slots = tmp_path / "config" / "slots" / "cam-ground.json"
+    data = json.loads(slots.read_text())
+    data["image_size"] = [1600, 800]
+    data["slots"] = [
+        {
+            "id": "G01",
+            "zone": "ground",
+            "polygon": [[700, 300], [900, 300], [900, 500], [700, 500]],
+            "type": "ev",
+        }
+    ]
+    data["reference_image"] = "old.png"
+    slots.write_text(json.dumps(data))
+
+    args = ["--image", "new.png", "--camera", "cam-ground", "--out", "carried.json"]
+    result = runner.invoke(app, ["bootstrap-slots", *args, "--carry-from", str(slots)])
+    assert result.exit_code == 0, result.output
+    assert "1 slot(s) carried from cam-ground.json" in result.output
+    sf = load_slots(tmp_path / "carried.json")
+    assert sf.image_size == (1600, 800) and sf.reference_image == "new.png"
+    [s] = sf.slots
+    assert s.id == "G01" and s.type == "ev"
+    assert (
+        np.abs(np.float64(s.polygon) - [[740, 300], [940, 300], [940, 500], [740, 500]]).max() <= 2
+    )
+
+    # the grab replaced the old reference: refuse, and say what to pass
+    args = [
+        "--image",
+        "old.png",
+        "--camera",
+        "cam-ground",
+        "--out",
+        "c2.json",
+        "--carry-from",
+        str(slots),
+    ]
+    result = runner.invoke(app, ["bootstrap-slots", *args])
+    assert result.exit_code == 1 and "is the new image itself" in result.output
+    # another place: nothing written
+    cv2.imwrite(str(tmp_path / "other.png"), np.full((800, 1600, 3), 60, np.uint8))
+    args = [
+        "--image",
+        "other.png",
+        "--camera",
+        "cam-ground",
+        "--out",
+        "c3.json",
+        "--carry-from",
+        str(slots),
+    ]
+    result = runner.invoke(app, ["bootstrap-slots", *args, "--carry-ref", "old.png"])
+    assert result.exit_code == 1 and "can't carry the slots over" in result.output
+    assert not (tmp_path / "c3.json").exists()

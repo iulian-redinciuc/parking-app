@@ -6,6 +6,8 @@ from shapely.geometry import Polygon
 
 from parking.config import SlotFile
 from parking.vision.bootstrap import (
+    CarryError,
+    carry_slots,
     footprint,
     format_json,
     propose_slots,
@@ -105,3 +107,125 @@ def test_format_json_small_cases():
 
 def test_slot_file_without_reference():
     assert "reference_image" not in slot_file("cam", (10, 10), [])
+
+
+# --- carry_slots (P4.5): an old slot file moved onto another view of the lot ---
+
+CARRY_SLOTS = [  # one row of spaces across the middle of a 960×540 view
+    [[200 + 110 * i, 200], [290 + 110 * i, 200], [290 + 110 * i, 340], [200 + 110 * i, 340]]
+    for i in range(5)
+]
+
+
+def scene(seed: int, w: int = 960, h: int = 540):
+    """A lot-like view: grey gradient with lots of random shapes (corners for ORB)."""
+    import cv2
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    img = cv2.cvtColor(np.tile(np.linspace(70, 150, w, dtype=np.uint8), (h, 1)), cv2.COLOR_GRAY2BGR)
+    for _ in range(400):
+        x, y, s = int(rng.integers(0, w)), int(rng.integers(0, h)), int(rng.integers(4, 32))
+        color = tuple(int(c) for c in rng.integers(0, 256, 3))
+        cv2.rectangle(img, (x, y), (x + s, y + int(rng.integers(4, s + 5))), color, -1)
+    return img
+
+
+def with_cars(img, seed: int):
+    """New "cars" (plain rectangles) in some of the spaces."""
+    import cv2
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    out = img.copy()
+    for x in range(210, 700, 110):
+        if rng.random() < 0.6:
+            color = tuple(int(c) for c in rng.integers(0, 256, 3))
+            cv2.rectangle(out, (x, 210), (x + 70, 330), color, -1)
+    return out
+
+
+def _old_slots(polys=CARRY_SLOTS, size=(960, 540)) -> SlotFile:
+    return SlotFile.model_validate(
+        {
+            "version": 1,
+            "camera_id": "cam",
+            "image_size": list(size),
+            "slots": [
+                {"id": f"G{i + 1:02d}", "zone": "ground", "polygon": p, "type": t}
+                for i, (p, t) in enumerate(
+                    zip(
+                        polys, ["standard", "ev", "standard", "accessible", "standard"], strict=True
+                    )
+                )
+            ],
+        }
+    )
+
+
+def _remount(img, out_size, k=40.0, turn=3.0, move=(30, -20)):
+    """Another mount: turned, moved and tilted (a keystone), into `out_size` (w, h)."""
+    import cv2
+    import numpy as np
+
+    h, w = img.shape[:2]
+    src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+    dst = np.float32([[k, 0], [w - k, 0], [w, h], [0, h]]) * 0.9
+    a = np.deg2rad(turn)
+    rot = np.float32([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+    dst = (dst - dst.mean(0)) @ rot.T + np.float32(
+        [out_size[0] / 2 + move[0], out_size[1] / 2 + move[1]]
+    )
+    hom = cv2.getPerspectiveTransform(src, dst.astype(np.float32))
+    return cv2.warpPerspective(img, hom, out_size, borderValue=(30, 30, 30)), hom
+
+
+def test_carry_slots_follows_a_remounted_camera_at_another_size():
+    import cv2
+    import numpy as np
+
+    old_ref = scene(1)
+    new, hom = _remount(with_cars(old_ref, 5), (1200, 900))  # other cars, other resolution
+    carried = carry_slots(_old_slots(), old_ref, new)
+    assert carried.inliers >= 100 and carried.outside == []
+    assert [(s["id"], s["zone"], s["type"]) for s in carried.slots] == [
+        ("G01", "ground", "standard"),
+        ("G02", "ground", "ev"),
+        ("G03", "ground", "standard"),
+        ("G04", "ground", "accessible"),
+        ("G05", "ground", "standard"),
+    ]
+    for s, poly in zip(carried.slots, CARRY_SLOTS, strict=True):
+        truth = cv2.perspectiveTransform(np.float64([poly]), hom)[0]
+        assert np.abs(np.float64(s["polygon"]) - truth).max() <= 3  # whole pixels
+        assert all(isinstance(v, int) for pt in s["polygon"] for v in pt)
+    SlotFile.model_validate(slot_file("cam", (1200, 900), carried.slots))
+
+
+def test_carry_slots_scales_the_slot_file_to_its_reference():
+    """A slot file drawn at half the reference image's size still lands right."""
+    import numpy as np
+
+    old_ref = scene(2)
+    half = [[[x // 2, y // 2] for x, y in p] for p in CARRY_SLOTS]
+    carried = carry_slots(_old_slots(half, (480, 270)), old_ref, old_ref.copy())
+    for s, poly in zip(carried.slots, CARRY_SLOTS, strict=True):
+        assert np.abs(np.float64(s["polygon"]) - np.float64(poly)).max() <= 2
+
+
+def test_carry_slots_clips_and_lists_spaces_outside_the_new_view():
+
+    old_ref = scene(3)
+    new = old_ref[:, :560].copy()  # the new view stops in the middle of the row
+    carried = carry_slots(_old_slots(), old_ref, new)
+    assert carried.outside == ["G04", "G05"]
+    assert max(x for s in carried.slots for x, _ in s["polygon"]) == 559
+
+
+def test_carry_slots_refuses_another_place():
+    import numpy as np
+
+    with pytest.raises(CarryError, match="same lot"):
+        carry_slots(_old_slots(), scene(4), scene(99))
+    with pytest.raises(CarryError, match="no features"):
+        carry_slots(_old_slots(), scene(4), np.zeros((540, 960, 3), np.uint8))
