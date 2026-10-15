@@ -29,7 +29,7 @@
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) (MVP) | 10 / 10 | ✅ | 2026-10-09 | 2026-10-10 |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 3 / 12 | 🟡 | 2026-10-09 | |
 | 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 3 / 11 | 🟡 | 2026-10-09 | |
-| 6 | [Notifications](docs/phases/phase-6-notifications.md) | 7 / 8 | 🟡 | 2026-10-09 | |
+| 6 | [Notifications](docs/phases/phase-6-notifications.md) | 8 / 8 | ✅ | 2026-10-09 | 2026-10-15 |
 | 7 | [Admin + stats](docs/phases/phase-7-admin-stats.md) | 8 / 8 | ✅ | 2026-10-09 | 2026-10-09 |
 | 8 | [Production deployment + hardening](docs/phases/phase-8-hardening.md) | 3 / 13 | 🟡 | 2026-10-10 | |
 | 9 | [Extras](docs/phases/phase-9-extras.md) | 5 / 6 | 🟡 | 2026-10-10 | |
@@ -87,7 +87,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P3.9** Dev API over HTTPS for phone testing (Cloudflare quick tunnel: no account or domain needed)
 - [x] **P3.10** Tests + quality gates (real-phone checklist item waits on P3.9)
 
-## Phase 6: Notifications 🟡
+## Phase 6: Notifications ✅
 - [x] **P6.1** VAPID keys + push sender
 - [x] **P6.2** Subscription storage + endpoints
 - [x] **P6.3** Service worker push handling
@@ -95,7 +95,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P6.5** Tier 1: proximity while open
 - [x] **P6.6** Tier 2: "I'm on my way"
 - [x] **P6.7** Tier 3: schedules, quiet hours, almost-full
-- [ ] **P6.8** Device test matrix (PoC check on images; the live check goes to docs/go-live.md)
+- [x] **P6.8** Device test matrix (PoC check on emulated devices, live pushes; real phones in docs/go-live.md)
 
 ## Phase 7: Admin tools, history, stats ✅
 - [x] **P7.1** Admin login
@@ -394,6 +394,8 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | 2026-10-11 | **PoC on images; going live is a separate track.** Images are the temporary cameras (at least for the ground level) until a real one is connected. Every task whose check needed the real camera, the lot or production machines is unblocked and closed with a **PoC check** in the dev environment (image feeds, the synthetic ramp clip, a production rehearsal stack on the dev Pi); the real-world check is recorded in docs/go-live.md §3 and blocks nothing. Purely physical tasks (buying, mounting, accounts) are closed as "moved to go-live" | Owner's decision: the PoC must be fully working with photos; production deployment must not block progress |
 | 2026-10-11 | **Dev and prod are separate environments** (docs/go-live.md §1): dev = the dev Pi, local builds, image feeds, dev tokens; prod = released images only, its own config, fresh secrets, its own data and hostname. They share code and image format only. The switch from the dev Pi is the G1–G12 checklist; production is rehearsed on the dev Pi as Compose project `parking-rehearsal` | Owner's requirement |
 | 2026-10-11 | `samples/generated/`: AI-generated images of the lot may be committed (they aren't real photos); new task P2.13 uses them as extra camera frames | Owner wants them in the repo; more varied frames than one photo |
+| 2026-10-15 | P6.8 PoC check = the matrix **live on emulated devices**: `frontend/scripts/device-matrix.sh` (throwaway `parking api`, dev VAPID keys, app built against it) + `playwright.devices.config.ts`, one project per row (Pixel 7, iPhone 13 installed, iPhone 13 not installed, desktop). **All on Chromium** with the real push service (FCM): the iPhone rows use the iPhone 13 profile (Safari UA) and `navigator.standalone = true` for *installed*, so they check the app's iPhone paths, not Safari's engine. Playwright WebKit can't run on the dev Pi (missing GTK4/GStreamer libraries, no system packages allowed) and has no Web Push; Safari's engine stays covered by the WebKit mock suite in CI and a real iPhone at go-live. One persistent profile per device (Chromium has no push in incognito), reset before each test; `retries: 1`, since FCM from the dev Pi dropped or timed out some pushes (410 on fresh subscriptions, read timeouts from `jmt17.google.com`), and every retry is reported. Desktop Firefox: not on the dev Pi, left to go-live. The P6.8 row of 2026-10-09 (blocked, desktop row from earlier runs) is replaced by this | Real phones need a public HTTPS API (G7); the user-agent-level emulation is what exercises the code paths that differ per device, and only Chromium can receive real pushes in Playwright here |
+| 2026-10-15 | P6.8: the app's *Enable notifications* no longer starts a **second, concurrent `pushManager.subscribe`** when the first ran past its 30 s timeout: a second tap waits for the call still running (`pushSubscribe` in `lib/push.ts`), and a timeout no longer goes down the "replaced VAPID key → unsubscribe and start over" path | Found by the matrix: after a slow first FCM registration the retry tap raced the pending call; tearing down a subscription that was still being created is never right. It did **not** explain the 410s (an experiment showed distinct endpoints, each live until unsubscribed), which stay an FCM/dev-Pi matter |
 
 ## Metrics
 
@@ -585,3 +587,4 @@ NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occup
 
 ### 2026-10-15
 - P2.13: generated images as the ground camera (work and checks run 2026-10-11). All 12 images in `samples/generated/` show the reference view and are labelled (`samples/generated/labels.json`, committed); `parking build-replay` (`parking/vision/replay.py`: view check with the shift code, `ShiftDetector.aligned` warps small shifts back, `unmeasured` = labelled by eye, `--review` overlays) builds `data/replay/ground-feed` (200 simulated frames + 2 photos + 12 generated images × 6 = 284 frames) and `data/labels/cam-ground-feed.json`; `cam-ground.source` points at it. Scorer: `appearance.frame_pavement` (the reference follows a colour cast) fixed 11 misses on darker, yellower pavement: generated 204/204 (was 193/204), feed 4828/4828, simulated 3400/3400, photos 34/34. 13 new tests, backend 1153 passed, ruff clean. Dev stack worker restarted on the feed; 24 min of `/api/status` followed the labels on every frame (see the phase guide's PoC check). Phase 2 done. **Note for Iulian:** `samples/generated/234523452352345.jpg` is the real sample photo downscaled (mean pixel difference 4.7 of 255) and `4564256432534656.jpg` is that photo with cars edited out; both are public in git now. If that wasn't meant, removing them from the current tree is easy, but they stay in the history.
+- P6.8: device test matrix, PoC on emulated devices with live pushes. `frontend/scripts/device-matrix.sh` (throwaway `parking api` on :8090 with the dev VAPID keys and a temp DB, restarted per device; the app built against it on :4175) + `frontend/playwright.devices.config.ts` / `e2e-devices/device-matrix.spec.ts`: Android (Pixel 7), iPhone installed (iPhone 13 + `navigator.standalone`), iPhone not installed, desktop, all on Chromium 154 (Debian 13, dev Pi) with real FCM pushes, one persistent profile per device. Final run 07:45–07:55: every expected cell passed (15 checks, 5 n/a skipped; 1 Playwright retry: Android push, a 410 after a slow first registration); `notification_log`: test 3 sent / 1 failed (410), on_my_way 6, almost_full 3, schedule 3 sent + 3 skipped_quiet. Results in notifications.md §6.1/§6.3; real phones, Safari/Apple push and desktop Firefox in go-live.md §3. Earlier runs showed FCM from the dev Pi dropping some fresh subscriptions (410) and read timeouts, which led to one profile per device and `retries: 1`. App fix: a second *Enable* tap after the 30 s subscribe timeout waits for the pending call instead of starting a concurrent one (`lib/push.ts`, 1 new unit test). Playwright WebKit can't run on the dev Pi (missing system libraries), so Safari's engine stays with the mock suite in CI. vitest 289 passed, mock e2e (Pixel 7) 43 passed / 1 skipped, eslint/prettier/tsc clean. Servers stopped afterwards. Phase 6 done.

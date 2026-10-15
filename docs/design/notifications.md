@@ -124,10 +124,14 @@ Fill in one row per device actually tested: ✅ confirmed, ❌ failed (note why)
 | Device / OS | Browser (version) | Installed? | Push | Tier 1 | Tier 2 | Tier 3 | Date | Notes |
 |-------------|-------------------|------------|------|--------|--------|--------|------|-------|
 | Desktop, Debian 13 (dev Pi 5, arm64) | Chromium 154.0.8037.92 (FCM) | no | ✅ | n/a | ✅ | ✅ | 2026-10-09 | Live runs against a real `parking api` with the dev VAPID keys: test push (P6.4), on-my-way rules (P6.6), reminder + quiet hours + almost-full (P6.7). Tier 1 also passes in Chromium with an emulated location (P6.5 e2e) |
-| Desktop | Firefox | no | — | n/a | — | — | | Not installed on the dev Pi |
-| Android phone | Chrome | optional | — | — | — | — | | Needs P3.9 (HTTPS from the phone) |
-| iPhone (iOS ≥ 16.4) | Safari, installed | required | — | — | — | — | | Needs P3.9 |
-| iPhone | Safari, not installed | — | — | — | — | — | | Expected: install hint, no push; Tier 1 banner only |
+| Android (emulated: Pixel 7, 412×839, touch, Chrome Android UA) | Chromium 154.0.8037.92 on the dev Pi (FCM) | no | ✅ | ✅ | ✅ | ✅ | 2026-10-15 | P6.8 PoC, [§6.3](#63-the-matrix-on-emulated-devices-poc-p68). Push passed on Playwright's retry: on the first try *Enable* needed a second tap after a slow registration and that endpoint got 410 on the test push |
+| iPhone, installed (emulated: iPhone 13, 390×664, Safari UA, `navigator.standalone`) | Chromium 154.0.8037.92 (FCM), **not Safari** | emulated | ✅ | ✅ | ✅ | ✅ | 2026-10-15 | P6.8 PoC, §6.3: the app's iPhone paths only; Safari's push through Apple's service is a go-live check |
+| iPhone, not installed (emulated: iPhone 13, Safari UA) | Chromium 154.0.8037.92, **not Safari** | no | ❌ as expected: install hint, no button, no prompt | ✅ banner only | n/a | n/a | 2026-10-15 | P6.8 PoC, §6.3. WebKit itself: the install hint and the Tier 1 banner also pass in the mock suite's `iPhone 13` project on WebKit in CI |
+| Desktop (emulated: Desktop Chrome 1280×720) | Chromium 154.0.8037.92 (FCM) | no | ✅ | n/a | ✅ | ✅ | 2026-10-15 | P6.8 PoC, §6.3 |
+| Desktop | Firefox | no | — | n/a | — | — | | Not on the dev Pi (no system packages); Chrome or Firefox satisfies the row. Go-live |
+| Android phone (real) | Chrome | optional | — | — | — | — | | Go-live (needs the public HTTPS API, G7) |
+| iPhone (real, iOS ≥ 16.4) | Safari, installed | required | — | — | — | — | | Go-live |
+| iPhone (real) | Safari, not installed | — | — | — | — | — | | Go-live. Expected: install hint, no push; Tier 1 banner only |
 
 ### 6.2 How to run it on a phone
 
@@ -140,3 +144,26 @@ Needs the dev API reachable over HTTPS (P3.9) and the frontend built against it 
 5. **iPhone not installed:** *Alerts* shows the install hint instead of the enable button; Tier 1 banner still works.
 
 Write the OS and browser versions into the table above and into PROGRESS.md.
+
+### 6.3 The matrix on emulated devices (PoC, P6.8)
+
+Until real phones can reach a public HTTPS API (go-live G7, G12), the matrix runs **live on the dev machine with emulated devices**: `frontend/scripts/device-matrix.sh` starts a throwaway `parking api` (temporary SQLite, the dev VAPID keys from `deploy/.env`, a random worker token, the lot at `LOT_LAT/LOT_LON` = 51.5007, -0.1246), builds the app against it (`VITE_API_BASE=http://127.0.0.1:8090`, base `/`), serves it on `localhost:4175` and runs `frontend/playwright.devices.config.ts`, one project per row:
+
+| Project | Emulates | Push | Tier 1 | Tier 2 | Tier 3 |
+|---------|----------|------|--------|--------|--------|
+| `Android Chrome` | Pixel 7 (viewport, touch, Chrome Android UA) | ✅ | ✅ | ✅ | ✅ |
+| `iPhone installed` | iPhone 13 profile (Safari UA) + `navigator.standalone = true` (the home-screen app) | ✅ | ✅ | ✅ | ✅ |
+| `iPhone Safari` | iPhone 13 profile, not installed | install hint, no button | banner only | — | — |
+| `Desktop Chrome` | Desktop Chrome 1280×720 | ✅ | n/a | ✅ | ✅ |
+
+- Every project runs on **Chromium**, the only Playwright engine with Web Push, and pushes go through the **real push service (FCM)** to the emulated device's service worker; Chromium has no Push API in incognito, so each project (= device) runs in **one persistent profile** kept for all its tests, as a phone keeps its browser; each test starts by resetting it (permissions, `localStorage`, the push subscription in the browser and on the server). A fresh profile per test meant a new FCM registration every time, and FCM dropped some of those within seconds (410 on the next push). The iPhone rows therefore check the **app's iPhone paths** (Safari UA detection, standalone vs not), not Safari's engine: Safari's WebKit is covered by the mock suite in CI (`frontend/e2e/`, `iPhone 13` project: install hint, Tier 1 banner), and real Safari push is a go-live check.
+- Without arguments the runner runs the four projects one after another and **restarts the API before each** (same database): one device's tests use several push `POST`s, and the API's 20 / hour budget per client IP (api.md §7) would otherwise answer 429 to the third device, all being `localhost`. With arguments (`--project`, `-g`) it is one Playwright run on one API.
+- The ground camera is played by the test: three observations per change on `/internal/observations` (the API takes a space's change after 3 frames in a row).
+- The checks: no permission prompt and no subscription before the tap; enable → test push arrives (`kind: test`); Tier 1: far → 400 m from the lot → banner (+ one `proximity` notification where push is allowed), not again after a reload; Tier 2: *15 min* → push at once, Δ1 → none, ground full → push at once, *Stop updates* → none; Tier 3: *Warn when almost full* → one `almost_full` push, not again within the cooldown; quiet hours over the next minute + reminders in that minute and the one after → only the second is sent (`schedule|skipped_quiet` + `schedule|sent`).
+- Notifications share the tag `parking-status`, so the page records each one as it appears; the runner prints the API's `notification_log` per kind and status at the end.
+- A profile's first FCM registration can take longer than the app's 30 s; the app then shows *That didn't work*, and the test taps *Enable* again (at most 3 tries, noted in the report as `retry`).
+- The push service is on the internet, so the config retries a failed test once (`retries: 1`, reported as *flaky*): a dropped or slow push on the dev Pi's link (a read timeout from FCM was seen) shouldn't fail the row, but every retry is in the report.
+
+```bash
+PW_CHROMIUM_PATH=/usr/bin/chromium frontend/scripts/device-matrix.sh   # ~15 min; -g / --project to narrow
+```

@@ -189,6 +189,22 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 
+// A subscribe call that ran past the timeout is still running in the browser. Tapping "Enable"
+// again waits for that one instead of starting a second, concurrent one.
+const pendingSubscribe = new WeakMap<ServiceWorkerRegistration, Promise<PushSubscription>>()
+
+function pushSubscribe(
+  reg: ServiceWorkerRegistration,
+  options: PushSubscriptionOptionsInit,
+): Promise<PushSubscription> {
+  let pending = pendingSubscribe.get(reg)
+  if (!pending) {
+    pending = reg.pushManager.subscribe(options).finally(() => pendingSubscribe.delete(reg))
+    pendingSubscribe.set(reg, pending)
+  }
+  return withTimeout(pending, SUBSCRIBE_TIMEOUT_MS)
+}
+
 async function currentSubscription(): Promise<PushSubscription | null> {
   const reg = await navigator.serviceWorker.getRegistration()
   return reg ? reg.pushManager.getSubscription() : null
@@ -245,13 +261,15 @@ export async function subscribe(prefs: Prefs, base = API_BASE): Promise<void> {
     const options = { userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) }
     let sub: PushSubscription
     try {
-      sub = await withTimeout(reg.pushManager.subscribe(options), SUBSCRIBE_TIMEOUT_MS)
+      sub = await pushSubscribe(reg, options)
     } catch (err) {
-      // Subscribed before with another key (the server's keys were replaced): start over.
+      // Subscribed before with another key (the server's keys were replaced): start over. Not
+      // after a timeout: that call is still running (pushSubscribe).
+      if (err instanceof PushError) throw err
       const old = await reg.pushManager.getSubscription()
       if (!old) throw err
       await old.unsubscribe()
-      sub = await withTimeout(reg.pushManager.subscribe(options), SUBSCRIBE_TIMEOUT_MS)
+      sub = await pushSubscribe(reg, options)
     }
     await register(sub, prefs, base)
   } catch (err) {

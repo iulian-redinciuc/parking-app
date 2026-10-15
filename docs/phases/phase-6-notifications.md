@@ -85,6 +85,8 @@
 
 **Done when:** every "expected ✅" cell is confirmed.
 
+**PoC check (2026-10-15):** the matrix live on emulated devices on the dev Pi (`PW_CHROMIUM_PATH=/usr/bin/chromium frontend/scripts/device-matrix.sh`, [notifications.md §6.3](../design/notifications.md#63-the-matrix-on-emulated-devices-poc-p68)): a throwaway `parking api` with the dev VAPID keys, the app built against it, Playwright 1.64 on Chromium 154 with real FCM pushes, one project per row (Pixel 7, iPhone 13 installed via `navigator.standalone`, iPhone 13 not installed, desktop), observations posted as cam-ground. Final run 07:45–07:55: **every expected cell passed** (15 checks; 5 n/a skipped). One check needed Playwright's retry (Android push: a slow first FCM registration, second tap, that endpoint got 410). Results in notifications.md §6.1. The iPhone rows ran on Chromium with Safari's user agent, not on Safari: real Safari / Apple push, real phones, desktop Firefox are in [go-live.md §3](../go-live.md#p68-device-test-matrix). Found and fixed on the way: a second *Enable* tap after the 30 s timeout started a concurrent `pushManager.subscribe`.
+
 ---
 
 ## Exit criteria

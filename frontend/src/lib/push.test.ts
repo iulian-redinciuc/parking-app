@@ -192,6 +192,30 @@ describe('subscribe (with a server)', () => {
     expect(storedEndpoint()).toBeNull()
   })
 
+  it('a second tap after a timeout waits for the call still running, not a new one', async () => {
+    const browser = stubBrowser()
+    stubFetch(api)
+    let finish: (sub: PushSubscription) => void = () => undefined
+    browser.pushManager.subscribe.mockReturnValueOnce(
+      new Promise((resolve) => (finish = resolve)) as never,
+    )
+    vi.useFakeTimers()
+    try {
+      const first = expect(subscribe(DEFAULT_PREFS, API)).rejects.toMatchObject({ code: 'failed' })
+      await vi.advanceTimersByTimeAsync(SUBSCRIBE_TIMEOUT_MS)
+      await first
+      const second = subscribe(DEFAULT_PREFS, API)
+      await vi.advanceTimersByTimeAsync(1000)
+      finish(fakeSubscription('https://push.example/late') as unknown as PushSubscription)
+      await second
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(browser.pushManager.subscribe).toHaveBeenCalledOnce()
+    expect(browser.pushManager.getSubscription).not.toHaveBeenCalled()
+    expect(storedEndpoint()).toBe('https://push.example/late')
+  })
+
   it('replaces a subscription made with an older key', async () => {
     const browser = stubBrowser()
     stubFetch(api)

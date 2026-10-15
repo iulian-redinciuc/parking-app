@@ -15,7 +15,8 @@
 | Frontend E2E | `frontend/e2e/` | Playwright (`iPhone 13`, `Pixel 7`) with `VITE_API_BASE=mock` | ✅ |
 | Quality | `frontend/lighthouserc.cjs` | Lighthouse CI (`@lhci/cli`, mobile preset, 3 runs): performance ≥ 90, a11y ≥ 90. Lighthouse 12 has no PWA category, so installability is asserted by Playwright (`e2e/pwa.spec.ts`, Chromium DevTools) | ✅ every push |
 | Load | `scripts/load/sse.py` ([§8](#8-load-test-p810-against-the-public-entry)) | asyncio + httpx, 500 clients | manual, Phase 8 (its logic is unit-tested in CI) |
-| Device checks | — | Real Android + iPhone, [notifications.md §6](notifications.md#6-test-matrix-phase-6) | manual |
+| Device matrix, emulated (P6.8) | `frontend/e2e-devices/` + `frontend/scripts/device-matrix.sh` | Playwright on Chromium (Pixel 7, iPhone 13 installed / not installed, desktop) against a throwaway `parking api`, real push service ([notifications.md §6.3](notifications.md#63-the-matrix-on-emulated-devices-poc-p68)) | manual, dev machine (needs the dev VAPID keys and internet) |
+| Device checks | — | Real Android + iPhone, [notifications.md §6](notifications.md#6-test-matrix-phase-6) | manual, go-live |
 
 ## 2. What must have unit tests
 
