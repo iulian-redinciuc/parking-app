@@ -15,7 +15,7 @@
     "lhci": "npx --yes @lhci/cli@0.15.1 autorun"
   },
   "dependencies": {
-    "i18next": "^26.4.2",
+    "i18next": "^26.4.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-i18next": "^17.0.16",
