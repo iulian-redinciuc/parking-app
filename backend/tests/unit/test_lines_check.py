@@ -1,3 +1,4 @@
+import importlib.util
 import json
 
 import cv2
@@ -99,3 +100,31 @@ def test_cli_lines_check_missing_file(tmp_path):
     (tmp_path / "config/lines/cam-ramp.json").unlink()
     result = runner.invoke(app, args)
     assert result.exit_code == 1 and "lines mode" in result.output
+
+
+# --- the committed cam-ramp lines on the synthetic ramp frame (P5.1 PoC) ---
+
+
+def test_committed_ramp_lines_pass_on_the_synthetic_frame(tmp_path):
+    from pathlib import Path
+
+    from parking.config import load_lines
+
+    root = Path(__file__).resolve().parents[3]
+    spec = importlib.util.spec_from_file_location(
+        "synth_ramp", root / "backend" / "scripts" / "synth_ramp.py"
+    )
+    synth = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(synth)
+    frame = synth.render()
+    assert frame.shape == (360, 640, 3)
+    assert np.array_equal(frame, synth.render())  # deterministic
+
+    lf = load_lines(root / "config" / "lines" / "cam-ramp.json")
+    res = check_lines(lf, (frame.shape[1], frame.shape[0]))
+    assert res.ok, res.errors
+    assert not res.warnings
+    # about a car length apart, and ≥ 3 m (~126 px) of lane before and after the lines
+    assert 4 * synth.PX_PER_M <= res.gap <= 6 * synth.PX_PER_M
+    xs = [p[0] for line in (lf.line_a, lf.line_b) for p in line]
+    assert min(xs) >= 3 * synth.PX_PER_M and max(xs) <= 640 - 3 * synth.PX_PER_M

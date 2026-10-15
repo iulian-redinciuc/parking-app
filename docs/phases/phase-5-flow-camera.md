@@ -23,6 +23,8 @@
 
 **Done when:** the lines file is committed, `parking lines-check --camera cam-ramp` prints `ok`, and its overlay shows the whole lane with ~3 m before and after the lines.
 
+**PoC check (2026-10-15):** no ramp camera exists, so the reference frame is a rendered stand-in: `backend/scripts/synth_ramp.py data/reference/cam-ramp.jpg` (640×360 like the sub-stream, the ramp lane seen side-on from the opposite wall, ~42 px per metre, wall panels 2.5 m wide; deterministic, git-ignored like every reference). The lines were drawn on it in the slot editor's lines mode (headless Chromium, real clicks: `line_a` on the street side, `line_b` ~4.8 m further in, the ROI around the lane plus car height, `in_direction: a_to_b` = down the ramp) and exported to `config/lines/cam-ramp.json` (committed). `parking lines-check --camera cam-ramp`: `line_a 162 px, line_b 160 px, 200 px apart, 0° between them, IN = a_to_b`, no warnings, **`ok`**, exit 0; the overlay `out/lines/cam-ramp.jpg` shows the whole lane with ~5 m before line A and after line B. New test: the committed file passes the check on the rendered frame (gap a car length, ≥ 3 m each side). Not checked: a real camera's position, network, stream settings, or lines on its view (go-live.md §3).
+
 ## P5.2: Low-latency RTSP + video file source
 **Files:** `parking/vision/sources.py`
 
