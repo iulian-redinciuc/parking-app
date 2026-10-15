@@ -5,7 +5,14 @@ import numpy as np
 import pytest
 
 from parking.config import AppearanceCfg, Slot
-from parking.vision.appearance import illumination, score_slots_appearance, slot_crop, to_lab
+from parking.vision.appearance import (
+    frame_pavement,
+    illumination,
+    pavement_model,
+    score_slots_appearance,
+    slot_crop,
+    to_lab,
+)
 
 W, H = 1040, 300  # frame size
 SLOT_W, SLOT_H, X0, Y0 = 120, 220, 40, 40
@@ -161,6 +168,76 @@ def test_illumination_ignores_cars_and_needs_a_free_slot():
     labs = [to_lab(slot_crop(img, s.polygon, 0.12)) for s in SLOTS]
     assert illumination(labs, ref_labs) == 1.0
     assert len(taken(score_slots_appearance(img, SLOTS, (W, H), reference=ref))) == N
+
+
+def cast(img: np.ndarray, gains=(0.7, 0.8, 0.84)) -> np.ndarray:
+    """Another light: darker and warmer (less blue), as per-channel BGR gains."""
+    return np.clip(img.astype(np.float32) * np.float32(gains), 0, 255).astype(np.uint8)
+
+
+def crops(img, ref):
+    labs = [to_lab(slot_crop(img, s.polygon, 0.12)) for s in SLOTS]
+    ref_labs = [to_lab(slot_crop(ref, s.polygon, 0.12)) for s in SLOTS]
+    return labs, ref_labs, pavement_model(ref_labs)[0]
+
+
+def test_reference_follows_a_colour_cast(monkeypatch):
+    """Darker and warmer light (P2.13): the free slots give the pavement's colour, not only
+    its lightness."""
+    ref = pavement(seed=4)
+    img = pavement()
+    car(img, 0, (25, 25, 30))
+    car(img, 2, (190, 110, 40))
+    car(img, 5, (235, 235, 235), dx=30)
+    shadow(img, 1)
+    moss(img, 3)
+    img, expected = cast(img), {"G01", "G03", "G06"}
+    results = score_slots_appearance(img, SLOTS, (W, H), reference=ref)
+    assert taken(results) == expected
+    assert max(r.score for r in results if not r.taken) < 0.1
+    labs, ref_labs, colour = crops(img, ref)
+    seen = frame_pavement(labs, ref_labs, colour)
+    assert 0.75 * colour[0] < seen[0] < 0.9 * colour[0]
+    assert 3 < seen[2] - colour[2] < 8  # more yellow than the reference
+    # lightness alone (`illumination`) calls free spaces taken in this light
+    monkeypatch.setattr("parking.vision.appearance.CAST_MIN_SLOTS", N + 1)
+    assert taken(score_slots_appearance(img, SLOTS, (W, H), reference=ref)) != expected
+
+
+def test_frame_pavement_needs_three_agreeing_free_slots():
+    ref = pavement(seed=4)
+    img = cast(pavement(seed=3))
+    for i in range(N - 2):  # six evenly grey cars, two free slots
+        cv2.rectangle(
+            img, (X0 + i * SLOT_W, Y0), (X0 + (i + 1) * SLOT_W, Y0 + SLOT_H), (150,) * 3, -1
+        )
+    assert frame_pavement(*crops(img, ref)) is None
+    img = cast(pavement(seed=3))
+    for i in range(N - 3):  # three free: enough, and the cars don't pull the colour
+        cv2.rectangle(
+            img, (X0 + i * SLOT_W, Y0), (X0 + (i + 1) * SLOT_W, Y0 + SLOT_H), (150,) * 3, -1
+        )
+    labs, ref_labs, colour = crops(img, ref)
+    seen = frame_pavement(labs, ref_labs, colour)
+    assert 3 < seen[2] - colour[2] < 8
+    results = score_slots_appearance(img, SLOTS, (W, H), reference=ref)
+    assert taken(results) == {s.id for s in SLOTS[: N - 3]}
+
+
+def test_frame_pavement_lightness_ignores_where_the_free_slots_are():
+    """The lot is brighter on one side; only dim-side slots are free. The colour's lightness
+    is still the reference's (per-slot ratios), so the bright slot isn't called taken."""
+    ramp = np.linspace(1.25, 0.8, W, dtype=np.float32)[None, :, None]
+    lit = lambda im: np.clip(im.astype(np.float32) * ramp, 0, 255).astype(np.uint8)  # noqa: E731
+    ref = lit(pavement(seed=4))
+    img = pavement(seed=3)
+    for i in range(1, N - 3):
+        car(img, i, (30, 30, 35))
+    img = lit(img)
+    labs, ref_labs, colour = crops(img, ref)
+    assert frame_pavement(labs, ref_labs, colour)[0] == pytest.approx(colour[0], abs=1.5)
+    results = score_slots_appearance(img, SLOTS, (W, H), reference=ref)
+    assert taken(results) == {s.id for s in SLOTS[1 : N - 3]}
 
 
 def test_crop_upright_and_inset():

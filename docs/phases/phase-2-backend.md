@@ -174,24 +174,26 @@ Implement `SlotSmoother` and `CountSmoother` per [vision.md §3](../design/visio
 **Done when:** 200 frames exist with labels, `parking evaluate` on them is recorded, and the app on the dev stack (and the phone preview) shows the ground count changing as the simulated cars come and go.
 
 ## P2.13: Generated images as the ground camera
-**Files:** `samples/generated/` (committed, AI-generated, not real photos), `data/labels/` and `data/replay/` (git-ignored), tests if code changes, docs
+**Files:** `samples/generated/` (committed, AI-generated, not real photos) with its `labels.json`, `backend/parking/vision/replay.py` + `parking build-replay`, `backend/parking/vision/appearance.py` (`frame_pavement`), `backend/parking/vision/shift.py` (`aligned`), `data/labels/` and `data/replay/` (git-ignored), tests, docs
 
 **Why:** images are the temporary camera until a real one is connected. Iulian adds AI-generated pictures of the lot with different cars to `samples/generated/` on GitHub.
 
 **Steps**
 1. `git pull`, list `samples/generated/`. If there are **no images yet**, do steps 4–6 with what exists (the real photo and the simulated feed), say so in the session log, and finish; the images get picked up by re-running the command of step 5 later.
 2. For each image: does it match the reference view (`data/reference/cam-ground.jpg`) closely enough for `config/slots/cam-ground.json`? Check by aligning it to the reference (feature matching / homography, the P4.6 shift code) and by looking at the slot overlay. Small shifts: warp the image onto the reference framing. A different view (other angle, other number of spaces): don't force it; list it as "not usable with this slot file" with the reason.
-3. Label the usable ones by eye (overlay with slot ids → taken list) into `data/labels/cam-ground-generated.json`; mark doubtful spaces `unsure`.
+3. Label the usable ones by eye (overlay with slot ids from `parking build-replay --review DIR` → taken list) into `samples/generated/labels.json`, committed next to the images (they are public AI-made pictures, and labels under git-ignored `data/` would be lost with the dev environment); mark doubtful spaces `unsure`.
 4. `parking evaluate` on them with the current settings; record slot accuracy and the misses in PROGRESS.md → Metrics, **marked as generated images**. If the appearance scorer fails on them for a reason that would also hit a real camera (other car colours, shadows), improve it; if the reason is an artefact of the generated image, note it and move on.
-5. A small command or documented one-liner that builds the dev replay folder from all the sources (real photo, simulated frames, usable generated images), so the feed can be rebuilt when more images arrive; rebuild it and restart the dev stack (`deploy/scripts/dev-public.sh up`).
+5. `parking build-replay --camera cam-ground` builds the dev replay folder `data/replay/ground-feed` from all the sources (simulated frames, real photos, usable generated images) with one labels file `data/labels/cam-ground-feed.json`, so the feed can be rebuilt when more images arrive ([vision.md §10](../design/vision.md#replay-feed-from-every-image-source-parkingvisionreplaypy-p213)); point `cam-ground.source` at it, rebuild it and restart the worker (`docker compose … restart vision-occupancy`; `deploy/scripts/dev-public.sh up` keeps the phone preview on it).
 6. Check through the API that the ground count follows the frames.
 
 **Done when:** every image in `samples/generated/` is either in the replay feed with labels and an evaluate result, or listed as unusable with the reason; the dev stack and the phone preview run on the rebuilt feed.
 
+**PoC check (2026-10-11):** all 12 images in `samples/generated/` checked against the reference view with `parking build-replay --review` (9 within 1.7 px by the P4.6 shift code, 3 with repainted pavement unmeasurable and checked by eye on the slot overlay; none unusable), labelled by eye into `samples/generated/labels.json`; `parking evaluate` on them 204/204 (94.6% before the colour-cast fix in the scorer), the whole 284-frame feed 4828/4828, the 200 simulated frames still 3400/3400 and the two photos 34/34. `cam-ground` switched to `folder:data/replay/ground-feed` and the worker restarted on the dev stack (tunnel and Pages preview unchanged, `dev-public.sh up` confirmed); over one full pass of the feed (24 min, 551 samples of `/api/status`) the ground state was always the labelled state of the current frame or one of the 4 before (smoothing lag), never stale, and every photo and generated image reached its labelled spaces exactly (free 0 to 17). Generated images are AI-made, not evidence of accuracy on a real camera.
+
 ---
 
 ## Exit criteria
-- [ ] Dropping a new image into the replay folder (`data/replay/ground-sim/` since P2.12) changes the numbers on `curl -N …/api/stream` within ~20 s
+- [ ] Dropping a new image into the replay folder (`data/replay/ground-feed/` since P2.13) changes the numbers on `curl -N …/api/stream` within ~20 s
 - [ ] Restarting the API shows the last known numbers immediately (marked stale), then live again
 - [ ] Killing the worker → camera `down` after 30 s → zone `stale` after 60 s
 - [ ] `docker ps` shows only `parking-*` containers added; nothing else on the dev Pi was changed

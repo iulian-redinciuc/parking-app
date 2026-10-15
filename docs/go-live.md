@@ -49,3 +49,8 @@ In order. Each step links to where the detail already is.
 Each task's check that needs the real camera, the lot or the production machines is listed here by task ID when the task is closed in PoC mode: what was checked in the PoC, and what remains to be checked for real. Tick them during G6–G12.
 
 <!-- The agent loop appends one "### Pn.m …" entry per task below. -->
+
+### P2.13 Generated images as the ground camera
+PoC: all 12 generated images show the reference view and are in the dev replay feed with labels; the appearance scorer reads 204 of 204 spaces right on them (after a fix for darker, yellower light) and the API's ground count follows the feed. Generated and simulated frames are not evidence of accuracy on a real camera.
+- [ ] On the real camera's view: the scorer on real frames in different light (morning, evening sun, overcast, wet pavement, night), which is what the colour-cast fix is for. Covered by the validation set and evaluation of P4.8–P4.9 (step G9); needs the camera mounted (G6).
+- [ ] Switch `cam-ground.source` from `folder:data/replay/ground-feed` to the camera, redraw the spaces and save a new `reference_image` and `reference_empty` for that view (G6); the generated images and their labels then only serve the dev environment.

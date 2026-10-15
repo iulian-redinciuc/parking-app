@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
@@ -46,6 +46,8 @@ class ShiftMeasure:
     displacement_px: float | None
     matches: int  # after the ratio test
     inliers: int
+    # 2×3 similarity taking reference pixels to the frame's (at reference size); `aligned` uses it
+    transform: np.ndarray | None = field(default=None, compare=False, repr=False)
 
 
 def _gray(image: np.ndarray, width: int) -> np.ndarray:
@@ -133,7 +135,23 @@ class ShiftDetector:
         if n < MIN_INLIERS:
             return ShiftMeasure(None, len(good), n)
         moved = np.linalg.norm(dst[keep] - src[keep], axis=1)
-        return ShiftMeasure(float(np.median(moved)) * self.scale, len(good), n)
+        transform = model.astype(np.float64)
+        transform[:, 2] *= self.scale
+        return ShiftMeasure(float(np.median(moved)) * self.scale, len(good), n, transform)
+
+    def aligned(self, image: np.ndarray, measure: ShiftMeasure) -> np.ndarray:
+        """`image` warped back onto the reference framing (reference size), undoing `measure`."""
+        if (image.shape[1], image.shape[0]) != self.ref_size:
+            image = cv2.resize(image, self.ref_size, interpolation=cv2.INTER_AREA)
+        if measure.transform is None:
+            return image
+        return cv2.warpAffine(
+            image,
+            measure.transform,
+            self.ref_size,
+            flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
 
     def due(self) -> bool:
         return self._last_check is None or (

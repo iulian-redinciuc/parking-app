@@ -80,6 +80,7 @@ backend/
 │   │   ├── recording.py         # `parking record` (FFmpeg stream copy) + `stream-check` fps stats
 │   │   ├── health.py            # black / frozen / blurry frame checks
 │   │   ├── shift.py             # camera shift detection vs reference frame (ORB)
+│   │   ├── replay.py            # `parking build-replay`: one dev feed from simulated frames, photos, generated images
 │   │   ├── annotate.py          # draw slots, detections, lines, totals on a frame
 │   │   ├── lines.py             # line-file checks + A/B/IN overlay (`parking lines-check`)
 │   │   ├── motion.py            # MotionGate (MOG2 on the ROI, 2 s hold-over) + `motion-check` stats

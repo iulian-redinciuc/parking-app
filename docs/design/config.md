@@ -49,7 +49,7 @@ cameras:
     role: occupancy                # occupancy | flow | barrier
     zones: [ground]                # zones this camera reports on
     source: "file:data/samples/ground-01.jpg"
-    # Phase 2:  "folder:data/replay/ground-sim?interval=5&loop=true"   (frames made by `parking simulate-feed`)
+    # Phase 2:  "folder:data/replay/ground-feed?interval=5&loop=true"  (frames put together by `parking build-replay`)
     # Phase 4:  "snapshot:${CAM_GROUND_SNAPSHOT_URL}" (preferred)  or  "rtsp:${CAM_GROUND_RTSP_URL}"
     sample_every_s: 5
     slots_file: config/slots/cam-ground.json
@@ -189,7 +189,7 @@ api: { ... }
 | Scheme | Example | Behaviour |
 |--------|---------|-----------|
 | `file:` | `file:data/samples/ground-01.jpg` | The same image every time |
-| `folder:` | `folder:data/replay/ground-sim?interval=5&loop=true` | Images in name order, one per `interval` seconds. `loop=false` stops at the end. New files dropped into the folder are picked up |
+| `folder:` | `folder:data/replay/ground-feed?interval=5&loop=true` | Images in name order, one per `interval` seconds. `loop=false` stops at the end. New files dropped into the folder are picked up |
 | `snapshot:` | `snapshot:http://user:pass@10.0.20.11/cgi-bin/snapshot.jpg` | HTTP GET per sample (JPEG). **Preferred for occupancy** (no decoding between samples, full resolution) |
 | `rtsp:` | `rtsp:rtsp://user:pass@10.0.20.12:554/sub` | Continuous stream on a reader thread that keeps only the latest frame. The occupancy fallback |
 | `device:` | `device:/dev/video0?width=3840&height=2160&fourcc=MJPG&fps=1` | A camera **plugged into the vision host** (USB/UVC webcam, anything V4L2). Latest frame and reconnects as `rtsp:` |
@@ -273,7 +273,7 @@ Made by the slot editor (`tools/slot-editor`) or `parking bootstrap-slots`.
   }
 }
 ```
-`parking simulate-feed` writes the same format to `data/labels/<camera>-sim.json` for its frames ([vision.md §10](vision.md#simulated-feed-parkingvisionsimulatepy-p212)).
+`parking simulate-feed` writes the same format to `data/labels/<camera>-sim.json` for its frames ([vision.md §10](vision.md#simulated-feed-parkingvisionsimulatepy-p212)). The generated images' labels are **committed** next to them, `samples/generated/labels.json` (AI-made pictures, nothing private; made by eye from the `parking build-replay --review` overlays), and `parking build-replay` writes `data/labels/<camera>-feed.json` for the whole replay feed ([vision.md §10](vision.md#replay-feed-from-every-image-source-parkingvisionreplaypy-p213)).
 
 Every slot not listed in `taken` or `unsure` is free. `unsure` slots are excluded from metrics. `load_labels(path)` reads it into `LabelFile` (unknown keys are errors; a slot can't be both `taken` and `unsure`).
 

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "camera_id": "cam-ground",
+  "images": {
+    "234523452352345.jpg": { "conditions": ["generated"], "taken": ["G05", "G06", "G09", "G12", "G14"], "unsure": [] },
+    "24566245634564564256.jpg": { "conditions": ["generated"], "taken": ["G04"], "unsure": [] },
+    "345234534523452345.jpg": { "conditions": ["generated"], "taken": ["G02", "G04"], "unsure": [] },
+    "345324523452352345.jpg": { "conditions": ["generated"], "taken": ["G01", "G03", "G04", "G05", "G06", "G07", "G08", "G10", "G11", "G14", "G16"], "unsure": [] },
+    "3453245324523453425.jpg": { "conditions": ["generated"], "taken": ["G04", "G06", "G14", "G16"], "unsure": [] },
+    "3453425342532453452345.jpg": { "conditions": ["generated"], "taken": ["G01", "G02", "G03", "G04", "G05", "G06", "G07", "G08", "G10", "G11", "G13", "G14", "G16", "G17"], "unsure": [] },
+    "34534532453245.jpg": { "conditions": ["generated"], "taken": ["G01", "G02", "G03", "G04", "G05", "G06", "G07", "G08", "G09", "G10", "G11", "G12", "G13", "G14", "G15", "G16", "G17"], "unsure": [] },
+    "345634534523452345.jpg": { "conditions": ["generated"], "taken": ["G01", "G06", "G07", "G13", "G16"], "unsure": [] },
+    "345645645634563456456.jpg": { "conditions": ["generated"], "taken": [], "unsure": [] },
+    "4563456345634563456.jpg": { "conditions": ["generated"], "taken": ["G02", "G04", "G06"], "unsure": [] },
+    "4563456345634563456345.jpg": { "conditions": ["generated"], "taken": ["G01", "G02", "G03", "G06", "G07", "G08", "G10", "G11", "G13", "G16"], "unsure": [] },
+    "4564256432534656.jpg": { "conditions": ["generated"], "taken": ["G05", "G12"], "unsure": [] }
+  }
+}

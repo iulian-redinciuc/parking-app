@@ -35,7 +35,7 @@ cameras:
     role: occupancy                # occupancy | flow | barrier
     zones: [ground]                # zones this camera reports on
     source: "file:data/samples/ground-01.jpg"
-    # Phase 2:  "folder:data/replay/ground-sim?interval=5&loop=true"   (frames made by `parking simulate-feed`)
+    # Phase 2:  "folder:data/replay/ground-feed?interval=5&loop=true"  (frames put together by `parking build-replay`)
     # Phase 4:  "snapshot:${CAM_GROUND_SNAPSHOT_URL}" (preferred)  or  "rtsp:${CAM_GROUND_RTSP_URL}"
     sample_every_s: 5
     slots_file: config/slots/cam-ground.json

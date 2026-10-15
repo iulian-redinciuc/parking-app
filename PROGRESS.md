@@ -9,7 +9,7 @@
 
 **Current focus:** a **fully working PoC on images** in the dev environment ([PLAN §6](PLAN.md#poc-and-going-live)): images stand in for the cameras until a real one is connected. Every task is closed with a PoC check; checks that need the real camera, the lot or production machines are collected in [docs/go-live.md](docs/go-live.md) and block nothing.
 **Build order:** 0 → 1 → 2 → 3 (MVP) → 6 → 7 (no hardware needed) → 4 → 5 → 8 (need the real cameras / production machines) → 9.
-**Last updated:** 2026-10-10
+**Last updated:** 2026-10-15
 
 **Try it (on your phone):** open https://iulian-redinciuc.github.io/parking-app/ (mobile data is fine). It shows the dev Pi's replay feed through a Cloudflare quick tunnel (API address since 2026-10-10: `https://delays-learners-notification-endangered.trycloudflare.com`), refreshed about every 10 s (header *Updating*: quick tunnels don't carry the live stream). The address changes whenever the tunnel restarts: **after a reboot of the dev Pi re-run `deploy/scripts/dev-public.sh up`** (about a minute; it rebuilds the preview with the new address), then reload the app. `deploy/scripts/dev-public.sh down` closes the tunnel and puts the preview back on mock data.
 
@@ -25,7 +25,7 @@
 |-------|------|-------|--------|---------|----------|
 | 0 | [Foundations](docs/phases/phase-0-foundations.md) (MVP) | 8 / 8 | ✅ | 2026-10-07 | 2026-10-08 |
 | 1 | [Still-image PoC](docs/phases/phase-1-still-image.md) (MVP) | 11 / 11 | ✅ | 2026-10-08 | 2026-10-08 |
-| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 12 / 13 | 🟡 | 2026-10-08 | |
+| 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 13 / 13 | ✅ | 2026-10-08 | 2026-10-11 |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) (MVP) | 10 / 10 | ✅ | 2026-10-09 | 2026-10-10 |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 3 / 12 | 🟡 | 2026-10-09 | |
 | 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 3 / 11 | 🟡 | 2026-10-09 | |
@@ -60,7 +60,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P1.10** Benchmark on the dev Pi
 - [x] **P1.11** Tune and decide
 
-## Phase 2: Backend + simulated live feed 🟡
+## Phase 2: Backend + simulated live feed ✅
 - [x] **P2.1** Message models + worker API client (with flow-event outbox)
 - [x] **P2.2** Frame sources + health checks
 - [x] **P2.3** Occupancy worker
@@ -73,7 +73,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P2.10** Docker images + Compose
 - [x] **P2.11** End-to-end test
 - [x] **P2.12** Simulated camera feed from one photo (`parking simulate-feed`: cars arriving and leaving)
-- [ ] **P2.13** Generated images (`samples/generated/`) as the ground camera: check, label, evaluate, add to the replay feed
+- [x] **P2.13** Generated images (`samples/generated/`) as the ground camera: check, label, evaluate, add to the replay feed (all 12 usable and in the feed; `parking build-replay`)
 
 ## Phase 3: Mobile web app + public access ✅
 - [x] **P3.1** App shell, routing, theme
@@ -179,6 +179,10 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 
 | Date | Decision | Why |
 |------|----------|-----|
+| 2026-10-11 | P2.13: the generated images' labels are **committed** as `samples/generated/labels.json`, not `data/labels/cam-ground-generated.json` as the guide said (guide fixed) | The images are public AI-made pictures, so their labels hold nothing private; under git-ignored `data/` the hand-made labels would be lost when the dev environment is rebuilt, and the images couldn't be evaluated from a fresh checkout |
+| 2026-10-11 | P2.13: the dev camera is **one feed built from every source**, `data/replay/ground-feed` (`parking build-replay`): the 200 simulated frames, then each labelled real photo and each generated image for 6 frames (30 s), the generated ones ordered so the lot fills up and empties; one labels file for the whole feed. `cam-ground.source` points at it; `ground-sim` stays as the input | One command rebuilds it when images are added. A still needs at least 3 frames for smoothing to follow; 6 gives the app time to show it. A labels file for the feed lets `evaluate` and the API check cover every frame |
+| 2026-10-11 | P2.13: a still is used only if the shift code (P4.6) says it shows the reference view (within `shift_max_px`, or after warping back a shift of up to 10% of the width). **Too few features to measure is not "different"**: such an image is used only when a person labelled it on the slot overlay, and is printed as "checked by eye". A different shape or a large shift is listed as not usable, never forced | Three of the twelve generated images have repainted pavement (0–9 feature matches) but are plainly the same view on the overlay; refusing them would throw away the most varied images, accepting unlabelled ones would let a wrong view in |
+| 2026-10-11 | P2.13: the appearance scorer's reference now follows a **colour cast**, not only brightness (`frame_pavement`: `ab` from the free-looking slots when at least 3 agree, lightness from their per-slot ratios); with fewer it falls back to P2.12's lightness-only factor | The 11 misses on the generated images were free spaces on darker, yellower pavement: a change of light a real camera also sees (evening sun, white balance), not an artefact to skip. A first version that took the lightness from the free slots directly lost 3 of 3400 simulated spaces (free slots only on the dim side of the lot), hence the per-slot ratios. Three agreeing slots keep a few evenly painted cars from passing for pavement in a nearly full lot |
 | 2026-10-10 | P9.6: the model predicts **how far an hour ends up from the P7.6 median** (not the count itself), per zone and per lot total, from hour / weekday / month, holiday / eve / day after, the median and its spread, temperature and rain | A model that learns nothing is then exactly the median, so it can't be much worse; the holidays and the weather are precisely where the median is wrong |
 | 2026-10-10 | P9.6: gradient boosting written in **numpy** (`parking/forecast/gbm.py`: 150 trees of depth 3, lr 0.05, fixed settings), stored as JSON in `forecast_model`; no scikit-learn / LightGBM | ≤ ~9 000 rows a year per zone: a library would add tens of MB to the API image; JSON instead of pickle; fixed settings so the held-out weeks never choose anything. Easy to swap: `gbm.fit` / `predict` is the whole interface |
 | 2026-10-10 | P9.6 "beats the median on a held-out month" = trained on the hours before the **last 28 days**, compared there on the mean absolute error of the served (rounded) values, **active only if at least 3% lower**; rechecked every night; a model older than 3 days or from another feature list is not served; needs ≥ 2 weeks of hours on each side | The guide leaves the measure and the margin open. 28 days hold out every weekday equally; the margin keeps noise from switching it on; the system decides by itself, so no real data is needed to ship it |
@@ -395,6 +399,8 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 
 | Date | Phase | Metric | Value | Target | Notes |
 |------|-------|--------|-------|--------|-------|
+| 2026-10-11 | 2 | Slot accuracy, **generated images** (P2.13) | **100% (204/204)** on the 12 images in `samples/generated/`, free-precision 100%, count error 0; every threshold 0.10–0.65 gives 204/204. **Before the colour-cast fix: 94.6% (193/204)**, 11 free spaces called taken in 3 images (8 + 2 + 1), count error ≤ 1 on 83% of images | ≥ 97% | **Generated images, not evidence of real-world accuracy**: AI-made pictures of the same view with 0 to 17 of 17 spaces taken, other car colours, an extra car outside the spaces and one in the driving lane; pavement, light and reflections are the generator's. `method: appearance` @ 0.30 with `reference_empty`. The misses were on darker, yellower pavement (fixed in the scorer, see the decision log), not an artefact |
+| 2026-10-11 | 2 | Slot accuracy, the whole replay feed (P2.13) | **100% (4828/4828)** on 284 frames: simulated 3400/3400 (thresholds 0.10–0.55 as before), generated 1224/1224 (12 images × 6), real photos 204/204 (2 × 6; alone 34/34 at every threshold 0.05–0.60) | ≥ 97% | Simulated and generated frames plus two photos of one scene: it shows the scorer change broke nothing; not evidence of real-world accuracy |
 | 2026-10-08 | 1 | Slot accuracy (samples) | 70.6% (24/34; free-precision 70.6%, count error 5) | ≥ 97% | dev Pi, `yolo11n-seg` NCNN @ 1280, mask, 0.30 (best of the 0.1–0.6 sweep, all tie); 2 photos of the same scene. 0 cars detected, so every taken space is said free (P1.4 blocker) |
 | 2026-10-08 | 1 | Slot accuracy (`ground-01.jpg`, appearance) | **100% (17/17)**; free-precision 100%, count error 0 | ≥ 97% | `method: appearance`, threshold 0.30; any threshold 0.05–0.40 gives 17/17. One photo only (`ground-02.jpg` doesn't line up with the slot file, P4.6) |
 | 2026-10-08 | 1 | **Slot accuracy, chosen MVP settings (P1.11)** | **100% (34/34)**; free-precision 100%, count error 0; `analyze` 12 free / 17 on both | ≥ 97% | `ground-01.jpg` + `ground-02.jpg` (same scene, shifted framing), `k_mad 1.5`, `shadow_chroma_max 2`, threshold 0.30; free ≤ 0.02, taken ≥ 0.61; 0.05–0.60 all 34/34. With the P1.4 defaults: 33/34 (G14 on `ground-02.jpg`) |
@@ -576,3 +582,6 @@ NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occup
 
 ### 2026-10-11
 - Plan change: PoC on images, go-live as a separate track (docs/go-live.md with the dev/prod environments and the switch checklist); all blocked tasks unblocked for a PoC check; new task P2.13 (generated images).
+
+### 2026-10-15
+- P2.13: generated images as the ground camera (work and checks run 2026-10-11). All 12 images in `samples/generated/` show the reference view and are labelled (`samples/generated/labels.json`, committed); `parking build-replay` (`parking/vision/replay.py`: view check with the shift code, `ShiftDetector.aligned` warps small shifts back, `unmeasured` = labelled by eye, `--review` overlays) builds `data/replay/ground-feed` (200 simulated frames + 2 photos + 12 generated images × 6 = 284 frames) and `data/labels/cam-ground-feed.json`; `cam-ground.source` points at it. Scorer: `appearance.frame_pavement` (the reference follows a colour cast) fixed 11 misses on darker, yellower pavement: generated 204/204 (was 193/204), feed 4828/4828, simulated 3400/3400, photos 34/34. 13 new tests, backend 1153 passed, ruff clean. Dev stack worker restarted on the feed; 24 min of `/api/status` followed the labels on every frame (see the phase guide's PoC check). Phase 2 done. **Note for Iulian:** `samples/generated/234523452352345.jpg` is the real sample photo downscaled (mean pixel difference 4.7 of 255) and `4564256432534656.jpg` is that photo with cars edited out; both are public in git now. If that wasn't meant, removing them from the current tree is easy, but they stay in the history.

@@ -636,6 +636,164 @@ def simulate_feed(
     )
 
 
+@app.command("build-replay")
+def build_replay(
+    camera: Annotated[str, typer.Option(help="Camera id in the config, e.g. cam-ground.")],
+    sim: Annotated[
+        Path | None,
+        typer.Option(help="Simulated frames to include (default data/replay/<zone>-sim)."),
+    ] = None,
+    sim_labels: Annotated[
+        Path | None, typer.Option(help="Their labels (default data/labels/<camera>-sim.json).")
+    ] = None,
+    photos: Annotated[Path, typer.Option(help="Folder of labelled real photos.")] = Path(
+        "data/samples"
+    ),
+    photo_labels: Annotated[
+        Path | None, typer.Option(help="Their labels (default data/labels/<camera>.json).")
+    ] = None,
+    generated: Annotated[Path, typer.Option(help="Folder of generated images.")] = Path(
+        "samples/generated"
+    ),
+    generated_labels: Annotated[
+        Path | None, typer.Option(help="Their labels (default <generated>/labels.json).")
+    ] = None,
+    reference: Annotated[
+        Path | None,
+        typer.Option(help="The view the slots were drawn on (default: the slot file's)."),
+    ] = None,
+    hold: Annotated[int, typer.Option(help="Frames each still image stays in the feed.")] = 6,
+    out: Annotated[
+        Path | None, typer.Option(help="Folder for the feed (default data/replay/<zone>-feed).")
+    ] = None,
+    labels_out: Annotated[
+        Path | None,
+        typer.Option(help="Labels file to write (default data/labels/<camera>-feed.json)."),
+    ] = None,
+    review: Annotated[
+        Path | None,
+        typer.Option(help="Also write every still with the slots drawn on it here (to label)."),
+    ] = None,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use.")] = DEFAULT_CONFIG,
+) -> None:
+    """Build the dev replay feed from every image source: simulated frames, labelled real
+    photos and generated images that show the reference view (P2.13)."""
+    import json
+
+    import cv2
+
+    from parking.config import ConfigError, load_labels
+    from parking.vision import replay as rp
+    from parking.vision.evaluate import list_images
+    from parking.vision.shift import ShiftDetector
+
+    if hold <= 0:
+        raise typer.BadParameter("must be positive", param_hint="--hold")
+    _, cam, root = _occupancy_camera(config, camera, "build-replay")
+    slot_file = _slot_file(cam, root)
+    slot_ids = {s.id for s in slot_file.slots}
+
+    def labels_of(path: Path) -> dict:
+        if not path.is_file():
+            return {}
+        try:
+            file = load_labels(path)
+        except (ConfigError, ValueError) as e:
+            _fail(f"labels {path}: {e}")
+        if file.camera_id != camera:
+            _fail(f"labels {path} are for camera '{file.camera_id}', not '{camera}'")
+        for name, label in file.images.items():
+            unknown = sorted(set(label.taken + label.unsure) - slot_ids)
+            if unknown:
+                _fail(f"labels {path}: {name} names unknown slot(s) {', '.join(unknown)}")
+        return file.images
+
+    target = _resolve_out(out or Path(f"data/replay/{cam.zones[0]}-feed"), root)
+    labels_target = _resolve_out(labels_out or Path(f"data/labels/{camera}-feed.json"), root)
+    target.mkdir(parents=True, exist_ok=True)
+    rp.clear(target, ("a-sim-", "b-photo-", "c-gen-"))
+    feed: dict = {}
+
+    def add(name: str, label) -> None:
+        feed[name] = label.model_dump()
+
+    # a: the simulated frames, as they are
+    sim_dir = _resolve(sim or Path(f"data/replay/{cam.zones[0]}-sim"), root)
+    sim_images = labels_of(_resolve(sim_labels or Path(f"data/labels/{camera}-sim.json"), root))
+    n_sim = 0
+    for path in list_images(sim_dir) if sim_dir.is_dir() else []:
+        if path.name in sim_images:
+            rp.link(path, target / f"a-sim-{path.name}")
+            add(f"a-sim-{path.name}", sim_images[path.name])
+            n_sim += 1
+    if not n_sim:
+        typer.echo(f"no labelled simulated frames in {sim_dir} (parking simulate-feed makes them)")
+
+    # b, c: still images, only those that show the reference view
+    stills = []
+    for kind, folder, labels_path in (
+        ("photo", _resolve(photos, root), photo_labels or Path(f"data/labels/{camera}.json")),
+        ("gen", _resolve(generated, root), generated_labels or generated / "labels.json"),
+    ):
+        found = list_images(folder) if folder.is_dir() else []
+        stills.append((kind, found, labels_of(_resolve(labels_path, root)), labels_path))
+    detector = None
+    if any(found for _, found, _, _ in stills):
+        ref_path = reference or (
+            Path(slot_file.reference_image) if slot_file.reference_image else None
+        )
+        ref = cv2.imread(str(_resolve(ref_path, root))) if ref_path else None
+        if ref is None:
+            _fail(
+                f"can't read the reference image ({ref_path or 'none in the slot file'}): "
+                "the still images are checked against it (--reference)"
+            )
+        detector = ShiftDetector(ref, slot_file, cam.health)
+    review_dir = _resolve_out(review, root) if review else None
+    if review_dir:
+        review_dir.mkdir(parents=True, exist_ok=True)
+    used = {"photo": 0, "gen": 0}
+    left_out = 0
+    for kind, found, images, labels_path in stills:
+        checks = {p.name: rp.check_view(cv2.imread(str(p)), detector) for p in found}
+        for p in found:
+            c = checks[p.name]
+            if review_dir and c.image is not None:
+                cv2.imwrite(str(review_dir / f"{p.stem}.jpg"), rp.overlay(c.image, slot_file))
+            if c.usable and p.name not in images:
+                typer.echo(
+                    f"  {p.name}: not in the feed, not labelled in {labels_path} ({c.reason})"
+                )
+            elif not c.usable:
+                typer.echo(f"  {p.name}: not usable with this slot file, {c.reason}")
+            else:
+                typer.echo(f"  {p.name}: {c.status}, {c.reason}")
+        ready = [n for n, c in checks.items() if c.usable and n in images]
+        left_out += len(found) - len(ready)
+        order = rp.up_and_down(ready, images) if kind == "gen" else sorted(ready)
+        prefix = "b-photo" if kind == "photo" else "c-gen"
+        for i, name in enumerate(order, 1):
+            stem = f"{prefix}-{i:02}-{Path(name).stem}"
+            try:
+                frames = rp.hold(checks[name].image, target, stem, hold)
+            except OSError as e:
+                _fail(str(e))
+            for frame in frames:
+                add(frame, images[name])
+            used[kind] += 1
+    if not feed:
+        _fail("nothing to put in the feed: no simulated frames and no usable labelled image")
+    labels_target.parent.mkdir(parents=True, exist_ok=True)
+    labels_target.write_text(
+        json.dumps({"version": 1, "camera_id": camera, "images": feed}, indent=1) + "\n"
+    )
+    typer.echo(
+        f"{len(feed)} frame(s) -> {target}: {n_sim} simulated, {used['photo']} photo(s) and "
+        f"{used['gen']} generated image(s) x {hold}; {left_out} image(s) left out; "
+        f"labels -> {labels_target}"
+    )
+
+
 @app.command("bootstrap-slots")
 def bootstrap_slots(
     image: Annotated[Path, typer.Option(help="Image of the lot when it's busy.")],

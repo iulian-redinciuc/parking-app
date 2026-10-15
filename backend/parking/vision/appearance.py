@@ -22,6 +22,9 @@ GAIN_RANGE = (0.5, 2.0)  # frame / reference lightness a slot may vote for
 GAIN_CHROMA_MAX = 4.0  # ... if its a,b are this close to the reference's (scaled)
 GAIN_SPREAD_MAX = 1.5  # ... and its colours spread at most this much wider than the reference's
 GAIN_TOL = 0.04  # votes this close agree
+CAST_MAX = 8.0  # how far the frame's pavement a,b may be from the reference's (a colour cast)
+CAST_TOL = 3.0  # slots whose a,b are this close agree on the cast
+CAST_MIN_SLOTS = 3  # fewer agreeing slots than this → lightness only (`illumination`)
 
 
 def _corners(points: Sequence[Sequence[float]]) -> np.ndarray:
@@ -89,6 +92,45 @@ def illumination(labs: Sequence[np.ndarray], ref_labs: Sequence[np.ndarray]) -> 
     return float(np.median(max(groups, key=len)))
 
 
+def frame_pavement(
+    labs: Sequence[np.ndarray], ref_labs: Sequence[np.ndarray], ref_colour: np.ndarray
+) -> np.ndarray | None:
+    """The reference pavement colour as this frame's light shows it, from the slots that
+    still look empty.
+
+    The light changes more than its strength: a warmer or cooler cast, another white balance.
+    A slot is a candidate when its lightness is plausible against its own reference crop, the
+    crop is as even as the reference's and its median a,b lie within `CAST_MAX` of the
+    reference pavement's. The largest group of candidates that agree on a,b (`CAST_TOL`)
+    gives the colour: a,b are the median of their pooled pixels, and the lightness is the
+    reference's times the median of their lightness ratios (per slot against its own
+    reference crop, so it doesn't matter whether the free slots are in the bright or the dim
+    part of the lot). None when fewer than `CAST_MIN_SLOTS` agree (a nearly full lot), so a
+    few evenly painted cars can't pass for pavement.
+    """
+    found = []
+    for lab, ref in zip(labs, ref_labs, strict=True):
+        px, ref_px = lab.reshape(-1, 3), ref.reshape(-1, 3)
+        m, r = np.median(px, axis=0), np.median(ref_px, axis=0)
+        ratio = float(m[0] / max(float(r[0]), 1e-6))
+        if (
+            GAIN_RANGE[0] <= ratio <= GAIN_RANGE[1]
+            and np.linalg.norm(m[1:] - ref_colour[1:]) <= CAST_MAX
+            and _spread(px, m) <= GAIN_SPREAD_MAX * _spread(ref_px, r) + 1
+        ):
+            found.append((m[1:], px[:, 1:], ratio))
+    if len(found) < CAST_MIN_SLOTS:
+        return None
+    ab = np.array([f[0] for f in found])
+    groups = [np.flatnonzero(np.linalg.norm(ab - x, axis=1) <= CAST_TOL) for x in ab]
+    best = max(groups, key=len)
+    if len(best) < CAST_MIN_SLOTS:
+        return None
+    gain = float(np.median([found[i][2] for i in best]))
+    cast = np.median(np.concatenate([found[i][1] for i in best]), axis=0)
+    return np.array([ref_colour[0] * gain, cast[0], cast[1]], dtype=ref_colour.dtype)
+
+
 def non_pavement(lab: np.ndarray, colour: np.ndarray, spread: float, p: AppearanceCfg):
     """Boolean mask of pixels that don't look like pavement (shadows count as pavement)."""
     limit = max(p.k_mad * spread, p.min_delta_e)
@@ -126,8 +168,10 @@ def score_slots_appearance(
 
     `frame` is BGR at `frame_size`; slot polygons are in `image_size` pixels and are rescaled.
     `reference` (an image of the empty lot, any size) is used for the pavement colour instead
-    of pooling the slots, which only works while about half the slots are free; its colour is
-    scaled to the frame's light (`illumination`).
+    of pooling the slots, which only works while about half the slots are free. Its colour
+    follows the frame's light: the colour of the slots that still look empty
+    (`frame_pavement`), or the reference's scaled to the frame's lightness (`illumination`)
+    when too few are left.
     """
     p = params or AppearanceCfg()
     polys = [_scaled(s.polygon, image_size, frame_size) for s in slots]
@@ -137,7 +181,8 @@ def score_slots_appearance(
         ref_polys = [_scaled(s.polygon, image_size, (rw, rh)) for s in slots]
         ref_labs = [to_lab(slot_crop(reference, q, p.inset)) for q in ref_polys]
         colour, spread = pavement_model(ref_labs)
-        colour = colour * illumination(labs, ref_labs)  # the light changes, the reference doesn't
+        seen = frame_pavement(labs, ref_labs, colour)  # the light changes, the reference doesn't
+        colour = seen if seen is not None else colour * illumination(labs, ref_labs)
     else:
         colour, spread = pavement_model(labs) if labs else (np.zeros(3), 0.0)
     results = []

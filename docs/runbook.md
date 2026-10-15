@@ -331,7 +331,9 @@ uv tool install pre-commit && pre-commit install          # gitleaks + ruff befo
 (cd backend && uv run parking models export --model yolo11n-seg --imgsz 1280 && uv run parking models export --model yolo11n --imgsz 640)
 
 # 5. the stack: a simulated camera feed from the one photo, then the API and the occupancy worker
-(cd backend && uv run parking simulate-feed --camera cam-ground --base data/samples/ground-01.jpg --frames 200 --seed 1 --day)
+(cd backend && uv run parking simulate-feed --camera cam-ground --base data/samples/ground-01.jpg --frames 200 --seed 1 --day \
+  && cp -n ../data/samples/ground-01.jpg ../data/reference/cam-ground.jpg \
+  && uv run parking build-replay --camera cam-ground)   # + the photo and samples/generated/ -> data/replay/ground-feed
 cd deploy
 [ -f .env ] || { cp .env.example .env && chmod 600 .env \
   && sed -i "s/^WORKER_TOKEN=.*/WORKER_TOKEN=$(openssl rand -hex 32)/; s/^DOCKER_GID=.*/DOCKER_GID=$(getent group docker | cut -d: -f3)/" .env; }
@@ -350,7 +352,8 @@ docker compose ps && curl -s localhost:8000/api/status | head -c 300
 | Symptom | Fix |
 |---------|-----|
 | `set DOCKER_GID in .env` | `getent group docker \| cut -d: -f3` into `DOCKER_GID` |
-| The worker is `unhealthy`, its log says `no images in data/replay/ground-sim` | Step 5's `simulate-feed` wasn't run (the frames are git-ignored) |
+| The worker is `unhealthy`, its log says `no images in data/replay/ground-feed` | Step 5's `simulate-feed` and `build-replay` weren't run (the frames are git-ignored) |
+| New images in `samples/generated/` don't show up | `uv run parking build-replay --camera cam-ground --review out/replay-review`: it says per image whether it shows the reference view; label the new ones in `samples/generated/labels.json` from the overlays in `out/replay-review/`, run it again (the worker picks the new frames up at its next loop) |
 | `simulate-feed` can't find the photo or its labels | Step 3: they are private and not in the repository. Any photo of the lot works after drawing slots and labels for it in [tools/slot-editor](../tools/slot-editor/README.md) |
 | Port 8000 is taken | `API_HOST_PORT` in `.env` |
 | `Permission denied` in `data/` from a container | The containers run as uid 1000: the folder must belong to that user (`id -u`) |

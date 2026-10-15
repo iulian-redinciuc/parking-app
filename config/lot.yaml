@@ -33,7 +33,7 @@ cameras:
   - id: cam-ground
     role: occupancy                # occupancy | flow
     zones: [ground]                # zones this camera reports on
-    source: "folder:data/replay/ground-sim?interval=5&loop=true"   # simulated feed (P2.12: `parking simulate-feed`)
+    source: "folder:data/replay/ground-feed?interval=5&loop=true"   # every image source in one feed (P2.13: `parking build-replay`)
     # Phase 4:  "snapshot:${CAM_GROUND_SNAPSHOT_URL}" (preferred)  or  "rtsp:${CAM_GROUND_RTSP_URL}"
     sample_every_s: 5
     slots_file: config/slots/cam-ground.json
