@@ -81,6 +81,8 @@ parking track-check --camera cam-ramp --source "video:data/recordings/cam-ramp-<
 
 **Done when:** on a clip, each passing car keeps one track id from entering to leaving the frame (inspect with an annotated video export: `--debug-video out.mp4`).
 
+**PoC check (2026-10-15):** no Camera A recording, so P5.3's synthetic off-peak clip of the rendered ramp (`synth_ramp.py --clip 20 --cars 6`: 20 min, 640×360, 10 fps, 6 drawn cars at 8–15 km/h, 3 in each direction). `parking track-check --camera cam-ramp --source "video:data/recordings/cam-ramp-synthetic-offpeak.mp4?realtime=false" --seconds 1200 --debug-video out/tracks/cam-ramp.mp4` with the committed `cam-ramp` lines and detector (NCNN `yolo11n` @ 640, conf 0.4) on the dev Pi (2 min 23 s): 12 000 frames, 413 gated in (150 ms each), **6 tracks for 6 cars** (#1, #3, #4, #6, #8, #10), each running from one edge of the lane to the other across both lines (e.g. #1 (542,276) → (75,294), #4 (43,293) → (561,274)), 6 resets (one 10 s after each car). The annotated video was checked by eye on a contact sheet of every pass: one box and one id per car, no second id. `yolo11n` sees the drawn cars only on some frames (11–34 of the ~45–90 a car is in view, rarely while it is half out of the frame), so this mostly shows that ByteTrack carries an id across missed detections; the ids skip numbers because ByteTrack also numbers tracks that never confirm. Real cars, headlights, two cars at once and a car stopping on the ramp are in [go-live.md §3](../go-live.md#p54-tracker-integration).
+
 ## P5.5: Two-line counter
 **Files:** `parking/vision/flow.py`, tests
 
