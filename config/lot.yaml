@@ -62,11 +62,12 @@ cameras:
         reference_empty: data/reference/cam-ground-empty.jpg   # written by `parking simulate-feed`
     smoothing:
       consistent_readings: 3
-    health:
-      black_mean_max: 12
-      frozen_diff_max: 0.5
+    health:                        # P4.4 PoC: tuned on a lit day of images (`parking light-feed`);
+                                   # retune on the real camera's 24 h (go-live.md §3, P4.4)
+      black_mean_max: 13           # 1/2 x p1 of the darkest valid frames (dusk ~27)
+      frozen_diff_max: 0.12        # quiet daytime frames differ by only ~0.23
       frozen_frames: 6
-      blur_laplacian_min: 40
+      blur_laplacian_min: 6        # IR night ~24-50, night rain ~11 (the default 40 flagged them)
       shift_check_every_s: 300
       shift_max_px: 8
 

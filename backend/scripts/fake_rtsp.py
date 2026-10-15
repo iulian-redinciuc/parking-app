@@ -13,7 +13,9 @@ since a bigger one (a 5 MP keyframe) overflows the local UDP port's buffer and b
 With `--snapshot-port` it also answers HTTP GETs on any path with a JPEG, like a camera's
 snapshot URL: the slideshow's current image as it is on disk (a clip or the test pattern: its
 first frame). With `--auth user:pass` (or FAKE_CAMERA_AUTH) both need that login: basic auth
-for RTSP, digest for HTTP (`--http-auth basic` for basic), as many cameras do.
+for RTSP, digest for HTTP (`--http-auth basic` for basic), as many cameras do. With `--cover IMG`,
+SIGUSR1 "covers the lens": snapshots return IMG until the next SIGUSR1 (P4.4's lens test;
+`docker kill -s USR1 <container>`). The RTSP stream isn't covered.
 
     python3 scripts/fake_rtsp.py --input ../data/replay/ground-feed --size native --fps 2 \
         --hold-s 5 --snapshot-port 8080 --auth admin:secret
@@ -170,12 +172,22 @@ class Server(socketserver.ThreadingTCPServer):
 class Stills:
     """The JPEG a snapshot returns: the slideshow's current image (same clock as FFmpeg's)."""
 
-    def __init__(self, files: list[Path], hold_s: float):
+    def __init__(self, files: list[Path], hold_s: float, cover: Path | None = None):
         self.files = files
         self.hold_s = hold_s
         self.t0 = time.monotonic()
+        self.cover = cover
+        self.covered = False
+
+    def toggle_cover(self) -> None:
+        if self.cover is not None:
+            self.covered = not self.covered
+            state = "covered" if self.covered else "uncovered"
+            print(f"lens {state} at {time.strftime('%Y-%m-%dT%H:%M:%S%z')}", flush=True)
 
     def current(self) -> bytes:
+        if self.covered and self.cover is not None:
+            return self.cover.read_bytes()
         i = int((time.monotonic() - self.t0) / self.hold_s) % len(self.files)
         return self.files[i].read_bytes()
 
@@ -318,6 +330,7 @@ def main() -> int:
         help="user:pass required by RTSP and HTTP (default: $FAKE_CAMERA_AUTH; none: no login)",
     )
     p.add_argument("--http-auth", choices=("digest", "basic"), default="digest")
+    p.add_argument("--cover", type=Path, help="JPEG snapshots return after SIGUSR1 (lens covered)")
     args = p.parse_args()
     if shutil.which("ffmpeg") is None:
         print("ffmpeg not found (run this in the vision container)", file=sys.stderr)
@@ -357,7 +370,8 @@ def main() -> int:
             cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", *src]
             subprocess.run([*cmd, "-frames:v", "1", "-q:v", "3", str(still)], check=True)
             files = [still]
-        stills = Stills(files, args.hold_s)
+        stills = Stills(files, args.hold_s, args.cover)
+        signal.signal(signal.SIGUSR1, lambda *_: stills.toggle_cover())
         snap = SnapshotServer(args.snapshot_port, stills, args.auth, args.http_auth)
         threading.Thread(target=snap.serve_forever, daemon=True).start()
     print(f"serving rtsp://127.0.0.1:{args.port}/sub ({args.size} @ {args.fps:g} fps)", flush=True)

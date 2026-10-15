@@ -1754,6 +1754,78 @@ def health_stats(
         typer.echo(report(hours, total, cam.health))
 
 
+@app.command("light-feed")
+def light_feed(
+    source: Annotated[Path, typer.Option(help="Folder of daytime frames to light.")] = Path(
+        "data/replay/ground-feed"
+    ),
+    out: Annotated[Path, typer.Option(help="Folder for the lit frames.")] = Path(
+        "data/replay/ground-lit"
+    ),
+    frames: Annotated[int, typer.Option(help="Frames in the day (240 = one every 6 min).")] = 240,
+    start_hour: Annotated[float, typer.Option(help="Lot-local hour of the first frame.")] = 12.0,
+    rain: Annotated[
+        str, typer.Option(help="Rainy hours, e.g. '14-16,22-23' (empty: none).")
+    ] = "14-16,22-23",
+    cover: Annotated[
+        Path | None,
+        typer.Option(help="Also write a lens-cover image here (default <out>-cover.jpg)."),
+    ] = None,
+    seed: Annotated[int, typer.Option(help="Same seed, same frames.")] = 1,
+    quality: Annotated[int, typer.Option(help="JPEG quality of the frames.")] = 90,
+    config: Annotated[Path, typer.Option(help="lot.yaml to use (for the repo root).")] = (
+        DEFAULT_CONFIG
+    ),
+) -> None:
+    """Make 24 h of light (day, dusk, IR night, rain) from daytime frames, to tune and check
+    the frame-health thresholds on images (P4.4, vision.md §5)."""
+    import cv2
+
+    from parking.vision import lighting
+    from parking.vision.simulate import frame_name
+
+    if frames <= 0:
+        raise typer.BadParameter("must be positive", param_hint="--frames")
+    try:
+        spans = [tuple(float(x) for x in s.split("-")) for s in rain.split(",") if s.strip()]
+        if any(len(s) != 2 for s in spans):
+            raise ValueError
+    except ValueError:
+        raise typer.BadParameter("hours like '14-16,22-23'", param_hint="--rain") from None
+    root = _find_config(config).resolve().parent.parent
+    src = _resolve(source, root)
+    files = sorted(f for f in src.glob("*") if f.suffix.lower() in {".jpg", ".jpeg", ".png"})
+    if not files:
+        _fail(f"no images in {src}")
+    target = _resolve_out(out, root)
+    target.mkdir(parents=True, exist_ok=True)
+    for old in target.glob("frame-*.jpg"):
+        old.unlink()
+    notes = {}
+    shape = None
+    for i in range(frames):
+        hour = (start_hour + 24 * i / frames) % 24
+        wet = any(a <= hour < b for a, b in spans)
+        image = cv2.imread(str(files[i % len(files)]))
+        if image is None:
+            _fail(f"can't read {files[i % len(files)]}")
+        shape = image.shape
+        lit, how = lighting.light(image, hour, wet, seed, i)
+        name = frame_name(i)
+        if not cv2.imwrite(str(target / name), lit, [cv2.IMWRITE_JPEG_QUALITY, quality]):
+            _fail(f"can't write {target / name}")
+        notes[name] = {"hour": round(hour, 2), "phase": how.phase, "rain": wet}
+    (target / "lighting.json").write_text(json.dumps(notes, indent=1) + "\n")
+    cover_path = _resolve_out(cover or Path(f"{out}-cover.jpg"), root)
+    cv2.imwrite(str(cover_path), lighting.covered(shape, seed), [cv2.IMWRITE_JPEG_QUALITY, quality])
+    counts = {p: sum(n["phase"] == p for n in notes.values()) for p in ("day", "dusk", "night")}
+    typer.echo(
+        f"{frames} frame(s) from {len(files)} image(s) -> {target} ("
+        + ", ".join(f"{v} {k}" for k, v in counts.items())
+        + f", {sum(n['rain'] for n in notes.values())} in rain), lens cover -> {cover_path}"
+    )
+
+
 def _flow_zone(config: Path, zone: str):
     """Load lot.yaml and return `(lot, root)`; exits unless `zone` is a flow zone."""
     from parking.config import ConfigError, cli_env, load_lots

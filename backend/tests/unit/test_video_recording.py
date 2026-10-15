@@ -543,3 +543,24 @@ def test_worker_logging_keeps_httpx_quiet():
 
     _worker_logging("info")
     assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING
+
+
+def test_fake_camera_lens_cover_toggles_the_snapshot(tmp_path):
+    # P4.4: SIGUSR1 "covers the lens" (snapshots return the cover image) until the next one
+    import importlib.util
+
+    script = Path(__file__).parents[2] / "scripts" / "fake_rtsp.py"
+    spec = importlib.util.spec_from_file_location("fake_rtsp", script)
+    fake = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fake)
+    (tmp_path / "a.jpg").write_bytes(b"view")
+    (tmp_path / "cover.jpg").write_bytes(b"dark")
+    stills = fake.Stills([tmp_path / "a.jpg"], 5.0, tmp_path / "cover.jpg")
+    assert stills.current() == b"view"
+    stills.toggle_cover()
+    assert stills.current() == b"dark"
+    stills.toggle_cover()
+    assert stills.current() == b"view"
+    plain = fake.Stills([tmp_path / "a.jpg"], 5.0)
+    plain.toggle_cover()  # no --cover: nothing to show
+    assert plain.current() == b"view"
