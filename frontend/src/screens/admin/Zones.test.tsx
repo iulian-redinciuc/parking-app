@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { adminLogin, MOCK_ADMIN_PASSWORD, setAdminToken } from '../../api/client'
@@ -37,6 +37,8 @@ describe('Zones (count corrections)', () => {
     await act(async () => {})
     expect(await screen.findByText('No corrections yet.')).toBeInTheDocument()
     const form = screen.getByRole('form', { name: 'Underground' })
+    // The feed may not have delivered yet: an empty count would read as 0.
+    await waitFor(() => expect(screen.getByTestId('live')).not.toBeEmptyDOMElement())
     const before = Number(screen.getByTestId('live').textContent)
     const target = before === 12 ? 13 : 12
 
