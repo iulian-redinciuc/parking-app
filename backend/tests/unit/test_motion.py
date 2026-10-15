@@ -213,3 +213,29 @@ def test_cli_motion_check_without_line_file(tmp_path):
     result = runner.invoke(app, [*args, "--seconds", "30"])
     assert result.exit_code == 0, result.output
     assert "whole frame" in result.output and "1 burst(s)" in result.output
+
+
+# --- the synthetic ramp clip (backend/scripts/synth_ramp.py, P5.3 PoC) ---
+
+
+def test_textured_first_frame_only_teaches_the_background():
+    """MOG2 marks parts of a textured first frame foreground: that must not open the gate,
+    neither at the start nor after a reset (reconnect). Here: the empty ramp with the committed
+    cam-ramp ROI, where it used to (largest area ~7000 px on frame 0)."""
+    import importlib.util
+    from pathlib import Path
+
+    from parking.config import load_lines
+
+    root = Path(__file__).resolve().parents[3]
+    spec = importlib.util.spec_from_file_location(
+        "synth_ramp", root / "backend" / "scripts" / "synth_ramp.py"
+    )
+    synth = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(synth)
+    frames = [img for img, _ in synth.clip_frames(0.1, cars=0)]  # 6 s, empty ramp
+    assert len(frames) == 60
+    gate = MotionGate(MIN_AREA, load_lines(root / "config" / "lines" / "cam-ramp.json"))
+    assert not any(r.active for r in run(gate, frames))
+    gate.reset()
+    assert not any(r.active for r in run(gate, frames, start=60))

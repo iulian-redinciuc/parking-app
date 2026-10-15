@@ -62,6 +62,8 @@ parking motion-check --camera cam-ramp --source "video:data/recordings/cam-ramp-
 
 **Done when:** on a recorded clip, the gate is active for < 20% of an off-peak hour (log the ratio): `motion-check` prints the share and exits 0.
 
+**PoC check (2026-10-15):** no Camera A recording, so a synthetic off-peak clip of the rendered ramp view: `uv run python scripts/synth_ramp.py --clip 20 --cars 6 ../data/recordings/cam-ramp-synthetic-offpeak.mp4` (640×360, 10 fps, mp4v, 20 min = the loop's cap instead of an hour; fresh sensor noise every frame, the light drifting ±3%, 6 cars at 8–15 km/h, i.e. 18 an hour, a car in view in 2.8% of frames). `parking motion-check --camera cam-ramp --source "video:data/recordings/cam-ramp-synthetic-offpeak.mp4?realtime=false" --seconds 1200` with the committed `cam-ramp` lines and `motion_min_area_px: 1500`: 12 000 frames over 1 200 s, **gate active 3.4%** (413 frames) in 6 bursts, one per car, ok, exit 0. The first run found a bug: on this textured scene MOG2 marked ~7 000 px of the first frame foreground, so the gate opened for 2 s at the start (and would after every reset/reconnect: 7 bursts, 3.6%); the first frame after a reset now only teaches the background (1 new test). A drawn clip has no headlights, reflections, people or real compression noise; the real check is in [go-live.md §3](../go-live.md#p53-motion-gate).
+
 ## P5.4: Tracker integration
 **Files:** `parking/vision/tracking.py`
 

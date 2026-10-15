@@ -14,8 +14,8 @@ costs almost no CPU. Per frame:
 4. It stays active for `HOLD_S` after the last motion, so a car that stops on the ramp keeps
    being tracked.
 
-The first frame only teaches the model the background (MOG2 marks it all shadow). A frame of
-another size starts over with a fresh model.
+The first frame only teaches the model the background (it's never motion: on a textured
+scene MOG2 marks parts of it foreground). A frame of another size starts over with a fresh model.
 """
 
 from __future__ import annotations
@@ -66,6 +66,7 @@ class MotionGate:
         self._subtractor: cv2.BackgroundSubtractorMOG2 | None = None
         self._size: tuple[int, int] | None = None
         self._last_motion: float | None = None
+        self._learning = True  # the next frame only teaches the background
 
     def _setup(self, w: int, h: int) -> None:
         self._size = (w, h)
@@ -109,7 +110,11 @@ class MotionGate:
             work = cv2.resize(work, self._work, interpolation=cv2.INTER_AREA)
         if self._mask is not None:
             work = cv2.bitwise_and(work, work, mask=self._mask)
+        first = self._learning
+        self._learning = False
         fg = self._subtractor.apply(work)
+        if first:
+            return MotionResult(False, False, 0.0)
         fg[fg == SHADOW] = 0
         fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, self._kernel)
         contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
