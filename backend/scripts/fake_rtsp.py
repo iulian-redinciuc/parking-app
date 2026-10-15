@@ -261,8 +261,12 @@ def image_files(path: Path) -> list[Path]:
 
 
 def ffmpeg_command(args: argparse.Namespace, rtp_port: int, sdp_file: Path) -> list[str]:
-    cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-re"]
     images = image_files(args.input) if args.input else []
+    cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error"]
+    # -re paces the input; a slideshow's input is one image per --hold-s, so it is paced on
+    # the output instead (the realtime filter below), or each image's frames go out in a burst
+    if not images:
+        cmd.append("-re")
     if images:  # a slideshow: each image for --hold-s seconds, round and round
         cmd += ["-loop", "1", "-framerate", f"1/{args.hold_s:g}"]
         if args.input.is_dir():
@@ -282,9 +286,14 @@ def ffmpeg_command(args: argparse.Namespace, rtp_port: int, sdp_file: Path) -> l
     # Cap every frame's size (VBV).
     vbv_kbit = int(args.max_frame_kb * 8)
     cmd += ["-maxrate", f"{max(1, int(vbv_kbit * args.fps / 2))}k", "-bufsize", f"{vbv_kbit}k"]
+    filters = []
     if args.input and args.size != "native":
         w, h = args.size.split("x")
-        cmd += ["-vf", f"scale={w}:{h}"]
+        filters.append(f"scale={w}:{h}")
+    if images:
+        filters += [f"fps={args.fps}", "realtime"]
+    if filters:
+        cmd += ["-vf", ",".join(filters)]
     # SPS/PPS before every keyframe, like a camera, so a client joining mid-stream decodes
     cmd += ["-bsf:v", "dump_extra=freq=keyframe"]
     cmd += ["-f", "rtp", "-sdp_file", str(sdp_file), f"rtp://127.0.0.1:{rtp_port}?pkt_size=1200"]

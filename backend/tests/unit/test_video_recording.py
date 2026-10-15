@@ -536,6 +536,28 @@ def test_fake_camera_caps_each_encoded_frame(tmp_path):
     assert cmd[cmd.index("-maxrate") + 1] == "960k"  # half a buffer per frame at 2 fps
 
 
+def test_fake_camera_paces_a_slideshow_on_the_output(tmp_path):
+    # P5.2: -re on a slideshow paced the input (one image per --hold-s), so each image's
+    # frames went out in one burst every 5 s and the RTSP source saw ~4 fps with 5-s gaps
+    import argparse
+    import importlib.util
+
+    script = Path(__file__).parents[2] / "scripts" / "fake_rtsp.py"
+    spec = importlib.util.spec_from_file_location("fake_rtsp", script)
+    fake = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fake)
+    (tmp_path / "a.jpg").write_bytes(b"view")
+    args = argparse.Namespace(
+        input=tmp_path / "a.jpg", size="640x360", fps=10.0, gop_s=2.0, hold_s=5.0, max_frame_kb=120
+    )
+    cmd = fake.ffmpeg_command(args, 50000, tmp_path / "s.sdp")
+    assert "-re" not in cmd
+    assert cmd[cmd.index("-vf") + 1] == "scale=640:360,fps=10.0,realtime"
+    args.input = None  # the test pattern: paced on the input as before
+    cmd = fake.ffmpeg_command(args, 50000, tmp_path / "s.sdp")
+    assert "-re" in cmd and "-vf" not in cmd
+
+
 def test_worker_logging_keeps_httpx_quiet():
     import logging
 

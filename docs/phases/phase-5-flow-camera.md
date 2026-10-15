@@ -47,6 +47,8 @@ Without Camera A, `backend/scripts/fake_rtsp.py` (run where FFmpeg is, e.g. the 
 
 **Done when:** a 1-hour recording plays back, and the source reports a steady fps (on the real Camera A: `record --minutes 60` exits 0, and `stream-check` exits 0 both on the live camera and on the recording with `video:`).
 
+**PoC check (2026-10-15):** on the vision image (`parking-p52-poc`, this commit's code) against `backend/scripts/fake_rtsp.py` serving the rendered ramp frame (`data/reference/cam-ramp.jpg`, 640×360, 10 fps, keyframe every 2 s) as `cam-ramp`'s `CAM_RAMP_RTSP_URL`, shortened to 15 min: `record --camera cam-ramp --minutes 15` → 900.7 s, h264 640×360, 9 007 frames, 10.00 fps, 27.8 MB, exit 0; at the same time `stream-check --camera cam-ramp --seconds 840 --window 60` on the live `rtsp:` source → 8 400 frames, every window 10.00 fps, longest gap 0.11 s, 1 dropped, 0 reconnects, steady, exit 0. A recording from the same setup played back with `video:` (realtime, 5 min, 60-s windows) → 3 002 frames, 10.00 fps, longest gap 0.10 s, steady, exit 0, and decoded in full with `realtime=false` (9 007 frames in 5.3 s). A first run with `pytest` loading the CPU at the same time had one 1.28-s gap in the live check (not steady), so it was run again with nothing else on the CPU. This check found a bug in the fake camera: a slideshow went out in 5-s bursts (3.6–4.2 fps); it is now paced on the output. The 1-hour length was run on the test pattern on 2026-10-10 (session log); the real Camera A check is in [go-live.md §3](../go-live.md#p52-low-latency-rtsp-video-source-and-parking-record).
+
 ## P5.3: Motion gate
 **Files:** `parking/vision/motion.py`, tests
 
