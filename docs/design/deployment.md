@@ -98,6 +98,7 @@ Files:
 | `docker-compose.dev.yml` | Dev Pi: builds images locally, mounts source for quick iteration |
 | `docker-compose.site.yml` | T2 lot box: vision services and `autoheal` only, `API_INTERNAL_URL` = the API's VPN address |
 | `docker-compose.device.yml` | Opt-in override (on the base or the site file): passes one USB camera to `vision-occupancy` (§4.3) |
+| `docker-compose.fake-camera.yml` | Dev / rehearsal only: a fake network camera (`backend/scripts/fake_rtsp.py` playing an image folder, RTSP + snapshot with a login) on an `internal` "camera VLAN" network that `vision-occupancy` joins; for trying `scripts/camera-check.sh` without a camera (P4.2) |
 | `docker-compose.picamera.yml` + `Dockerfile.picamera` | Opt-in override (on the base or the site file): `vision-occupancy` with `rpicam-vid` and the Pi camera's device nodes (§4.3) |
 | `docker-compose.server.yml` | T2 server: API + public entry only (`--profile web`: `parking-web`, Caddy + the frontend; or `--profile public`: the Cloudflare tunnel) |
 

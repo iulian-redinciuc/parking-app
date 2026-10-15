@@ -1,0 +1,42 @@
+# Dev / rehearsal only (P4.2): a fake network camera on its own "camera VLAN", so the network setup of
+# the lot (hardware.md §3) and scripts/camera-check.sh can be tried on the dev Pi with images.
+# Spec: docs/design/hardware.md §3 · Guide: docs/phases/phase-4-occupancy-camera.md P4.2
+#   docker compose -p parking-rehearsal -f docker-compose.site.yml -f docker-compose.fake-camera.yml up -d fake-camera
+#   ./scripts/camera-check.sh -p parking-rehearsal -f docker-compose.site.yml -f docker-compose.fake-camera.yml
+# .env: FAKE_CAMERA_AUTH=user:pass and the camera URLs pointing at its fixed address, e.g.
+#   CAM_GROUND_RTSP_URL=rtsp://user:pass@10.99.20.11:8554/sub
+#   CAM_GROUND_SNAPSHOT_URL=http://user:pass@10.99.20.11:8080/cgi-bin/snapshot.jpg
+# The camera network is `internal`: no route to the internet (the rule "camera VLAN -> internet: block"),
+# and only containers attached to it reach the camera ("vision host -> camera VLAN: allow"); the host
+# reaches 10.99.20.11 through the network's bridge, like the vision host on the camera VLAN.
+# Never on a production machine: the real cameras replace this service.
+
+services:
+  fake-camera:
+    # the vision image has FFmpeg and Python; the script and the image feed come from the checkout
+    image: ghcr.io/iulian-redinciuc/parking-vision:${PARKING_VERSION:?set PARKING_VERSION}
+    entrypoint: ["/app/backend/.venv/bin/python", "/fake/fake_rtsp.py"]
+    command: ["--input", "/feed", "--size", "native", "--fps", "2", "--hold-s", "5",
+              "--port", "8554", "--snapshot-port", "8080"]
+    environment:
+      FAKE_CAMERA_AUTH: "${FAKE_CAMERA_AUTH:?set FAKE_CAMERA_AUTH=user:pass in .env}"
+    volumes:
+      - ${FAKE_CAMERA_SCRIPT:-../backend/scripts/fake_rtsp.py}:/fake/fake_rtsp.py:ro
+      - ${FAKE_CAMERA_FEED:-../data/replay/ground-feed}:/feed:ro
+    networks:
+      camera: { ipv4_address: 10.99.20.11 }                    # a static IP, like a DHCP reservation
+    read_only: true
+    tmpfs: ["/tmp:size=16m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    user: "1000:1000"
+    restart: "no"
+    deploy: { resources: { limits: { cpus: "1.0", memory: 256M } } }
+
+  vision-occupancy:
+    networks: [egress, camera]                                 # the API / VPN, and the cameras
+
+networks:
+  camera:
+    internal: true
+    ipam: { config: [{ subnet: 10.99.20.0/24 }] }

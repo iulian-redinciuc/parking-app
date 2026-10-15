@@ -34,16 +34,19 @@
 6. Put the URLs in the vision host's `deploy/.env`.
 7. For development on the dev Pi: grab snapshots and short recordings on site (`parking record`, P5.2) and copy them to the Pi's `data/` folder. Work against `folder:`/`video:` sources; the dev Pi doesn't need to reach the live camera.
 
+**Which steps apply.** With the default since 2026-10-10, the **standalone box** (Pi camera module on the box, [hardware.md §4.6](../design/hardware.md#46-default-from-2026-10-10-standalone-box-no-access-to-the-lots-cameras-or-network)), there is no camera network: instead of steps 2–6 the box has its own 4G link, outbound only (`provision.sh site` already denies everything inbound but SSH) and the camera check is `parking grab` ([deployment.md §4.3](../design/deployment.md#43-a-camera-plugged-into-the-vision-host-p412)). Steps 2–6 are for network cameras: an old phone as the first try, or the PoE camera if wired access is granted.
+
 **Done when:** both commands work from the vision host and from inside its vision container (`docker compose run --rm vision-occupancy ...`).
 
-Inside the container the image's entrypoint is `parking worker` and there is no `curl` (it has `ffprobe` from ffmpeg, and Python), so from `deploy/`:
+`deploy/scripts/camera-check.sh` runs all of it, from `deploy/` with the `-f` files of `up` (and `-p` for another Compose project), and prints one PASS/FAIL line per check with any `user:pass@` replaced by `***@`:
 ```bash
-docker compose run --rm --no-deps --entrypoint ffprobe vision-occupancy -v error -rtsp_transport tcp \
-  -show_entries stream=codec_name,width,height "$CAM_GROUND_RTSP_URL"
-docker compose run --rm --no-deps --entrypoint /app/backend/.venv/bin/python vision-occupancy -c \
-  'import os,urllib.request as u;print(len(u.urlopen(os.environ["CAM_GROUND_SNAPSHOT_URL"],timeout=10).read()),"bytes")'
+./scripts/camera-check.sh -f docker-compose.site.yml     # T2 lot box; no -f on a one-machine install
 ```
-(the URLs come from `deploy/.env` via `env_file`; `--no-deps` so the API doesn't have to be up).
+For each URL in `.env` it runs, on the host, `ffprobe -rtsp_transport tcp` and `curl --anyauth` (a JPEG must come back); without FFmpeg on the host it runs the vision image's `ffprobe` with `--network host`, so the box needs no extra package. In the container (`docker compose run --rm --no-deps -T -e <URL> vision-occupancy`, entrypoint `sh`; the image has no `curl`) it runs `ffprobe` and **`parking grab --source "snapshot:$CAM_GROUND_SNAPSHOT_URL"`**, the worker's own snapshot code. The URLs only travel in environment variables, never on a command line. Not Python's `urllib`: it can't read a URL with `user:pass@` in it (it takes the login as part of the host name, `Name or service not known`).
+
+**Trying it without a camera** (dev / rehearsal): `deploy/docker-compose.fake-camera.yml` adds `fake-camera` (`backend/scripts/fake_rtsp.py` playing an image folder as RTSP + HTTP snapshot behind a login) at a fixed address on an `internal` network that only `vision-occupancy` joins, the rehearsal's camera VLAN. Its header has the commands and the `.env` lines.
+
+**PoC check (2026-10-15):** production rehearsal on the dev Pi (project `parking-rehearsal`: `docker-compose.site.yml` + `docker-compose.fake-camera.yml`, released image `parking-vision:v0.1.0` with the v0.1.0 `config/`, `.env` from `prod-env.sh site` plus `VPN_BIND_IP=127.0.0.1` and the camera URLs, data in `/tmp`); the camera was the 284-image replay feed (`data/replay/ground-feed`) at native size 1932×2576, H.264 2 fps, at `10.99.20.11` with a random password (RTSP basic, snapshot digest). `camera-check.sh`: **4 of 4 PASS**: host-network ffprobe and container ffprobe `h264,1932,2576`, host curl `200 image/jpeg` ~1.47 MB, container `parking grab` a 1932×2576 frame. With a wrong password all 4 FAIL (401, URL shown as `***@`), and with the camera stopped all 4 FAIL in 33 s. Camera VLAN: from the camera, 1.1.1.1:443 and 8.8.8.8:53 are unreachable and DNS doesn't resolve; a container on the egress network only can't reach the camera (time-out) but reaches the internet. The guide's earlier `urllib` command failed against the login camera (`Name or service not known`), so it was replaced. Torn down afterwards. Not checked: a real camera, its firmware/settings/privacy masks, a real router's VLAN rules, the box's 4G link (go-live.md §3).
 
 ## P4.3: Snapshot and RTSP sources
 **Files:** `parking/vision/sources.py`, tests

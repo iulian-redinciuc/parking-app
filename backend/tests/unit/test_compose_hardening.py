@@ -249,6 +249,18 @@ def test_picamera_override_admits_only_camera_device_kinds():
     assert dockerfile.rstrip().endswith("USER 1000:1000")
 
 
+def test_fake_camera_override_models_a_camera_vlan():
+    """P4.2 rehearsal: the fake camera is locked down, publishes nothing, sits on an internal
+    network (no internet) that only the occupancy worker joins besides it."""
+    doc = yaml.safe_load((DEPLOY / "docker-compose.fake-camera.yml").read_text())
+    cam, worker = doc["services"]["fake-camera"], doc["services"]["vision-occupancy"]
+    assert cam["read_only"] is True and cam["cap_drop"] == ["ALL"] and cam["user"] == "1000:1000"
+    assert cam["security_opt"] == ["no-new-privileges:true"]
+    assert "ports" not in cam and list(cam["networks"]) == ["camera"]
+    assert doc["networks"]["camera"]["internal"] is True
+    assert worker == {"networks": ["egress", "camera"]}  # only adds the camera network
+
+
 # --- a barrier's contacts on the GPIO header (P9.3, barrier.md §5) ---
 
 

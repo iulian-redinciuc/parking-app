@@ -1,12 +1,15 @@
 """P5.2: `video:` source, newest-frame RTSP counters, `parking record` and `stream-check`."""
 
 import json
+import os
 import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import cv2
@@ -461,6 +464,56 @@ def test_record_and_read_the_fake_rtsp_camera(tmp_path):
         stats = measure_stream(live, 4, window=2)
         live.close()
         assert stats.fps == pytest.approx(10, rel=0.2), stats
+    finally:
+        server.terminate()
+        server.wait(10)
+
+
+@pytest.mark.skipif(not HAVE_FFMPEG, reason="needs the ffmpeg binary")
+def test_fake_camera_slideshow_with_login(tmp_path):
+    """P4.2: an image folder as a network camera, RTSP + HTTP snapshot, both behind a login."""
+    feed = tmp_path / "feed"
+    feed.mkdir()
+    for i, shade in enumerate((40, 200)):
+        img = np.full((96, 128, 3), shade, np.uint8)
+        cv2.imwrite(str(feed / f"f{i}.jpg"), img)
+    rtsp_port, http_port = _free_port(), _free_port()
+    script = Path(__file__).parents[2] / "scripts" / "fake_rtsp.py"
+    args = ["--port", str(rtsp_port), "--snapshot-port", str(http_port), "--input", str(feed)]
+    args += ["--size", "native", "--fps", "2", "--hold-s", "1", "--gop-s", "1"]
+    server = subprocess.Popen(
+        [sys.executable, str(script), *args],
+        stdout=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "FAKE_CAMERA_AUTH": "admin:s3cret"},
+    )
+    try:
+        assert "serving rtsp" in server.stdout.readline()
+        assert "serving http" in server.stdout.readline()
+        snap = f"http://127.0.0.1:{http_port}/cgi-bin/snap.jpg"
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(snap, timeout=5)
+        assert e.value.code == 401 and "Digest" in e.value.headers["WWW-Authenticate"]
+        src = make_source(f"snapshot:http://admin:s3cret@127.0.0.1:{http_port}/cgi-bin/snap.jpg")
+        shades = set()
+        for _ in range(8):  # the slideshow moves on every second
+            frame = src.read()
+            assert frame is not None and frame.image.shape == (96, 128, 3)
+            shades.add(int(frame.image.mean()) // 50)
+            time.sleep(0.4)
+        src.close()
+        assert len(shades) == 2
+        assert make_source(f"snapshot:http://admin:wrong@127.0.0.1:{http_port}/x").read() is None
+
+        probe = ["ffprobe", "-v", "error", "-rtsp_transport", "tcp", "-show_entries"]
+        probe += ["stream=codec_name,width,height", "-of", "csv=p=0"]
+        url = f"rtsp://admin:s3cret@127.0.0.1:{rtsp_port}/sub"
+        out = subprocess.run([*probe, url], capture_output=True, text=True, timeout=30)
+        assert out.stdout.strip() == "h264,128,96", out.stderr
+        bad = subprocess.run(
+            [*probe, url.replace("s3cret", "nope")], capture_output=True, text=True, timeout=30
+        )
+        assert bad.returncode != 0 and "401" in bad.stderr
     finally:
         server.terminate()
         server.wait(10)

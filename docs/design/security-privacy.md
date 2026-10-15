@@ -40,7 +40,7 @@
 | `fingerprints` | On the dev machine | Prints the sha256 of each secret in `.env`. Copy the output to the production machine and pass it as `DEV_FINGERPRINTS=<file>`: `server` / `site` then fail on any secret that is the dev one |
 | `repo` | In a clone, with `gitleaks` and `gh` | `gitleaks detect --log-opts=--all` (the full history) is clean; no open high/critical Dependabot alert |
 
-Not scripted: that the cameras can't be reached from outside their VLAN (a `nc -z <camera> 554` from another network segment, P4.2).
+Not scripted: that the cameras can't be reached from outside their VLAN (a `nc -z <camera> 554` from another network segment, P4.2). Rehearsed on the dev Pi only, with Docker networks (P4.2 PoC check); none with the standalone box, whose camera isn't on a network.
 
 ## 3. Public-repo rules
 

@@ -1,22 +1,37 @@
-"""A fake RTSP camera for dev tests (stands in for Camera A until it exists; P5.2).
+"""A fake network camera for dev tests (stands in for the cameras until they exist; P5.2, P4.2).
 
-FFmpeg encodes a synthetic test pattern (or loops a clip) to H.264 RTP on a local UDP port,
-and this script serves it over RTSP with RTP interleaved in the TCP connection, which is
-what `rtsp:` sources and `parking record` ask for (`rtsp_transport tcp`). Several clients
-can watch at once; a client that joins waits for the next keyframe like with a real camera.
+FFmpeg encodes a synthetic test pattern (or loops a clip, an image or a folder of images as a
+slideshow) to H.264 RTP on a local UDP port, and this script serves it over RTSP with RTP
+interleaved in the TCP connection, which is what `rtsp:` sources and `parking record` ask for
+(`rtsp_transport tcp`). Several clients can watch at once; a client that joins waits for the
+next keyframe like with a real camera.
 
     python3 scripts/fake_rtsp.py --port 8554 --fps 10 --size 640x360
     # -> rtsp://127.0.0.1:8554/sub
 
-Needs the `ffmpeg` binary (the vision image has it). Stop with Ctrl-C. Dev only: no auth,
-TCP only, one stream; never expose it outside the machine.
+With `--snapshot-port` it also answers HTTP GETs on any path with a JPEG, like a camera's
+snapshot URL: the slideshow's current image as it is on disk (a clip or the test pattern: its
+first frame). With `--auth user:pass` (or FAKE_CAMERA_AUTH) both need that login: basic auth
+for RTSP, digest for HTTP (`--http-auth basic` for basic), as many cameras do.
+
+    python3 scripts/fake_rtsp.py --input ../data/replay/ground-feed --size native --fps 2 \
+        --hold-s 5 --snapshot-port 8080 --auth admin:secret
+    # -> rtsp://admin:secret@127.0.0.1:8554/sub and http://admin:secret@127.0.0.1:8080/snap.jpg
+
+Needs the `ffmpeg` binary (the vision image has it). Stop with Ctrl-C. Dev only: TCP only,
+one stream; never expose it outside the machine.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import http.server
 import itertools
 import os
+import re
+import secrets
 import shutil
 import signal
 import socket
@@ -27,6 +42,8 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+
+IMAGE_SUFFIXES = {".jpg", ".jpeg"}
 
 
 class Relay:
@@ -94,7 +111,15 @@ class Handler(socketserver.StreamRequestHandler):
                 extra: dict[str, str] = {}
                 body = b""
                 status = "200 OK"
-                if method == "OPTIONS":
+                expected = self.server.basic_header
+                if (
+                    method not in ("OPTIONS", "TEARDOWN")
+                    and expected
+                    and (headers.get("authorization") != expected)
+                ):
+                    status = "401 Unauthorized"
+                    extra["WWW-Authenticate"] = 'Basic realm="fake-camera"'
+                elif method == "OPTIONS":
                     extra["Public"] = "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN, GET_PARAMETER"
                 elif method == "DESCRIBE":
                     body = self.server.sdp.encode()
@@ -133,23 +158,113 @@ class Server(socketserver.ThreadingTCPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, port: int, sdp: str, relay: Relay):
+    def __init__(self, port: int, sdp: str, relay: Relay, auth: str | None = None):
         super().__init__(("0.0.0.0", port), Handler)
         self.sdp = sdp
         self.relay = relay
         self.ids = itertools.count(10000001)
+        self.basic_header = "Basic " + base64.b64encode(auth.encode()).decode() if auth else None
+
+
+class Stills:
+    """The JPEG a snapshot returns: the slideshow's current image (same clock as FFmpeg's)."""
+
+    def __init__(self, files: list[Path], hold_s: float):
+        self.files = files
+        self.hold_s = hold_s
+        self.t0 = time.monotonic()
+
+    def current(self) -> bytes:
+        i = int((time.monotonic() - self.t0) / self.hold_s) % len(self.files)
+        return self.files[i].read_bytes()
+
+
+def _md5(text: str) -> str:
+    return hashlib.md5(text.encode()).hexdigest()
+
+
+class SnapshotHandler(http.server.BaseHTTPRequestHandler):
+    server: SnapshotServer
+
+    def do_GET(self) -> None:  # noqa: N802 (http.server's name)
+        if not self._authorized():
+            self.send_response(401)
+            if self.server.scheme == "digest":
+                nonce = secrets.token_hex(16)
+                self.server.nonces.add(nonce)
+                challenge = f'Digest realm="fake-camera", nonce="{nonce}", qop="auth"'
+            else:
+                challenge = 'Basic realm="fake-camera"'
+            self.send_header("WWW-Authenticate", challenge)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        body = self.server.stills.current()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _authorized(self) -> bool:
+        auth = self.server.auth
+        if not auth:
+            return True
+        given = self.headers.get("Authorization", "")
+        if self.server.scheme == "basic":
+            return given == "Basic " + base64.b64encode(auth.encode()).decode()
+        if not given.startswith("Digest "):
+            return False
+        p = {k: a or b for k, a, b in re.findall(r'(\w+)=(?:"([^"]*)"|([^\s,]+))', given)}
+        user, _, password = auth.partition(":")
+        if p.get("username") != user or p.get("nonce") not in self.server.nonces:
+            return False
+        ha1 = _md5(f"{user}:fake-camera:{password}")
+        ha2 = _md5(f"GET:{p.get('uri', '')}")
+        want = _md5(f"{ha1}:{p['nonce']}:{p.get('nc', '')}:{p.get('cnonce', '')}:auth:{ha2}")
+        return p.get("uri") == self.path and secrets.compare_digest(p.get("response", ""), want)
+
+    def log_message(self, format, *args) -> None:  # noqa: A002 (quiet, like the RTSP side)
+        pass
+
+
+class SnapshotServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, port: int, stills: Stills, auth: str | None, scheme: str):
+        super().__init__(("0.0.0.0", port), SnapshotHandler)
+        self.stills = stills
+        self.auth = auth
+        self.scheme = scheme
+        self.nonces: set[str] = set()
+
+
+def image_files(path: Path) -> list[Path]:
+    """The images an --input stands for: a folder's JPEGs in name order, or the image itself."""
+    if path.is_dir():
+        return sorted(f for f in path.iterdir() if f.suffix.lower() in IMAGE_SUFFIXES)
+    return [path] if path.suffix.lower() in IMAGE_SUFFIXES else []
 
 
 def ffmpeg_command(args: argparse.Namespace, rtp_port: int, sdp_file: Path) -> list[str]:
     cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-re"]
-    if args.input:
+    images = image_files(args.input) if args.input else []
+    if images:  # a slideshow: each image for --hold-s seconds, round and round
+        cmd += ["-loop", "1", "-framerate", f"1/{args.hold_s:g}"]
+        if args.input.is_dir():
+            pattern = str(args.input / ("*" + images[0].suffix))
+            cmd += ["-pattern_type", "glob", "-i", pattern]
+        else:
+            cmd += ["-i", str(args.input)]
+    elif args.input:
         cmd += ["-stream_loop", "-1", "-i", str(args.input)]
     else:
         src = f"testsrc2=size={args.size}:rate={args.fps}"
         cmd += ["-f", "lavfi", "-i", src]
     cmd += ["-an", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency"]
     cmd += ["-pix_fmt", "yuv420p", "-r", str(args.fps), "-g", str(int(args.fps * args.gop_s))]
-    if args.input:
+    if args.input and args.size != "native":
         w, h = args.size.split("x")
         cmd += ["-vf", f"scale={w}:{h}"]
     # SPS/PPS before every keyframe, like a camera, so a client joining mid-stream decodes
@@ -180,11 +295,25 @@ def main() -> int:
     p.add_argument("--fps", type=float, default=10)
     p.add_argument("--size", default="640x360")
     p.add_argument("--gop-s", type=float, default=2.0, help="keyframe interval in seconds")
-    p.add_argument("--input", type=Path, help="a clip to loop instead of the test pattern")
+    p.add_argument(
+        "--input", type=Path, help="a clip to loop, or an image / folder of JPEGs for a slideshow"
+    )
+    p.add_argument("--hold-s", type=float, default=5.0, help="seconds per image of a slideshow")
+    p.add_argument("--snapshot-port", type=int, help="also serve JPEG snapshots over HTTP here")
+    p.add_argument(
+        "--auth",
+        default=os.environ.get("FAKE_CAMERA_AUTH") or None,
+        help="user:pass required by RTSP and HTTP (default: $FAKE_CAMERA_AUTH; none: no login)",
+    )
+    p.add_argument("--http-auth", choices=("digest", "basic"), default="digest")
     args = p.parse_args()
     if shutil.which("ffmpeg") is None:
         print("ffmpeg not found (run this in the vision container)", file=sys.stderr)
         return 1
+    if args.size == "native" and not args.input:
+        p.error("--size native needs an --input")
+    if args.auth is not None and ":" not in args.auth:
+        p.error("--auth must be user:pass")
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         probe.bind(("127.0.0.1", 0))
@@ -205,11 +334,28 @@ def main() -> int:
         print("ffmpeg wrote no SDP", file=sys.stderr)
         return 1
 
-    server = Server(args.port, rtsp_sdp(sdp_file.read_text()), relay)
+    server = Server(args.port, rtsp_sdp(sdp_file.read_text()), relay, args.auth)
+    snap = None
+    if args.snapshot_port:
+        files = image_files(args.input) if args.input else []
+        if not files:  # a clip or the test pattern: its first frame
+            still = tmp / "still.jpg"
+            src = ["-i", str(args.input)] if args.input else []
+            src = src or ["-f", "lavfi", "-i", f"testsrc2=size={args.size}:rate=1"]
+            cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", *src]
+            subprocess.run([*cmd, "-frames:v", "1", "-q:v", "3", str(still)], check=True)
+            files = [still]
+        stills = Stills(files, args.hold_s)
+        snap = SnapshotServer(args.snapshot_port, stills, args.auth, args.http_auth)
+        threading.Thread(target=snap.serve_forever, daemon=True).start()
     print(f"serving rtsp://127.0.0.1:{args.port}/sub ({args.size} @ {args.fps:g} fps)", flush=True)
+    if snap:
+        print(f"serving http://127.0.0.1:{args.snapshot_port}/snap.jpg", flush=True)
 
     def stop(*_):
         threading.Thread(target=server.shutdown, daemon=True).start()
+        if snap:
+            threading.Thread(target=snap.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)

@@ -45,7 +45,9 @@ Requirements:
 - PoE switch (802.3af/at), budget ≥ 15 W per camera with IR.
 - Put cameras on a **separate VLAN** with no internet access. Only the vision host may reach them.
 - Give cameras **static IPs** (or DHCP reservations). Change default passwords; disable cloud/P2P features; update firmware.
-- Test from the vision host: `ffprobe -rtsp_transport tcp "rtsp://user:pass@IP:554/..."` and `curl -o test.jpg "http://user:pass@IP/snapshot..."`.
+- Test from the vision host: `ffprobe -rtsp_transport tcp "rtsp://user:pass@IP:554/..."` and `curl -o test.jpg "http://user:pass@IP/snapshot..."`. `deploy/scripts/camera-check.sh` does both from the host and from inside the vision container for the URLs in `deploy/.env` (P4.2).
+- Rehearsed on the dev Pi with `deploy/docker-compose.fake-camera.yml`: an image feed as a camera with a login on an `internal` Docker network, which has no route to the internet and which only the occupancy worker joins.
+- The standalone box (§4.6) has no camera network: the camera is on the box, and the box's 4G link is outbound only (nothing forwarded to it).
 
 ## 4. Compute hardware
 
