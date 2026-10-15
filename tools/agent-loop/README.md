@@ -13,7 +13,7 @@ tools/agent-loop/stop.sh           # stop after the current task
 tools/agent-loop/stop.sh --now     # stop immediately (the task resumes on the next start)
 ```
 
-From your phone: [`PROGRESS.md` on GitHub](https://github.com/iulian-redinciuc/parking-app/blob/main/PROGRESS.md) updates after every task, and every task is its own commit (`P1.5: …`).
+From your phone: [`PROGRESS.md` on GitHub](https://github.com/iulian-redinciuc/parking-app/blob/main/PROGRESS.md) has an **Agent loop:** line at the top with the task being worked on and the next three. When a task starts, the loop pushes a commit `Now: P4.5 … · next: P4.8, P4.9, P4.10`, so the [commit list](https://github.com/iulian-redinciuc/parking-app/commits/main) shows it too; each finished task is its own commit (`P4.5: …`).
 
 ## How it works
 

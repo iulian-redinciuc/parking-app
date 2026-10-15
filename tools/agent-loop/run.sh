@@ -201,6 +201,39 @@ PY
         && git -C "$REPO" push -q origin HEAD:main 2>>"$STATE/loop.log"
 }
 
+# Show on GitHub what the loop is doing: a "**Agent loop:**" line in PROGRESS.md, committed and
+# pushed on its own commit ("Now: P4.5 … · next: …"). Only with a clean tree (never mid-task).
+announce() { # text for the line | commit subject
+    local line="$1" subject="$2"
+    [ -n "$(git -C "$REPO" status --porcelain)" ] && { say "note: not announcing (uncommitted changes)"; return 0; }
+    python3 -I - "$PROGRESS" "$line" <<'PY' || return 0
+import re, sys
+path, line = sys.argv[1:3]
+s = open(path).read()
+new = f"**Agent loop:** {line}"
+if re.search(r"^\*\*Agent loop:\*\*.*$", s, re.M):
+    s = re.sub(r"^\*\*Agent loop:\*\*.*$", lambda m: new, s, count=1, flags=re.M)
+else:
+    s = re.sub(r"^(\*\*Current focus:\*\*.*)$", lambda m: new + "\n" + m.group(1), s, count=1, flags=re.M)
+open(path, "w").write(s)
+PY
+    git -C "$REPO" diff --quiet -- PROGRESS.md && return 0
+    git -C "$REPO" add PROGRESS.md
+    git -C "$REPO" commit -q --no-verify -m "$subject" || return 0
+    git -C "$REPO" push -q origin HEAD:main 2>>"$STATE/loop.log" \
+        || { git -C "$REPO" pull -q --rebase origin main 2>>"$STATE/loop.log" && git -C "$REPO" push -q origin HEAD:main 2>>"$STATE/loop.log"; } \
+        || say "warning: couldn't push the status commit; it goes out with the next push"
+}
+short_title() { task_title "$1" | sed -E 's/ \(PoC check on images; the live check goes to docs\/go-live\.md\)$//'; }
+next_after() { # task → up to 3 open task ids after it
+    grep -oP '^- \[ \] \*\*\KP\d+\.\d+(?=\*\*)' "$PROGRESS" | grep -Fvx "$1" | head -3 | paste -sd ',' - | sed 's/,/, /g'
+}
+announce_task() { # task
+    local t="$1" title nxt; title="$(short_title "$t")"; nxt="$(next_after "$t")"
+    announce "working on **$t** $title (started $(now)) · next: ${nxt:-nothing, this is the last one} · $(open_count) open" \
+             "Now: $t $title · next: ${nxt:-none}"
+}
+
 # ---------- quality gate ----------
 # Lint + tests for whatever parts of the project exist yet. Output goes to $1.
 verify_repo() { # logfile
@@ -332,6 +365,7 @@ while :; do
     task="$(next_task)"
     if [ -z "$task" ]; then
         if [ "$(open_count)" -eq 0 ]; then
+            announce "finished: every task is done ($(now))" "Agent loop finished: every task in PROGRESS.md is done"
             FINAL_STATE="FINISHED: every task in PROGRESS.md is done"
             exit 0
         fi
@@ -341,5 +375,6 @@ while :; do
         sleep_until $(( $(date +%s) + IDLE_POLL_S )) || true
         continue
     fi
+    announce_task "$task"
     run_task "$task" || true
 done

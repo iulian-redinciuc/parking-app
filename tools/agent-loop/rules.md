@@ -12,7 +12,7 @@ Hard rules:
 - The repo is **public**: never commit secrets, `.env` files, tokens, passwords, real camera images or video, or anything under `data/` or `models/`.
 - Git: commit to `main` and push to `origin main`. Never force-push, rewrite history, delete branches, or change repository settings, unless the task's guide explicitly says to (e.g. P3.8 switches GitHub Pages to Actions).
 - Don't create GitHub issues, releases or PRs unless the task's guide says to.
-- Don't edit `tools/agent-loop/` (the loop itself).
+- Don't edit `tools/agent-loop/` (the loop itself), or the `**Agent loop:**` line at the top of PROGRESS.md (the loop keeps it up to date).
 - Don't leave servers or containers running when you finish, unless the task's guide says the stack should stay up. Use timeouts for anything long-running.
 - Never reboot, shut down or power-cycle the dev Pi, and never restart Docker itself; simulate those with the app's own containers.
 - Stay inside your one assigned task. Don't start the next one.
