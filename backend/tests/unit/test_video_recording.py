@@ -517,3 +517,29 @@ def test_fake_camera_slideshow_with_login(tmp_path):
     finally:
         server.terminate()
         server.wait(10)
+
+
+def test_fake_camera_caps_each_encoded_frame(tmp_path):
+    # P4.3: a 5 MP keyframe in one burst overflowed the local UDP hop and broke the stream
+    import argparse
+    import importlib.util
+
+    script = Path(__file__).parents[2] / "scripts" / "fake_rtsp.py"
+    spec = importlib.util.spec_from_file_location("fake_rtsp", script)
+    fake = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fake)
+    args = argparse.Namespace(
+        input=None, size="640x360", fps=2.0, gop_s=2.0, hold_s=5.0, max_frame_kb=120
+    )
+    cmd = fake.ffmpeg_command(args, 50000, tmp_path / "s.sdp")
+    assert cmd[cmd.index("-bufsize") + 1] == "960k"  # 120 KB
+    assert cmd[cmd.index("-maxrate") + 1] == "960k"  # half a buffer per frame at 2 fps
+
+
+def test_worker_logging_keeps_httpx_quiet():
+    import logging
+
+    from parking.cli import _worker_logging
+
+    _worker_logging("info")
+    assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING

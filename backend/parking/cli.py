@@ -78,6 +78,16 @@ def models_export(
     typer.echo(f"exported {model} @ {imgsz} ({runtime}) -> {path}")
 
 
+def _worker_logging(level: str) -> None:
+    import logging
+
+    fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    logging.basicConfig(level=level.upper(), format=fmt)
+    # httpx logs every request at INFO: one line per observation / health message sent to the API
+    # (every few seconds), and a camera URL may hold credentials in its query
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
 def _find_config(path: Path) -> Path:
     """`path`, or for the default path also `../config/lot.yaml` (running from `backend/`)."""
     if path.is_file() or path.is_absolute() or path != DEFAULT_CONFIG:
@@ -1965,7 +1975,6 @@ def worker_occupancy(
     max_frames: Annotated[int, typer.Option(help="Stop after this many frames (0 = never).")] = 0,
 ) -> None:
     """Run the occupancy worker: analyse a frame every interval and send observations."""
-    import logging
 
     from parking.workers.base import WorkerError, load_settings
     from parking.workers.occupancy_worker import OccupancyWorker
@@ -1977,10 +1986,7 @@ def worker_occupancy(
 
     config = _find_config(config)
     settings = load_settings(config.resolve().parent.parent)
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    _worker_logging(settings.log_level)
     try:
         worker = OccupancyWorker(
             config,
@@ -2022,7 +2028,6 @@ def worker_flow(
     max_frames: Annotated[int, typer.Option(help="Stop after this many frames (0 = never).")] = 0,
 ) -> None:
     """Run the flow worker: gate + track + two-line count every frame and send in/out events."""
-    import logging
 
     from parking.workers.base import WorkerError, load_settings
     from parking.workers.flow_worker import FlowWorker
@@ -2034,10 +2039,7 @@ def worker_flow(
 
     config = _find_config(config)
     settings = load_settings(config.resolve().parent.parent)
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    _worker_logging(settings.log_level)
     try:
         worker = FlowWorker(
             config,
@@ -2068,7 +2070,6 @@ def worker_barrier(
     max_events: Annotated[int, typer.Option(help="Stop after this many cars (0 = never).")] = 0,
 ) -> None:
     """Run the barrier worker: read the barrier's contacts and send one in/out event per car."""
-    import logging
 
     from parking.workers.barrier_worker import BarrierWorker
     from parking.workers.base import WorkerError, load_settings
@@ -2078,10 +2079,7 @@ def worker_barrier(
 
     config = _find_config(config)
     settings = load_settings(config.resolve().parent.parent)
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    _worker_logging(settings.log_level)
     try:
         worker = BarrierWorker(config, camera, print_mode=print_mode, settings=settings)
         worker.run(max_events or None)

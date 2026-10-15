@@ -4,7 +4,8 @@ FFmpeg encodes a synthetic test pattern (or loops a clip, an image or a folder o
 slideshow) to H.264 RTP on a local UDP port, and this script serves it over RTSP with RTP
 interleaved in the TCP connection, which is what `rtsp:` sources and `parking record` ask for
 (`rtsp_transport tcp`). Several clients can watch at once; a client that joins waits for the
-next keyframe like with a real camera.
+next keyframe like with a real camera. Every encoded frame is capped at --max-frame-kb (120 KB),
+since a bigger one (a 5 MP keyframe) overflows the local UDP port's buffer and breaks the stream.
 
     python3 scripts/fake_rtsp.py --port 8554 --fps 10 --size 640x360
     # -> rtsp://127.0.0.1:8554/sub
@@ -264,6 +265,11 @@ def ffmpeg_command(args: argparse.Namespace, rtp_port: int, sdp_file: Path) -> l
         cmd += ["-f", "lavfi", "-i", src]
     cmd += ["-an", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency"]
     cmd += ["-pix_fmt", "yuv420p", "-r", str(args.fps), "-g", str(int(args.fps * args.gop_s))]
+    # A frame's packets arrive in one burst on the local UDP port; a 5 MP keyframe (1-2 MB)
+    # overflows the socket's buffer (net.core.rmem_max, ~200 KB) and breaks the stream (P4.3).
+    # Cap every frame's size (VBV).
+    vbv_kbit = int(args.max_frame_kb * 8)
+    cmd += ["-maxrate", f"{max(1, int(vbv_kbit * args.fps / 2))}k", "-bufsize", f"{vbv_kbit}k"]
     if args.input and args.size != "native":
         w, h = args.size.split("x")
         cmd += ["-vf", f"scale={w}:{h}"]
@@ -297,6 +303,12 @@ def main() -> int:
     p.add_argument("--gop-s", type=float, default=2.0, help="keyframe interval in seconds")
     p.add_argument(
         "--input", type=Path, help="a clip to loop, or an image / folder of JPEGs for a slideshow"
+    )
+    p.add_argument(
+        "--max-frame-kb",
+        type=float,
+        default=120,
+        help="largest encoded frame in KB (more is lost on the local UDP hop)",
     )
     p.add_argument("--hold-s", type=float, default=5.0, help="seconds per image of a slideshow")
     p.add_argument("--snapshot-port", type=int, help="also serve JPEG snapshots over HTTP here")
