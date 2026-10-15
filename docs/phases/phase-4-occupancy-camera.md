@@ -156,7 +156,7 @@ Put the suggested values in `cameras[].health` in `lot.yaml` (check the night an
 ## P4.10: Per-slot classifier (only if P4.9 misses the target)
 **Files:** `backend/parking/vision/slot_classifier.py`, `backend/scripts/train_slot_classifier.py`
 
-**Steps:** follow [vision.md §9](../design/vision.md#9-per-slot-classifier). Train on a laptop or desktop with a GPU (or Google Colab), not on the dev Pi or the vision host. Export ONNX into `models/`. Add `classifier` and `ensemble` to `occupancy.method` (it replaces `appearance` on top-down views). Re-evaluate on the **same** validation set; keep 20% of frames held out from fine-tuning.
+**Steps:** follow [vision.md §9](../design/vision.md#9-per-slot-classifier). Train on a laptop or desktop with a GPU (or Google Colab), not on the vision host; the dev Pi's CPU manages a 200-frame set (~75 s per epoch, measured in P4.10's PoC check), not public pre-training. Export ONNX into `models/`. Add `classifier` and `ensemble` to `occupancy.method` (it replaces `appearance` on top-down views). Re-evaluate on the **same** validation set; keep 20% of frames held out from fine-tuning.
 
 The code, the methods and the training script are in place (prepared while P4.9 was blocked); what's left needs P4.8's labelled frames:
 
@@ -167,6 +167,8 @@ The code, the methods and the training script are in place (prepared while P4.9 
 3. Set the winner as `occupancy.method` (and `classifier.threshold` if the sweep says so) in `config/lot.yaml`, `reload` the worker, record the numbers in PROGRESS.md Metrics.
 
 **Done when:** targets are met, or the gap and next steps are documented.
+
+**PoC check (2026-10-15):** on images on the dev Pi, on P4.8's 200 PoC validation frames. P4.9 already met the target with `appearance` (re-run: 99.7%, count error ≤ 1 on 99.5%, `target … met`), so the classifier isn't needed and `occupancy.method` stays `appearance`. To show the path works end to end and to have the comparison, step 1 was run on the dev Pi's CPU (`--device cpu --epochs 6`, ImageNet start, no public pre-training, ~75 s per epoch, ~8 min, output to a scratch folder, not `models/`): 2839 training crops (1254 taken), **33 frames / 561 crops held out**, best held-out crop accuracy 99.8%. Step 2 on the held-out frames only (`--sweep 0.1:0.9:0.05`): `appearance` **99.1%** (556/561, count error ≤ 1 on 97.0%; misses: G14 on 2 empty IR frames, 3 cars in one rainy evening frame), `classifier` **99.8%** (560/561, count ≤ 1 on 100%, best threshold 0.50), `ensemble` **99.8%** (same frame, G12). All three meet the target. Step 3: `appearance` stays the winner in `config/lot.yaml`: it needs no model file (the public repo can't ship one, `models/` is ignored) and the classifier only learned the five simulated cars of one scene, so its 0.7-point edge on 33 frames says nothing about a real camera. Not checked: a classifier trained on real frames, public pre-training (PKLot/CNRPark), training on a GPU machine (go-live.md §3).
 
 ## P4.11: Soak test (on the vision host)
 **Steps**
