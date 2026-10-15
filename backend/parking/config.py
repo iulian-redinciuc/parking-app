@@ -157,6 +157,7 @@ class AppearanceCfg(Strict):
     shadow_chroma_max: float = Field(default=2, ge=0)
     morph_frac: float = Field(default=0.06, gt=0, lt=1)
     reference_empty: Path | None = None
+    match_light: bool = True  # relight the frame to the reference first (P4.9, vision.md §2.1)
 
     @model_validator(mode="after")
     def _check(self) -> Self:

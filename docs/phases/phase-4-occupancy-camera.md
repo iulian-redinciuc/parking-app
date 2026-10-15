@@ -150,6 +150,9 @@ Put the suggested values in `cameras[].health` in `lot.yaml` (check the night an
 
 **Done when:** slot accuracy ≥ 97% and count error ≤ 1 on ≥ 95% of frames, **or** you decide P4.10 is needed.
 
+**PoC check (2026-10-15):** on images on the dev Pi, on P4.8's 200 PoC validation frames (lit copies of the sample scene: colour day, dusk, IR night, rain; labels from the known truth). Step 1's command at first: slot accuracy **85.4%**, count error ≤ 1 on 73.5%, **`target … missed`**; the sweep didn't help (best 85.7% at 0.20). The breakdown: noon 99.7%, but dusk 68.6% (frames at ~1/5 of the light, too dark for the scorer's light matching) and **night 46.8%** (IR: every space taken against the colour reference). Not a detector problem (`method: appearance`), so the fix went into the scorer (vision.md §2.1 step 2): the frame is relit to `reference_empty` with a smooth per-channel gain fitted on the background outside the spaces (a grey reference for IR frames), and the shadow rule is off in grey frames (every darker car passed for a shadow). After: **99.7%** (3390/3400), count error ≤ 1 on **99.5%**, **`target … met`** at 0.30 (also the sweep's best; 0.25–0.35 all ≥ 99.6%); night 98.5%, rain 99.2%, dusk 100%. On all 1008 timelapse frames (the 200 included): 99.0%, count error ≤ 1 on 98.5%, met; rain is the weakest there (96.6%, count ≤ 1 on 83.3% of 84 frames). The 284-frame replay feed (daytime) stays 4828/4828. So P4.10 isn't needed on the PoC set. Left: G14 called taken on 6 empty IR frames, one rainy evening frame with 3 cars missed. Not checked: real frames, a real camera's IR and rain, real labelling (go-live.md §3).
+
+
 ## P4.10: Per-slot classifier (only if P4.9 misses the target)
 **Files:** `backend/parking/vision/slot_classifier.py`, `backend/scripts/train_slot_classifier.py`
 

@@ -25,6 +25,13 @@ GAIN_TOL = 0.04  # votes this close agree
 CAST_MAX = 8.0  # how far the frame's pavement a,b may be from the reference's (a colour cast)
 CAST_TOL = 3.0  # slots whose a,b are this close agree on the cast
 CAST_MIN_SLOTS = 3  # fewer agreeing slots than this → lightness only (`illumination`)
+LIGHT_GRID = (32, 24)  # blocks the frame is compared with the reference in (`match_light`)
+LIGHT_MIN = 6.0  # reference blocks darker than this (0..255) don't vote
+LIGHT_ROUNDS = 5  # robust refits; blocks further than LIGHT_K x MAD from the fit drop out
+LIGHT_K = 2.5
+LIGHT_OUTSIDE = 0.9  # blocks at least this much outside the slots vote
+LIGHT_MIN_SHARE = 0.1  # ... and at least this share of all blocks must, or no relighting
+GREY_CHROMA_MAX = 2.0  # mean |B-G|, |R-G| below this = a grey (infrared) frame
 
 
 def _corners(points: Sequence[Sequence[float]]) -> np.ndarray:
@@ -52,6 +59,77 @@ def to_lab(crop: np.ndarray) -> np.ndarray:
     k = max(int(min(crop.shape[:2]) * BLUR_FRAC) | 1, 3)
     blurred = cv2.GaussianBlur(crop, (k, k), 0)
     return cv2.cvtColor(blurred.astype(np.float32) / 255.0, cv2.COLOR_BGR2Lab)
+
+
+def _gain_field(
+    frame: np.ndarray, reference: np.ndarray, polys: Sequence[Sequence[Sequence[float]]] = ()
+) -> np.ndarray | None:
+    """Per-channel gain (frame / reference) as a smooth surface over the image, shape (h, w, 3).
+
+    The frame and the reference are averaged in `LIGHT_GRID` blocks; only blocks outside the
+    slot polygons `polys` vote (the lot's unchanging background: aisles, lines, walls), so a lot
+    full of cars of one colour can't pass for the light. Each channel's log ratio is fitted
+    with a quadratic in x, y (a dimmer day, a warm dusk, an infrared light that is bright in the
+    middle), refitted `LIGHT_ROUNDS` times without the blocks that disagree (a car in the aisle,
+    a person). None when too little background is left to go by (`LIGHT_MIN_SHARE`).
+    """
+    h, w = frame.shape[:2]
+    gw, gh = LIGHT_GRID
+    outside = np.ones((h, w), np.float32)
+    for poly in polys:
+        cv2.fillPoly(outside, [np.round(np.asarray(poly)).astype(np.int32)], 0.0)
+    outside = cv2.resize(outside, (gw, gh), interpolation=cv2.INTER_AREA).reshape(-1)
+    f = cv2.resize(frame, (gw, gh), interpolation=cv2.INTER_AREA).astype(np.float32)
+    r = cv2.resize(reference, (gw, gh), interpolation=cv2.INTER_AREA).astype(np.float32)
+    y, x = np.mgrid[0:gh, 0:gw].astype(np.float32)
+    x, y = (x + 0.5) / gw - 0.5, (y + 0.5) / gh - 0.5
+    terms = np.stack([np.ones_like(x), x, y, x * x, x * y, y * y], axis=-1).reshape(-1, 6)
+    gains = []
+    for c in range(3):
+        ok = (r[..., c] >= LIGHT_MIN).reshape(-1) & (outside >= LIGHT_OUTSIDE)
+        if ok.sum() < LIGHT_MIN_SHARE * gw * gh:
+            return None
+        ratio = np.log(np.maximum(f[..., c], 0.5) / np.maximum(r[..., c], 0.5)).reshape(-1)
+        use = ok.copy()
+        for _ in range(LIGHT_ROUNDS):
+            coef = np.linalg.lstsq(terms[use], ratio[use], rcond=None)[0]
+            res = np.abs(ratio - terms @ coef)
+            mad = float(np.median(res[use])) + 1e-3
+            use = ok & (res <= LIGHT_K * 1.4826 * mad)
+            if use.sum() < LIGHT_MIN_SHARE * gw * gh / 2:
+                return None
+        gains.append(np.exp(terms @ coef).reshape(gh, gw).astype(np.float32))
+    # the quadratic is smooth, so the block grid scaled up linearly is the same surface
+    return cv2.resize(np.stack(gains, axis=-1), (w, h), interpolation=cv2.INTER_LINEAR)
+
+
+def is_grey(image: np.ndarray) -> bool:
+    """An infrared (night mode) picture: no colour."""
+    px = cv2.resize(image, (64, 48), interpolation=cv2.INTER_AREA).astype(np.float32)
+    b, g, r = px[..., 0], px[..., 1], px[..., 2]
+    return float(np.mean(np.abs(b - g)) + np.mean(np.abs(r - g))) / 2 < GREY_CHROMA_MAX
+
+
+def match_light(
+    frame: np.ndarray, reference: np.ndarray, polys: Sequence[Sequence[Sequence[float]]] = ()
+) -> tuple[np.ndarray, np.ndarray]:
+    """The frame relit to the reference's light, and the reference to compare it with.
+
+    The reference (the empty lot, any size) is resized to the frame and, when the frame is grey
+    (the camera's infrared night mode), made grey too. The frame is divided by the smooth
+    per-channel gain between the two outside the slots `polys` (frame pixels; `_gain_field`),
+    so the pavement looks as it does in the reference whatever the time of day: what's left is
+    cars, and noise. The frame is left as it is when there's too little background to go by.
+    """
+    h, w = frame.shape[:2]
+    ref = cv2.resize(reference, (w, h), interpolation=cv2.INTER_AREA)
+    if is_grey(frame) and not is_grey(ref):
+        ref = cv2.cvtColor(cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    gain = _gain_field(frame, ref, polys)
+    if gain is None:
+        return frame, ref
+    relit = frame.astype(np.float32) / gain
+    return np.clip(relit, 0, 255).astype(np.uint8), ref
 
 
 def pavement_model(labs: Sequence[np.ndarray]) -> tuple[np.ndarray, float]:
@@ -131,10 +209,15 @@ def frame_pavement(
     return np.array([ref_colour[0] * gain, cast[0], cast[1]], dtype=ref_colour.dtype)
 
 
-def non_pavement(lab: np.ndarray, colour: np.ndarray, spread: float, p: AppearanceCfg):
-    """Boolean mask of pixels that don't look like pavement (shadows count as pavement)."""
+def non_pavement(
+    lab: np.ndarray, colour: np.ndarray, spread: float, p: AppearanceCfg, shadows: bool = True
+):
+    """Boolean mask of pixels that don't look like pavement (shadows count as pavement, unless
+    `shadows` is off: in a grey picture every darker pixel would pass for one)."""
     limit = max(p.k_mad * spread, p.min_delta_e)
     diff = np.linalg.norm(lab - colour, axis=2) > limit
+    if not shadows:
+        return diff
     # shadow: darker, and the chroma shrinks with the lightness (same surface, less light)
     ratio = lab[..., 0] / max(float(colour[0]), 1e-6)
     lo, hi = p.shadow_l_range
@@ -174,7 +257,11 @@ def score_slots_appearance(
     when too few are left.
     """
     p = params or AppearanceCfg()
+    # infrared at night: lit from the camera, so no sun shadows, and no colour to tell them by
+    shadows = not is_grey(frame)
     polys = [_scaled(s.polygon, image_size, frame_size) for s in slots]
+    if reference is not None and p.match_light:
+        frame, reference = match_light(frame, reference, polys)
     labs = [to_lab(slot_crop(frame, poly, p.inset)) for poly in polys]
     if reference is not None:
         rh, rw = reference.shape[:2]
@@ -187,6 +274,6 @@ def score_slots_appearance(
         colour, spread = pavement_model(labs) if labs else (np.zeros(3), 0.0)
     results = []
     for slot, lab in zip(slots, labs, strict=True):
-        score = largest_blob(non_pavement(lab, colour, spread, p), p.morph_frac)
+        score = largest_blob(non_pavement(lab, colour, spread, p, shadows), p.morph_frac)
         results.append(SlotResult(id=slot.id, score=score, taken=score >= threshold))
     return results

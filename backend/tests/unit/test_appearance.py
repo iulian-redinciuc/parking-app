@@ -8,6 +8,8 @@ from parking.config import AppearanceCfg, Slot
 from parking.vision.appearance import (
     frame_pavement,
     illumination,
+    is_grey,
+    match_light,
     pavement_model,
     score_slots_appearance,
     slot_crop,
@@ -199,9 +201,14 @@ def test_reference_follows_a_colour_cast(monkeypatch):
     seen = frame_pavement(labs, ref_labs, colour)
     assert 0.75 * colour[0] < seen[0] < 0.9 * colour[0]
     assert 3 < seen[2] - colour[2] < 8  # more yellow than the reference
-    # lightness alone (`illumination`) calls free spaces taken in this light
+    # without relighting (P4.9), lightness alone (`illumination`) calls free spaces taken
     monkeypatch.setattr("parking.vision.appearance.CAST_MIN_SLOTS", N + 1)
-    assert taken(score_slots_appearance(img, SLOTS, (W, H), reference=ref)) != expected
+    plain = AppearanceCfg(match_light=False)
+    assert (
+        taken(score_slots_appearance(img, SLOTS, (W, H), params=plain, reference=ref)) != expected
+    )
+    # relit to the reference's light first, it needs neither
+    assert taken(score_slots_appearance(img, SLOTS, (W, H), reference=ref)) == expected
 
 
 def test_frame_pavement_needs_three_agreeing_free_slots():
@@ -238,6 +245,61 @@ def test_frame_pavement_lightness_ignores_where_the_free_slots_are():
     assert frame_pavement(labs, ref_labs, colour)[0] == pytest.approx(colour[0], abs=1.5)
     results = score_slots_appearance(img, SLOTS, (W, H), reference=ref)
     assert taken(results) == {s.id for s in SLOTS[1 : N - 3]}
+
+
+def night(img: np.ndarray) -> np.ndarray:
+    """The camera's infrared mode: grey, lit from the camera (bright in the middle)."""
+    grey = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    x = np.linspace(-1, 1, W, dtype=np.float32)[None, :]
+    grey *= 0.35 + 0.45 * np.exp(-((x / 0.7) ** 2))
+    return np.repeat(np.clip(grey, 0, 255).astype(np.uint8)[..., None], 3, axis=2)
+
+
+def test_infrared_night_relit_against_a_grey_reference():
+    """P4.9: a grey, unevenly lit frame against the colour reference. Relit to the reference's
+    light, and with no sun shadows to excuse a darker car, the cars are found."""
+    ref = pavement(seed=4)
+    img = pavement()
+    car(img, 0, (25, 25, 30))
+    car(img, 2, (190, 110, 40))
+    car(img, 5, (230, 230, 230), dx=30)  # white: a car of the pavers' own grey would vanish
+    img = night(img)
+    assert is_grey(img) and not is_grey(ref)
+    results = score_slots_appearance(img, SLOTS, (W, H), reference=ref)
+    assert taken(results) == {"G01", "G03", "G06"}
+    plain = AppearanceCfg(match_light=False)
+    assert taken(score_slots_appearance(img, SLOTS, (W, H), params=plain, reference=ref)) != {
+        "G01",
+        "G03",
+        "G06",
+    }
+
+
+def test_dark_warm_dusk_relit():
+    """P4.9: dusk before the camera's night mode: a fifth of the light, warmer. Beyond what
+    the free slots' lightness ratio may vote for, but the background still gives the gain."""
+    ref = pavement(seed=4)
+    img, expected = scene()
+    img = cast(img, (0.15, 0.2, 0.24))
+    results = score_slots_appearance(img, SLOTS, (W, H), reference=ref)
+    assert taken(results) == expected
+    plain = AppearanceCfg(match_light=False)
+    assert (
+        taken(score_slots_appearance(img, SLOTS, (W, H), params=plain, reference=ref)) != expected
+    )
+
+
+def test_match_light_needs_background():
+    """Slots that cover the whole picture leave nothing to relight by: the frame is kept."""
+    ref = pavement(seed=4)
+    img = cast(pavement(seed=3))
+    relit, _ = match_light(img, ref, [rect(0, 0, W, H)])
+    assert relit is img
+    relit, same = match_light(img, ref, [s.polygon for s in SLOTS])
+    assert same.shape == img.shape
+    # outside the slots the relit frame looks like the reference again
+    band = (slice(0, Y0 - 5), slice(None))
+    assert np.abs(relit[band].mean((0, 1)) - ref[band].mean((0, 1))).max() < 3
 
 
 def test_crop_upright_and_inset():

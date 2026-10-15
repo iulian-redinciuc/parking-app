@@ -75,6 +75,7 @@ cameras:
         shadow_chroma_max: 2
         morph_frac: 0.06
         reference_empty: null      # optional path to an image of the empty lot
+        match_light: true          # relight the frame to reference_empty first (P4.9, vision.md §2.1)
       classifier:                  # classifier / ensemble only (vision.md §9)
         model: models/slot_classifier.onnx   # from backend/scripts/train_slot_classifier.py
         threshold: 0.5             # on P(taken), or on the ensemble's mean
