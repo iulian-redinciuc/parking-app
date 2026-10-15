@@ -248,3 +248,48 @@ def test_cli_track_check(tmp_path, monkeypatch):
 
     result = runner.invoke(app, args)
     assert result.exit_code == 0 and "1 track(s)" in result.output and "#1" in result.output
+
+
+class FakeNet:
+    """Stands in for `ncnn.Net`: records what was loaded with how many threads."""
+
+    loaded: list = []
+
+    def __init__(self):
+        self.opt = SimpleNamespace(num_threads=4, use_vulkan_compute=False)
+
+    def load_param(self, path):
+        FakeNet.loaded.append((path, self.opt.num_threads))
+
+    def load_model(self, path):
+        FakeNet.loaded.append((path, self.opt.num_threads))
+
+
+def test_warmup_tracks_once_resets_and_applies_omp_threads_to_ncnn(tmp_path, monkeypatch):
+    (tmp_path / "model.param").write_text("")
+    backend = SimpleNamespace(net=FakeNet(), pyncnn=SimpleNamespace(Net=FakeNet))
+    ut = UltralyticsTracker.__new__(UltralyticsTracker)
+    ut.model_path = tmp_path
+    ut.model = SimpleNamespace(predictor=SimpleNamespace(model=SimpleNamespace(backend=backend)))
+    calls = []
+    monkeypatch.setattr(ut, "track", lambda image: calls.append(image.shape) or [])
+    monkeypatch.setattr(ut, "reset", lambda: calls.append("reset"))
+    FakeNet.loaded = []
+    monkeypatch.setenv("OMP_NUM_THREADS", "2")
+    ut.warmup((640, 360))
+    assert calls == [(360, 640, 3), "reset"]
+    assert backend.net.opt.num_threads == 2
+    assert FakeNet.loaded == [(str(tmp_path / "model.param"), 2), (str(tmp_path / "model.bin"), 2)]
+    assert ut.ncnn_threads(2) is False  # already 2: not reloaded
+    monkeypatch.delenv("OMP_NUM_THREADS")
+    net = backend.net
+    ut.warmup((640, 360))
+    assert backend.net is net  # no OMP_NUM_THREADS: the model stays as loaded
+
+
+def test_ncnn_threads_is_a_no_op_for_other_runtimes():
+    ut = UltralyticsTracker.__new__(UltralyticsTracker)
+    ut.model = SimpleNamespace(predictor=SimpleNamespace(model=SimpleNamespace(backend=object())))
+    assert ut.ncnn_threads(2) is False
+    ut.model = SimpleNamespace(predictor=None)
+    assert ut.ncnn_threads(2) is False

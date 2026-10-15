@@ -93,6 +93,20 @@ def to_event_msg(camera_id: str, ev: FlowEvent, lot: str | None = None) -> FlowE
     )
 
 
+def warmup(backend: TrackBackend, camera_id: str, size: tuple[int, int]) -> None:
+    """Run the backend once before the first frame (if it can), so the first car isn't missed."""
+    fn = getattr(backend, "warmup", None)
+    if fn is None:
+        return
+    t0 = time.perf_counter()
+    try:
+        fn(size)
+    except Exception:
+        log.exception("%s: detector warm-up failed", camera_id)
+        return
+    log.info("%s: detector warmed up in %.0f ms", camera_id, 1000 * (time.perf_counter() - t0))
+
+
 class _Setup:
     """Everything that `reload` replaces at once."""
 
@@ -102,10 +116,12 @@ class _Setup:
         self.lines = load_line_file(cam, root)
         if old is not None and old.cam.detector == cam.detector:
             backend = old.tracker.backend
-        elif worker.backend_factory is not None:
-            backend = worker.backend_factory(cam)
         else:
-            backend = make_backend(cam, root)
+            if worker.backend_factory is not None:
+                backend = worker.backend_factory(cam)
+            else:
+                backend = make_backend(cam, root)
+            warmup(backend, cam.id, self.lines.image_size)
         if old is not None and old.cam.source == cam.source:
             self.source = old.source
         else:

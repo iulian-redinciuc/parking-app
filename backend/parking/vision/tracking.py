@@ -19,9 +19,12 @@ never reused while the process runs (the two-line counter keys its state by id).
 
 from __future__ import annotations
 
+import logging
+import os
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
 import cv2
@@ -33,6 +36,8 @@ from parking.vision.detector import COCO_VEHICLES, Detection, class_ids
 from parking.vision.lines import draw_lines
 from parking.vision.motion import MotionGate
 from parking.vision.sources import FrameSource
+
+log = logging.getLogger(__name__)
 
 RESET_AFTER_S = 10.0
 TRACKER_CFG = "bytetrack.yaml"
@@ -77,6 +82,7 @@ class UltralyticsTracker:
     ):
         from ultralytics import YOLO  # heavy import, only when a real model is used
 
+        self.model_path = Path(model_path)
         self.model = YOLO(str(model_path), task="detect")
         self.names: dict[int, str] = dict(self.model.names)
         self.imgsz = imgsz
@@ -130,6 +136,39 @@ class UltralyticsTracker:
     def reset(self) -> None:
         for t in self._trackers():
             t.reset()
+
+    def warmup(self, size: tuple[int, int]) -> None:
+        """Track one black `size` (w, h) frame and reset: ultralytics sets up its predictor
+        and the model on the first call (~2 s on a Pi 5), which would otherwise land on the
+        first car."""
+        w, h = size
+        self.track(np.zeros((h, w, 3), np.uint8))
+        self.reset()
+        threads = os.environ.get("OMP_NUM_THREADS", "")
+        if threads.isdigit() and int(threads) > 0:
+            self.ncnn_threads(int(threads))
+
+    def ncnn_threads(self, n: int) -> bool:
+        """Reload an NCNN model with `n` threads (after the first call; other runtimes: no-op).
+
+        NCNN ignores `OMP_NUM_THREADS` and uses every big core; in a container with a CPU
+        quota (`vision-flow`: 1.5 CPUs) 4 threads get throttled: 288 ms median, 513 ms p90 per
+        frame on a Pi 5 vs 172 / 198 ms with 2 (P5.6). The thread count is fixed at load time."""
+        backend = getattr(getattr(self.model.predictor, "model", None), "backend", None)
+        net, pyncnn = getattr(backend, "net", None), getattr(backend, "pyncnn", None)
+        if net is None or pyncnn is None or net.opt.num_threads == n:
+            return False
+        param = self.model_path
+        if not param.is_file():
+            param = next(param.glob("*.param"))
+        new = pyncnn.Net()
+        new.opt.use_vulkan_compute = net.opt.use_vulkan_compute
+        new.opt.num_threads = n
+        new.load_param(str(param))
+        new.load_model(str(param.with_suffix(".bin")))
+        backend.net = new
+        log.info("NCNN model reloaded with %d threads (was %d)", n, net.opt.num_threads)
+        return True
 
 
 class RoiMask:

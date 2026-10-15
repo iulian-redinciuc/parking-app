@@ -106,8 +106,7 @@ def make_worker(root, api=None, **kw):
         api=api,
         settings=Settings(_env_file=None),
         control_port=None,
-        backend_factory=lambda cam: BlobBackend(),
-        **kw,
+        **{"backend_factory": lambda cam: BlobBackend(), **kw},
     )
     return w, out
 
@@ -134,6 +133,31 @@ def test_counts_one_in_and_one_out(repo):
     cap = cv2.VideoCapture(str(video))
     assert int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) == 400
     cap.release()
+
+
+def test_backend_is_warmed_up_before_the_first_frame(repo, caplog):
+    """The first real model call sets ultralytics up (~2 s on a Pi 5): done at start, not on
+    the first car. A failing warm-up is logged and the worker runs anyway."""
+
+    class Warm(BlobBackend):
+        def __init__(self, fail=False):
+            super().__init__()
+            self.fail, self.sizes = fail, []
+
+        def warmup(self, size):
+            self.sizes.append(size)
+            if self.fail:
+                raise RuntimeError("boom")
+
+    backend = Warm()
+    w, _ = make_worker(repo, backend_factory=lambda cam: backend)
+    assert backend.sizes == [tuple(lines().image_size)] and w.frames == 0
+    w.api.close()
+    failing = Warm(fail=True)
+    w, out = make_worker(repo, backend_factory=lambda cam: failing)
+    assert "warm-up failed" in caplog.text
+    w.run(handle_signals=False)
+    assert w.counts == {"in": 1, "out": 1}
 
 
 def test_events_go_through_the_outbox(repo):
