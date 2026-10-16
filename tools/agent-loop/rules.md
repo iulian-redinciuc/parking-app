@@ -14,5 +14,6 @@ Hard rules:
 - Don't create GitHub issues, releases or PRs unless the task's guide says to.
 - Don't edit `tools/agent-loop/` (the loop itself), or the `**Agent loop:**` line at the top of PROGRESS.md (the loop keeps it up to date).
 - Don't leave servers or containers running when you finish, unless the task's guide says the stack should stay up. Use timeouts for anything long-running.
+- **One heavy job at a time.** Model inference, evaluations, training, video encoding and image builds run one after another, never in parallel (no `&`, no several background runs), and each long one with `timeout`. Before starting one, check `free -m`: keep at least 1.5 GB available. The dev Pi has 8 GB and a hardware watchdog: if memory runs out the system freezes and the watchdog reboots it, killing the loop (this happened on 2026-10-15 during parallel `evaluate-flow` runs).
 - Never reboot, shut down or power-cycle the dev Pi, and never restart Docker itself; simulate those with the app's own containers.
 - Stay inside your one assigned task. Don't start the next one.
