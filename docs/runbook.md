@@ -171,7 +171,7 @@ ssh -J <you>@<server> <you>@10.77.0.2 docker restart parking-vision-occupancy
 $P grab --camera cam-ground --out data/debug/now.jpg --force
 $P analyze --image data/debug/now.jpg --camera cam-ground --out data/debug/analyze     # now.json (score per space) + now.png
 $P analyze --image data/debug/now.jpg --camera cam-ground --out data/debug/analyze --threshold 0.25    # try another threshold
-$P evaluate --camera cam-ground --images data/validation/cam-ground --sweep 0.15:0.5:0.05   # the labelled validation set: the best threshold overall
+$P evaluate --camera cam-ground --images data/validation/cam-ground --labels data/labels/cam-ground-validation.json --sweep 0.15:0.5:0.05 --out data/eval --cache data/cache   # the labelled validation set: the best threshold overall (the image's own out/ is read-only)
 ```
 
 Put the value into `occupancy.threshold` of that camera in `lot.yaml` on both machines and `docker restart parking-vision-occupancy`. Don't tune on one picture: a threshold that fixes today's shadow can break the night. The target is ≥ 97% of spaces right on the validation set ([vision.md §10](design/vision.md#10-evaluation-parkingvisionevaluatepy)). Delete the pictures in `data/debug/` afterwards (they can show people and plates).
