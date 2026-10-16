@@ -7,7 +7,7 @@
 >
 > The [agent loop](tools/agent-loop/README.md) works through the unticked tasks in order. Nothing is blocked: tasks that need the real cameras or production are closed with a PoC check on images, and their real-world checks are in [docs/go-live.md](docs/go-live.md).
 
-**Agent loop:** working on **P8.2** Provision production machines + re-measure on production hardware (started 2026-10-16 11:38:00) · next: P8.3, P8.4, P8.6 · 11 open
+**Agent loop:** working on **P8.3** Production public entry + frontend hosting (started 2026-10-16 12:16:13) · next: P8.4, P8.6, P8.7 · 10 open
 **Current focus:** a **fully working PoC on images** in the dev environment ([PLAN §6](PLAN.md#poc-and-going-live)): images stand in for the cameras until a real one is connected. Every task is closed with a PoC check; checks that need the real camera, the lot or production machines are collected in [docs/go-live.md](docs/go-live.md) and block nothing.
 **Build order:** 0 → 1 → 2 → 3 (MVP) → 6 → 7 (no hardware needed) → 4 → 5 → 8 (need the real cameras / production machines) → 9.
 **Last updated:** 2026-10-16
