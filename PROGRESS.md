@@ -29,7 +29,7 @@
 | 2 | [Backend + simulated feed](docs/phases/phase-2-backend.md) (MVP) | 13 / 13 | ✅ | 2026-10-08 | 2026-10-11 |
 | 3 | [Mobile web app](docs/phases/phase-3-frontend.md) (MVP) | 10 / 10 | ✅ | 2026-10-09 | 2026-10-10 |
 | 4 | [Live occupancy camera](docs/phases/phase-4-occupancy-camera.md) | 12 / 12 | ✅ | 2026-10-09 | 2026-10-15 |
-| 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 10 / 11 | 🟡 | 2026-10-09 | |
+| 5 | [Entry/exit camera](docs/phases/phase-5-flow-camera.md) | 11 / 11 | ✅ | 2026-10-09 | 2026-10-16 |
 | 6 | [Notifications](docs/phases/phase-6-notifications.md) | 8 / 8 | ✅ | 2026-10-09 | 2026-10-15 |
 | 7 | [Admin + stats](docs/phases/phase-7-admin-stats.md) | 8 / 8 | ✅ | 2026-10-09 | 2026-10-09 |
 | 8 | [Production deployment + hardening](docs/phases/phase-8-hardening.md) | 3 / 13 | 🟡 | 2026-10-10 | |
@@ -122,7 +122,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P4.11** 7-day soak test (on the vision host) (PoC check on images; the live check goes to docs/go-live.md)
 - [x] **P4.12** Camera plugged into the vision host (`device:` / `picamera:` source for the standalone box) — built and tested without hardware; the first run on a real camera is still to do (no camera on the dev Pi)
 
-## Phase 5: Entry/exit camera + combining levels 🟡
+## Phase 5: Entry/exit camera + combining levels ✅
 - [x] **P5.1** Mount Camera A, draw lines (PoC check on images; the live check goes to docs/go-live.md)
 - [x] **P5.2** Low-latency RTSP + video source + `parking record` (PoC check on images; the live check goes to docs/go-live.md)
 - [x] **P5.3** Motion gate (PoC check on images; the live check goes to docs/go-live.md)
@@ -133,7 +133,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 - [x] **P5.8** Fusion update + confidence
 - [x] **P5.9** Test clips, tally tool, `evaluate-flow` (PoC check on images; the live check goes to docs/go-live.md)
 - [x] **P5.10** Performance on the vision host + accelerator decision (PoC check on images; the live check goes to docs/go-live.md)
-- [ ] **P5.11** Live week drift test (PoC check on images; the live check goes to docs/go-live.md)
+- [x] **P5.11** Live week drift test (PoC check on images; the live check goes to docs/go-live.md)
 
 ## Phase 8: Production deployment and hardening 🟡
 - [x] **P8.1** Release pipeline (multi-arch images to GHCR)
@@ -180,6 +180,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 
 | Date | Decision | Why |
 |------|----------|-----|
+| 2026-10-16 | P5.11 PoC check = a **compressed week**: one 18.9-min synthetic clip of 7 "days" of 2.6 min (`synth_ramp.py` segments, new seeds, offpeak / rush / night in turn, 30 s without cars at the start of each), played in real time through `vision-flow` in a production rehearsal. A drift note is taken live after each day in the next day's empty start, with `--at` = day 0 + n days, so `drift-report` reads it as a week. The truth comes from the generator. No code change; the scheduled reset stays off and remains the fallback | The real test needs Camera A, the vision host and 7 days of hand counts. 20 min is the loop's cap. `--at` already exists for counts written down after the fact. Real-time playback through the API exercises the whole path the live week uses (worker → ingest → `/api/status` → `drift-note`). The result (PASSED only because missed INs and OUTs cancelled) is no reason to turn the reset on before real data |
 | 2026-10-15 | P5.6 PoC check = (1) `worker flow --print` on P5.3's 20-min synthetic clip (`cam-ramp`'s source swapped to `video:…?realtime=false` in a scratch lot.yaml) and (2) a **production rehearsal** (`parking-rehearsal`, base compose + fake camera + a scratch override, images built from HEAD, `--profile flow`) with `fake_rtsp.py` looping the clip as Camera A over RTSP for the full 20 min; truth = `synth_ramp.py`'s car schedule | No Camera A or real car; the rehearsal runs the production service, limits and RTSP path, the clip file run checks the pipeline frame by frame. The worker has no `--source` option, so the clip run uses a scratch config rather than adding one |
 | 2026-10-15 | The flow worker **warms the detector up at start** (`UltralyticsTracker.warmup`: one black frame of the line file's `image_size`, then a reset; also when a reload builds a new detector) | ultralytics sets up its predictor on the first `track` call (~2.5 s on the dev Pi 5), which landed on the first car after every start; in the rehearsal that car was lost |
 | 2026-10-15 | `UltralyticsTracker` **reloads an NCNN model with `OMP_NUM_THREADS` threads** after the warm-up (`ncnn_threads`; no env var or another runtime: unchanged); the Compose files already set 2 for the vision workers | NCNN ignores `OMP_NUM_THREADS` and uses every big core (4); in `vision-flow`'s 1.5-CPU quota that was throttled to 288 ms median / 513 ms p90 per frame vs 172 / 198 ms with 2 threads (dev Pi 5 benchmark), and cars got too few frames to be counted. ultralytics creates the `ncnn.Net` itself and the thread count is fixed at load time, so the net is rebuilt; the occupancy detector (`vision/detector.py`) is unchanged (one frame every few seconds); P5.10 measures it on the vision host |
@@ -452,6 +453,7 @@ Planning done: repo created, GitHub Pages live, PLAN.md + docs written.
 | | 4 | Count error ≤ 1 (% of frames) | | ≥ 95% | |
 | | 5 | Flow event accuracy (3 clips) | | ≥ 98% | |
 | | 5 | Flow drift per day | | ≤ 2 cars | |
+| 2026-10-16 | 5 | Flow drift, **compressed synthetic week in a production rehearsal on the dev Pi, not a live week** (P5.11) | **0.14 cars/day**, `PASSED` (errors +0 +2 +1 +1 +3 +1 +1 +1, largest step ±2) | ≤ 2 cars/day | 7 × 2.6-min drawn days, 38 cars; counted 21/26 IN, 6/12 OUT, 0 false: misses cancelled. NCNN `yolo11n` @ 480, 1.5 CPUs |
 | | 5 | Flow fps while active (vision host) | | ≥ 8 | |
 | | 8 | Slot accuracy on production hardware | | ≥ 97% | |
 | | 8 | Flow fps on production hardware | | ≥ 8 | |
@@ -645,3 +647,4 @@ NCNN is 3.5–3.7× faster than PyTorch in every case. Everything fits the occup
 ### 2026-10-16
 - P5.9: test clips, tally tool, `evaluate-flow`, PoC check on synthetic clips (code from 2026-10-10 reused). `synth_ramp.py --scenario rush|night` + `--truth` (offpeak unchanged, byte-identical clip): 20-min rush (60 cars, platoons, slow queues) and night (14 cars, dim, headlights) clips. `evaluate-flow` one at a time: offpeak 100%, night 100%, rush 62.3% (71.7% at conf 0.25); the gap is the detector on drawn cars (missed cars boxed on a median of 9% of their frames between the lines), plan in the phase guide. Event time convention fixed to "the second line" (it was showing late counts as FN + FP). Tally tool driven in headless Chromium at 4× on the night clip: 14/14 against the truth. 3 new tests; backend 1189 passed, 4 skipped, ruff clean; tally tests 6 passed. Phase guide, vision.md §10, config.md §4, tally README, go-live.md §3. (The first attempt on 2026-10-15 ran two evaluations in parallel and the dev Pi ran out of memory; re-run one at a time.)
 - P5.10: performance + accelerator decision, PoC check as a production rehearsal on the dev Pi (`parking-rehearsal`, images from HEAD, `--profile flow`, P5.9's rush clip in real time, occupancy worker alongside, 15 min per setting): busy fps 6.65 @ 640 / 1.5 CPUs, 8.3 @ 640 / 2 CPUs, 9.55 @ 480 / 1.5 CPUs; `evaluate-flow` @ 480: offpeak 100%, night 100%, rush 70.0% (62.3% @ 640). Decision: no AI HAT+, `cam-ramp` on `yolo11n` @ 480 (`models/flow-480/`). `/api/admin/cameras` returns `gate_active_ratio` (1 test; the guide's log grep found nothing); runbook's model exports fixed to write to the repo's `models/`. Rehearsal torn down; go-live.md §3.
+- P5.11: live week drift test as a PoC check (`drift.py`, `drift-note` and `drift-report` reused from 2026-10-10, no code change). Production rehearsal on the dev Pi (`parking-rehearsal`, its own `.env`, config and data, `--profile flow`, `yolo11n` @ 480): a compressed week (one 18.9-min synthetic clip of 7 × 2.6-min offpeak/rush/night days, 38 cars, truth from the generator) in real time, corrected to 20 on day 0, one live `drift-note` per day (`--at` day 0 + n). `drift-report` → 0.14 cars/day, **PASSED**, exit 0. The counter missed 5/26 IN and 6/12 OUT, which cancelled (errors +0…+3). Rehearsal torn down. Phase 5 complete. Phase guide, go-live.md §3.
