@@ -42,7 +42,8 @@ remote_ready() {
   [ "$kind" = crypt ] || { echo "remote \"$REMOTE\" is of type $kind, not crypt: refusing to upload unencrypted"; return 1; }
 }
 
-local_archives() { find "$BACKUPS" -maxdepth 1 -name 'parking-*.tar.gz' -printf '%f\n' 2>/dev/null | sort; }
+# none yet (a fresh machine before its first restore) is an empty list, not an error
+local_archives() { [ -d "$BACKUPS" ] || return 0; find "$BACKUPS" -maxdepth 1 -name 'parking-*.tar.gz' -printf '%f\n' | sort; }
 remote_archives() { rc lsf --files-only --include 'parking-*.tar.gz' "$REMOTE:backups" 2>/dev/null | sort; }
 
 # The run's outcome for the API: {"ts", "status": ok | local_only | failed, "message"}.

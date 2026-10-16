@@ -177,6 +177,15 @@ def test_list(box):
     assert r.returncode == 0 and "Remote: not available" in r.stdout
 
 
+def test_list_on_a_fresh_machine_shows_the_remote(box):
+    """The restore drill starts on a machine without data/backups/ (P8.6)."""
+    _run(box)
+    fresh = box | {"BACKUP_ROOT": str(Path(box["BACKUP_ROOT"]).parent / "spare")}
+    r = _run(fresh, "list")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.count(ARCHIVE) == 1 and "  server\n" in r.stdout
+
+
 def test_env_fetch_never_overwrites(box):
     _run(box)
     env_file = Path(box["BACKUP_ENV_FILE"])

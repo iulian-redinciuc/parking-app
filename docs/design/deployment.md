@@ -421,7 +421,7 @@ Set the preview API URL: `gh variable set API_BASE --body "https://parking-api-d
 
 ## 7. Backups
 
-**Production only** (the dev Pi holds test data), on the **API machine** (the server in T2): it has the database, the `config/` the admin editor writes, and the `.env` with the VAPID keys. The lot box holds nothing that can't be recreated (a copy of `lot.yaml`, exported models, `prod-env.sh site` + the camera URLs). How to restore: [runbook.md](../runbook.md#restore-from-backup).
+**Production only** (the dev Pi holds test data), on the **API machine** (the server in T2): it has the database, the `config/` the admin editor writes, and the `.env` with the VAPID keys. The lot box holds nothing that can't be recreated (a copy of `lot.yaml`, exported models, `prod-env.sh site` + the camera URLs). In T2 the **reference images** (`data/reference/`) are saved by the workers, so they are on the lot box and **not** in the server's archive: after replacing the lot box, save a new reference for each camera (*Save reference frame* in the admin app, or `parking grab`) once the view is checked against the slot overlay. How to restore: [runbook.md](../runbook.md#restore-from-backup).
 
 **The archive** (`parking backup --out DIR`, `parking/db/backup.py`): `parking-YYYYMMDD-HHMM.tar.gz`, time in **UTC**, written atomically (a second run in the same minute replaces the first).
 
@@ -454,7 +454,7 @@ Exit codes: `0` done, `1` failed, `3` the local archive exists but was **not** c
 
 Variables for `backup.sh` (environment, all optional): `RCLONE`, `BACKUP_RCLONE_CONFIG`, `BACKUP_REMOTE`, `BACKUP_REMOTE_DAYS`, `BACKUP_ENV_NAME`, `BACKUP_ENV_FILE`, `BACKUP_ROOT` (the folder holding `config/` and `data/`), `BACKUP_API_CONTAINER`, `BACKUP_IMAGE`.
 
-**Restore drill** (P8.6): done on the dev Pi from a backup of the dev stack through a `crypt` remote (results in [PROGRESS.md → Metrics](../../PROGRESS.md#metrics)); repeated with a production backup once production exists.
+**Restore drill** (P8.6): done on the dev Pi from a backup of the dev stack (2026-10-10) and of a T2 production rehearsal (2026-10-16), each through a `crypt` remote over a local folder (results in [PROGRESS.md → Metrics](../../PROGRESS.md#metrics)); repeated with a production backup once production exists ([go-live.md §3](../go-live.md#p86-backups-and-restore-drill)).
 
 ## 8. Releases and updating
 
