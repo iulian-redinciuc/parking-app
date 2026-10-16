@@ -14,7 +14,9 @@ What it does:
    when the counts changed), so both clocks must be synchronised (NTP; checked against the
    server's `Date` header). The events counted are the ones whose `updated_at` falls inside
    the measurement; the one each client gets on connecting is the current state, not a
-   delivery;
+   delivery, and an event that repeats the previous `updated_at` (the API also publishes
+   when only spaces swap, one taken and one freed by the same reading: same counts, same
+   `updated_at`) isn't timed, since its `updated_at` isn't when it was sent;
 3. every `--sample` (10 s) reads `/healthz` (`stream.clients`, `stream.dropped`) and, with
    `--docker` (and `--ssh HOST` when the API runs on another machine), the API container's
    memory and CPU from `docker stats`.
@@ -148,6 +150,7 @@ class Recorder:
     behind: int = 0  # clients that never got the server's last event of the measurement
     window: tuple[float, float] | None = None  # measurement start / end (epoch seconds)
     _updated: dict[tuple[int, str], float] = field(default_factory=dict)
+    _first_id: dict[float, int] = field(default_factory=dict)  # updated_at -> first event id
 
     def error(self, kind: str, detail: str = "") -> None:
         self.errors[kind] += 1
@@ -158,8 +161,14 @@ class Recorder:
         key = (event_id, data)
         if key not in self._updated:
             self._updated = {k: v for k, v in self._updated.items() if k[0] >= event_id - 20}
-            self._updated[key] = parse_ts(json.loads(data)["updated_at"])
+            sent = self._updated[key] = parse_ts(json.loads(data)["updated_at"])
+            if self._first_id.get(sent, event_id + 1) > event_id:
+                self._first_id[sent] = event_id
         return self._updated[key]
+
+    def count_change(self, event_id: int, sent: float) -> bool:
+        """False for an event that repeats an earlier event's `updated_at` (no count change)."""
+        return self._first_id.get(sent) == event_id
 
     def delivered(self, event_id: int, data: str, received: float) -> None:
         """A `status` event that reached a client at `received` (not its first one); counted
@@ -167,7 +176,7 @@ class Recorder:
         if self.window is None:
             return
         sent = self.updated_at(event_id, data)
-        if self.window[0] <= sent <= self.window[1]:
+        if self.window[0] <= sent <= self.window[1] and self.count_change(event_id, sent):
             self.delays.setdefault(event_id, []).append(received - sent)
 
 
@@ -303,6 +312,7 @@ async def client(
                         received = time.time()
                         event_id = int(event.id or "")
                         if last_id is None:
+                            rec.updated_at(event_id, event.data)  # for `count_change`
                             if not counted:
                                 counted = True
                                 rec.connected += 1

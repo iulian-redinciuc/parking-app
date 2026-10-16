@@ -109,6 +109,21 @@ def test_recorder_counts_only_deliveries_inside_the_measurement():
     assert rec.delays[6] == pytest.approx([0.5])
 
 
+def test_recorder_does_not_time_an_event_that_repeats_the_previous_updated_at():
+    # the API also publishes when only spaces swap (same counts): the payload keeps the
+    # updated_at of the last count change, so that event is delivered but not timed
+    rec = load.Recorder()
+    changed = _status("2027-01-15T08:00:10.000Z")
+    sent = load.parse_ts("2027-01-15T08:00:10.000Z")
+    rec.updated_at(3, changed)  # a client's first event: the current state
+    rec.window = (sent - 1, sent + 600)
+    swapped = json.dumps({"v": 1, "updated_at": "2027-01-15T08:00:10.000Z", "slots": 1})
+    rec.delivered(4, swapped, sent + 15.0)
+    rec.delivered(5, _status("2027-01-15T08:00:20.000Z"), sent + 10.1)
+    assert list(rec.delays) == [5]
+    assert rec.delays[5] == pytest.approx([0.1])
+
+
 def test_report_passes_a_clean_run():
     result = load.report(_recorder(_good_delays()), _args(), 0.1)
     assert result["passed"] and result["reasons"] == []
