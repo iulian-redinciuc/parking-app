@@ -5,6 +5,11 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 STATE="${STATE:-$HOME/.parking-loop}"
 mkdir -p "$STATE"
 
+# Memory guard: kills the loop's biggest process before the Pi runs out of memory (memguard.py).
+if ! { [ -f "$STATE/memguard.pid" ] && grep -q memguard "/proc/$(cat "$STATE/memguard.pid")/cmdline" 2>/dev/null; }; then
+    nohup python3 -I "$HERE/memguard.py" "$STATE" >>"$STATE/memguard.log" 2>&1 </dev/null &
+fi
+
 if tmux has-session -t parking-loop 2>/dev/null; then
     # The window stays open after the loop ends ("Press Enter to close"), so check the lock, not just the window.
     if ! flock -n "$STATE/lock" true 2>/dev/null; then
