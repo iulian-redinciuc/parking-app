@@ -547,7 +547,7 @@ A day is **clean** when all of these hold:
 | 3 | The uptime monitor is green and its test alert reached you ([Alerts](#alerts)) |
 | 4 | [Security check](#security-check) and [Privacy check](#privacy-check) pass; the Privacy screen names the operator and the contact |
 | 5 | The signs are up at the lot's entrances ([security-privacy.md §4.1](design/security-privacy.md#41-privacy-deliverables-p89)) **before** the address is shared |
-| 6 | Turn the sampler off (`pkill -f 'soak.py sample'` on both machines); anything switched on for the week (debug capture, a longer retention, `LOG_LEVEL=DEBUG`) goes back to normal |
+| 6 | Turn the sampler off (`pkill -f 'soak[.]py sample'` on both machines: the brackets keep it from also matching a script or `ssh` command line that contains the pattern); anything switched on for the week (debug capture, a longer retention, `LOG_LEVEL=DEBUG`) goes back to normal |
 | 7 | Share `https://<PUBLIC_HOST>` (a QR code on the sign works well); tick P8.13 and the exit criteria |
 
 The preview (GitHub Pages, on the dev API or mock data) stays as it is: future changes are tried there first, and reach production only through a release tag.
