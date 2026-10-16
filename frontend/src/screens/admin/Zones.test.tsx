@@ -37,8 +37,11 @@ describe('Zones (count corrections)', () => {
     await act(async () => {})
     expect(await screen.findByText('No corrections yet.')).toBeInTheDocument()
     const form = screen.getByRole('form', { name: 'Underground' })
-    // The feed may not have delivered yet: an empty count would read as 0.
-    await waitFor(() => expect(screen.getByTestId('live')).not.toBeEmptyDOMElement())
+    // The feed may not have delivered yet: an empty count would read as 0. Its next tick can be
+    // up to 8 s away (seen on a slow CI runner), so wait longer than waitFor's default 1 s.
+    await waitFor(() => expect(screen.getByTestId('live')).not.toBeEmptyDOMElement(), {
+      timeout: 10_000,
+    })
     const before = Number(screen.getByTestId('live').textContent)
     const target = before === 12 ? 13 : 12
 
@@ -59,7 +62,7 @@ describe('Zones (count corrections)', () => {
     expect(log).toHaveTextContent(`Underground: ${before} → ${target}`)
     expect(log).toHaveTextContent('counted on foot')
     expect(log).toHaveTextContent('sign-in #mock')
-  })
+  }, 15_000)
 
   it('refuses a number above the capacity without calling the API', async () => {
     renderZones()
