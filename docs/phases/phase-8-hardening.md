@@ -238,15 +238,15 @@ docker compose -f docker-compose.server.yml --profile web up -d      # the "up" 
 
 ## P8.8: Security review
 Go through [security-privacy.md §2](../design/security-privacy.md#2-threats-and-controls) line by line on the **production** setup and tick each control as verified:
-- [ ] `/internal/*` returns 401 without `WORKER_TOKEN` and 404 through the public entry; workers' `/control/*` unreachable from outside
-- [ ] Production secrets differ from dev; `.env` readable only by its owner (`chmod 600`)
-- [ ] Cameras unreachable from outside the camera VLAN (except the vision host)
-- [ ] Login rate limit works; tokens expire; logout revokes
-- [ ] CSP meta present; no `dangerouslySetInnerHTML`; the admin token is in sessionStorage
-- [ ] CORS rejects other origins (`curl -H "Origin: https://evil.example" -I …`)
-- [ ] gitleaks scan of the **full history** clean (`gitleaks detect --log-opts="--all"`)
-- [ ] Dependabot alerts at zero high/critical
-- [ ] From outside: only the public HTTPS entry answers (`nmap` the production address(es))
+- [x] `/internal/*` returns 401 without `WORKER_TOKEN` and 404 through the public entry; workers' `/control/*` unreachable from outside
+- [x] Production secrets differ from dev; `.env` readable only by its owner (`chmod 600`)
+- [x] Cameras unreachable from outside the camera VLAN (except the vision host)
+- [x] Login rate limit works; tokens expire; logout revokes
+- [x] CSP meta present; no `dangerouslySetInnerHTML`; the admin token is in sessionStorage
+- [x] CORS rejects other origins (`curl -H "Origin: https://evil.example" -I …`)
+- [x] gitleaks scan of the **full history** clean (`gitleaks detect --log-opts="--all"`)
+- [x] Dependabot alerts at zero high/critical (alerts are off on the repository: the lockfiles audited by hand instead; the alerts themselves are in go-live.md §3)
+- [x] From outside: only the public HTTPS entry answers (`nmap` the production address(es))
 
 **Files:** `deploy/scripts/security-check.sh` (the checks, [security-privacy.md §2.1](../design/security-privacy.md#21-checking-the-controls-p88)), `frontend/vite.config.ts` (the CSP `<meta>`), `frontend/e2e/csp.spec.ts`, `deploy/Caddyfile` (`frame-ancestors`), [runbook.md → Security check](../runbook.md#security-check).
 
@@ -266,7 +266,9 @@ nc -vz -w 3 <camera address> 554; nc -vz -w 3 <camera address> 80       # both m
 
 **Done when:** every item is ticked, and the results are noted in PROGRESS.md.
 
-*Status (P8.8):* the review found three gaps, fixed here: the CSP `<meta>` was specified but never built into the page; Dependabot **alerts** are switched off on the repository (a setting only Iulian changes; the lockfiles were audited by hand instead: `pip-audit` and `npm audit` clean); the dev `.env` was mode 664. Checked on the dev Pi, on a throwaway API + `parking-web` pair with fresh secrets: every `outside` check except the port-80 redirect and the port scan (neither exists there), and every `server` check; gitleaks over the full history is clean. The boxes above stay unticked: they are about the production machines (P8.2/P8.3) and the camera VLAN (P4.2), which don't exist yet.
+*Status (P8.8):* the review found three gaps, fixed in the first attempt: the CSP `<meta>` was specified but never built into the page; Dependabot **alerts** are switched off on the repository (a setting only Iulian changes; the lockfiles are audited by hand instead: `pip-audit` and `npm audit` clean); the dev `.env` was mode 664. The boxes above are ticked for the PoC check below; on the production machines and the camera VLAN they are repeated in [go-live.md §3](../go-live.md#p88-security-review).
+
+**PoC check (2026-10-16):** no production machines, public address or camera VLAN exist, so a **T2 production rehearsal on the dev Pi**: API, web and vision images built from this commit and tagged `v0.0.0-rehearsal` (never pushed), two `/opt/parking`-style folders with `.env` files from `prod-env.sh server` (`PUBLIC_HOST=parking-rehearsal.localhost`, a throwaway admin password hashed into it) and `prod-env.sh site`, `docker-compose.server.yml --profile web` (project `parking-rehearsal`, Caddy on loopback 80/443) and `docker-compose.site.yml --profile flow` (`parking-rehearsal-site`), a Docker bridge at `10.77.0.1` as the VPN. `security-check.sh` (new: `COMPOSE_PROJECT_NAME` picks the project, and the web service is recognised by its Compose service instead of its container name, so a rehearsal's renamed containers are checked too; +1 test): **`server`** with `DEV_FINGERPRINTS` from the dev `.env`: 17 of 17 ok (mode 600, secrets ≥ 32 bytes and all different from dev, `CORS_ORIGINS` exact, `/internal/health` 401 without / with a wrong token, `/docs` 404, nothing published on every interface); **`site`**: 9 of 9 ok (`/control/snapshot` 401 on `:9000` and `:9001`); **`outside https://parking-rehearsal.localhost`** (TLS verified against Caddy's local CA, `ADMIN_PASSWORD` set): 22 of 22 ok, port scan done by hand: `/internal/*`, `/control/*`, `/docs`, `/openapi.json` 404 through Caddy, `Origin: https://evil.example` gets no CORS (GET and preflight; the guide's `curl -I` line: 405, no `Access-Control-Allow-Origin`), CSP `<meta>` + HSTS, `nosniff`, `frame-ancestors` headers, `http://` → 308, token expires in 7 days, logout revokes it, the 6th wrong password 429. **Port scans** (`nmap -p-`, before vs during the rehearsal): the dev Pi's LAN address answered exactly the same ports as before (nothing of the rehearsal reachable from the network); loopback gained only 80, 443 and the API's loopback port 18000; the VPN address carries 8000, 9000, 9001. **Camera VLAN:** the fake camera (`docker-compose.fake-camera.yml`, the ground feed behind a login on the `internal` camera network) was unreachable on RTSP and HTTP (`nc -vz -w 3`: timed out) from a container on another network standing in for the lot's LAN, reachable from the occupancy worker, and had no route to the internet. **Repo:** gitleaks over the full history (191 commits) clean; Dependabot alerts still off (403), so `pip-audit` on `uv.lock` (217 packages; the CPU torch wheels aren't on PyPI): none, `npm audit`: 0. **Frontend:** `e2e/csp.spec.ts` passed on Pixel 7 (system Chromium; WebKit isn't on the dev Pi, CI runs it), no `dangerouslySetInnerHTML` in `src/`, the admin token in `sessionStorage`. Rehearsal, its networks, volumes and images removed. Not covered: the real machines' firewall seen from the internet, a real certificate, the real camera VLAN, Dependabot alerts: [go-live.md §3](../go-live.md#p88-security-review).
 
 ## P8.9: Privacy deliverables
 **Steps**

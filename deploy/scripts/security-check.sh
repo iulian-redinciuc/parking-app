@@ -16,6 +16,7 @@
 #       /control/* answer 401 without the worker token; nothing but 80/443 is published on a
 #       public interface.
 #         DEV_FINGERPRINTS=file   output of `fingerprints` on the dev machine: no secret may match
+#         COMPOSE_PROJECT_NAME=…  the Compose project whose ports are checked (default parking)
 #   deploy/scripts/security-check.sh fingerprints  sha256 of each secret in .env (to compare, not secret)
 #   deploy/scripts/security-check.sh repo          gitleaks over the full history + Dependabot alerts
 #
@@ -153,21 +154,23 @@ check_env() {
   done
 }
 
-# Ports the project's containers publish on every interface: only parking-web's 80/443 may be.
+# Ports the project's containers publish on every interface: only the web service's 80/443 may be.
 check_ports() {
-  local line found=
+  local project=${COMPOSE_PROJECT_NAME:-parking} line found=
   while read -r line; do
     [ -n "$line" ] || continue
     found=1
-    local name=${line%% *} port
+    local name service port
+    read -r name service _ <<<"$line"
     for port in $(grep -oE '(0\.0\.0\.0|\[::\]|:::?)[:]?[0-9]+->' <<<"$line" | grep -oE '[0-9]+->' | tr -d '>-' | sort -u); do
-      if [ "$name" = parking-web ] && { [ "$port" = 80 ] || [ "$port" = 443 ]; }; then continue; fi
+      if [ "$service" = web ] && { [ "$port" = 80 ] || [ "$port" = 443 ]; }; then continue; fi
       bad "$name publishes port $port on every interface"
       found=bad
     done
-  done < <(docker ps --filter label=com.docker.compose.project=parking --format '{{.Names}} {{.Ports}}')
-  [ "$found" = 1 ] && ok "published ports: only loopback / the VPN address (and parking-web's 80, 443)"
-  [ -n "$found" ] || bad "no running container of the parking project"
+  done < <(docker ps --filter "label=com.docker.compose.project=$project" \
+    --format '{{.Names}} {{.Label "com.docker.compose.service"}} {{.Ports}}')
+  [ "$found" = 1 ] && ok "published ports: only loopback / the VPN address (and the web service's 80, 443)"
+  [ -n "$found" ] || bad "no running container of the $project project"
 }
 
 server() {
@@ -228,7 +231,7 @@ case "$MODE" in
     exit 0
     ;;
   *)
-    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac

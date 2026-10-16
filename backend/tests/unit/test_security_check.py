@@ -55,8 +55,9 @@ def _run(tmp_path: Path, mode: str, env_file: Path, ports: str = "", **env: str)
 
 
 SERVER_PORTS = (
-    "parking-api 127.0.0.1:8000->8000/tcp, 10.77.0.1:8000->8000/tcp\n"
-    "parking-web 0.0.0.0:80->80/tcp, [::]:80->80/tcp, 0.0.0.0:443->443/tcp, 0.0.0.0:443->443/udp"
+    "parking-api api 127.0.0.1:8000->8000/tcp, 10.77.0.1:8000->8000/tcp\n"
+    "parking-web web 0.0.0.0:80->80/tcp, [::]:80->80/tcp, "
+    "0.0.0.0:443->443/tcp, 0.0.0.0:443->443/udp"
 )
 
 
@@ -99,9 +100,9 @@ def test_server_fails_on_a_weak_env(tmp_path, mode, values, message):
 @pytest.mark.parametrize(
     "ports",
     [
-        "parking-api 0.0.0.0:8000->8000/tcp",
-        "parking-api 127.0.0.1:8000->8000/tcp, [::]:8000->8000/tcp",
-        "parking-web 0.0.0.0:443->443/tcp, 0.0.0.0:2019->2019/tcp",
+        "parking-api api 0.0.0.0:8000->8000/tcp",
+        "parking-api api 127.0.0.1:8000->8000/tcp, [::]:8000->8000/tcp",
+        "parking-web web 0.0.0.0:443->443/tcp, 0.0.0.0:2019->2019/tcp",
     ],
 )
 def test_a_port_published_on_every_interface_fails(tmp_path, ports):
@@ -129,10 +130,22 @@ def test_fingerprints_and_secrets_equal_to_dev(tmp_path):
 
 
 def test_site_checks_the_control_ports(tmp_path):
-    ports = "parking-vision-occupancy 10.77.0.2:9000->9000/tcp\nparking-autoheal "
+    ports = (
+        "parking-vision-occupancy vision-occupancy 10.77.0.2:9000->9000/tcp\n"
+        "parking-autoheal autoheal "
+    )
     r = _run(tmp_path, "site", _env(tmp_path), ports)
     assert r.returncode == 0, r.stdout
     assert "ok    /control/snapshot on 10.77.0.2:9000 without a token: 401" in r.stdout
+
+
+def test_only_the_web_service_may_publish_80_and_443(tmp_path):
+    # a rehearsal renames the containers; the Compose service decides, not the name
+    ports = "parking-rh-web web 0.0.0.0:443->443/tcp\nparking-rh-api api 0.0.0.0:443->8000/tcp"
+    r = _run(tmp_path, "server", _env(tmp_path), ports, COMPOSE_PROJECT_NAME="parking-rehearsal")
+    assert r.returncode == 1
+    assert "FAIL  parking-rh-api publishes port 443" in r.stdout
+    assert "parking-rh-web publishes" not in r.stdout
 
 
 def test_the_proxy_forbids_framing_the_app():

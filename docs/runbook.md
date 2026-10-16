@@ -486,6 +486,7 @@ deploy/scripts/security-check.sh repo                           # gitleaks over 
 | `… through the public entry` isn't 404 | The proxy forwards more than `/api/*` and `/healthz`: compare the running `parking-web` with `deploy/Caddyfile` (a tunnel: its ingress rules) |
 | `CORS: … is allowed` | `CORS_ORIGINS` in `.env` must be exactly `https://<PUBLIC_HOST>` |
 | `publishes port … on every interface` / `open TCP ports besides …` | A `ports:` entry without the loopback or VPN address, or a firewall rule too many: `docker ps`, `sudo ufw status` |
+| `Dependabot alerts can't be read` | Alerts are switched off: GitHub → Settings → Code security → *Dependabot alerts*; meanwhile `uvx pip-audit` on `uv export --frozen` and `npm audit` in `frontend/` |
 | `gitleaks found something` | **Rotate that secret first**, then remove it from the history ([security-privacy.md §3](design/security-privacy.md#3-public-repo-rules)) |
 
 ## Power and network drills
