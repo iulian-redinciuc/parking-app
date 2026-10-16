@@ -167,3 +167,4 @@ Until real phones can reach a public HTTPS API (go-live G7, G12), the matrix run
 ```bash
 PW_CHROMIUM_PATH=/usr/bin/chromium frontend/scripts/device-matrix.sh   # ~15 min; -g / --project to narrow
 ```
+Against an app that is already running (P8.3: the production rehearsal behind `parking-web`), call Playwright directly with `DM_APP_URL`, `DM_API_URL` (where `/internal/observations` is reachable, i.e. the API's loopback port) and `DM_WORKER_TOKEN`; `DM_SELF_SIGNED=1` when the certificate isn't trusted (Caddy's own CA for a `*.localhost` host).

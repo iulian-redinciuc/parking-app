@@ -10,9 +10,17 @@ import { defineConfig, devices } from '@playwright/test'
 // "installed" sets `navigator.standalone` the way a home-screen app does. Safari's own engine is
 // covered by the mock suite on WebKit in CI (e2e/), and on a real iPhone in docs/go-live.md.
 const chromiumPath = process.env.PW_CHROMIUM_PATH
-const chromium = chromiumPath
-  ? { launchOptions: { executablePath: chromiumPath } }
-  : { channel: 'chromium' }
+// DM_SELF_SIGNED=1: the app is behind a certificate the browser doesn't trust (P8.3's production
+// rehearsal: Caddy's own test CA for a *.localhost PUBLIC_HOST). The flag, not only
+// ignoreHTTPSErrors, is what lets the service worker register over it.
+const selfSigned = process.env.DM_SELF_SIGNED === '1'
+const args = selfSigned ? ['--ignore-certificate-errors'] : []
+const chromium = {
+  ...(chromiumPath
+    ? { launchOptions: { executablePath: chromiumPath, args } }
+    : { channel: 'chromium', launchOptions: { args } }),
+  ignoreHTTPSErrors: selfSigned,
+}
 // Reminders are set in this time zone, and the API reads them in the subscription's tz.
 const common = { timezoneId: 'Europe/Bucharest', locale: 'en-GB' }
 
