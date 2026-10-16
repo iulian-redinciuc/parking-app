@@ -162,7 +162,7 @@ Why not cookies: the frontend and the API can be on different sites (e.g. the Gi
 | POST | `/api/admin/login` | 7 | `{"password":"…"}` → `{"token":"…","expires_at":"…"}`. 5 attempts / 15 min / IP |
 | GET | `/api/admin/session` | 7 | Checks the token: `{"actor":"session:<id>"\|"admin-token","expires_at":"…"\|null}` (the admin screen calls it on open) |
 | POST | `/api/admin/logout` | 7 | Revokes the calling session token → `204` (a no-op for `ADMIN_TOKEN`) |
-| GET | `/api/admin/cameras` | 7 | `[{"id","role","zones","state":"ok|degraded|down|unknown","issue","fps","last_frame_age_s","inference_ms_avg","unhealthy_ratio","last_health_age_s","snapshot"}]`, in lot.yaml order (see below) |
+| GET | `/api/admin/cameras` | 7 | `[{"id","role","zones","state":"ok|degraded|down|unknown","issue","fps","last_frame_age_s","inference_ms_avg","unhealthy_ratio","gate_active_ratio","last_health_age_s","snapshot"}]`, in lot.yaml order (see below) |
 | GET | `/api/admin/cameras/{id}/snapshot?annotated=true` | 7 | `image/jpeg` with `Cache-Control: no-store` (proxied from the worker's `/control/snapshot`, 5 s timeout → 503) |
 | GET | `/api/admin/cameras/{id}/slots` | 7 | Slot file JSON |
 | PUT | `/api/admin/cameras/{id}/slots` | 7 | Validates, writes `config/slots/<id>.json`, keeps a `.bak`, calls the worker's `/control/reload` |

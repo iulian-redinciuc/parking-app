@@ -242,7 +242,7 @@ Every service in every Compose file (base, server, site; the e2e test stack too,
 |----------|---------|-----------|-------|
 | `API_CPUS` / `API_MEMORY` | `1.0` / `512M` | `parking-api` | dev Pi: ~115 MB, < 1% CPU with one camera and no clients; re-check under P8.10's 500 SSE clients |
 | `VISION_CPUS` / `VISION_MEMORY` | `1.0` / `1200M` | `parking-vision-occupancy` | dev Pi: ~130 MB with the appearance scorer; a YOLO model in memory needs several hundred MB |
-| `FLOW_CPUS` / `FLOW_MEMORY` | `1.5` / `1200M` | `parking-vision-flow` | P5.10's dev-Pi reference; raise `FLOW_CPUS` to 2 first if fps is short |
+| `FLOW_CPUS` / `FLOW_MEMORY` | `1.5` / `1200M` | `parking-vision-flow` | P5.10 (dev Pi rehearsal): `yolo11n` @ 480 holds 9.55 fps at p90 1.35 cores; @ 640 it needs 2 (8.3 fps). Raise `FLOW_CPUS` to 2 first if fps is short |
 | `WEB_CPUS` / `WEB_MEMORY` | `1.0` / `256M` | `parking-web` | dev Pi: ~15 MB idle |
 | (fixed) | `0.5` / `128M` | tunnels | dev Pi: ~20 MB |
 | (fixed) | `0.2` / `64M` | `parking-autoheal` | a shell loop with `curl` + `jq` every 5 s |

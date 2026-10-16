@@ -128,6 +128,7 @@ async def test_camera_list_shows_latest_health_and_ages(tmp_path, clock, worker)
             "last_frame_age_s": None,
             "inference_ms_avg": None,
             "unhealthy_ratio": None,
+            "gate_active_ratio": None,
             "last_health_age_s": None,
             "snapshot": True,
         }
@@ -152,7 +153,14 @@ async def test_camera_list_shows_latest_health_and_ages(tmp_path, clock, worker)
         assert ground["last_frame_age_s"] == 7.1  # 3.1 when sent + 4 s since
         assert ground["inference_ms_avg"] == 151.3
         assert ground["unhealthy_ratio"] == 0.4
+        assert ground["gate_active_ratio"] is None  # flow workers only
         assert ground["last_health_age_s"] == 4.0
+
+        flow = {**health, "camera_id": "cam-ramp", "state": "ok", "issue": None, "fps": 9.4}
+        flow["gate_active_ratio"] = 0.62
+        assert (await c.post("/internal/health", json=flow, headers=WORKER_H)).status_code == 204
+        ramp = (await c.get("/api/admin/cameras", headers=ADMIN_H)).json()[1]
+        assert (ramp["fps"], ramp["gate_active_ratio"]) == (9.4, 0.62)
 
 
 async def test_snapshot_is_the_workers_jpeg_never_cached(tmp_path, clock, worker):

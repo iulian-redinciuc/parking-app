@@ -328,7 +328,10 @@ uv tool install pre-commit && pre-commit install          # gitleaks + ruff befo
 #    deploy/.env                  or make a new one, step 5   models/                       or export again, step 4
 
 # 4. models (only for the detector methods; the dev config's `appearance` method needs none)
-(cd backend && uv run parking models export --model yolo11n-seg --imgsz 1280 && uv run parking models export --model yolo11n --imgsz 640)
+# (--out is relative to the current folder: the repo's models/, not backend/models/)
+(cd backend && uv run parking models export --model yolo11n-seg --imgsz 1280 --out ../models \
+  && uv run parking models export --model yolo11n --imgsz 640 --out ../models \
+  && uv run parking models export --model yolo11n --imgsz 480 --out ../models/flow-480)   # the last one: cam-ramp (P5.10)
 
 # 5. the stack: a simulated camera feed from the one photo, then the API and the occupancy worker
 (cd backend && uv run parking simulate-feed --camera cam-ground --base data/samples/ground-01.jpg --frames 200 --seed 1 --day \

@@ -80,8 +80,8 @@ cameras:
     control_url: http://vision-flow:9000
     detector:
       runtime: ncnn
-      model: models/yolo11n_ncnn_model
-      imgsz: 640
+      model: models/flow-480/yolo11n_ncnn_model   # P5.10: `parking models export --model yolo11n --imgsz 480 --out models/flow-480`
+      imgsz: 480
       conf: 0.4
       classes: [car, motorcycle, bus, truck]
       use_masks: false

@@ -231,6 +231,7 @@ async def cameras(_: AdminDep, rt: RuntimeDep) -> list[dict]:
                 "last_frame_age_s": _round(frame_age),
                 "inference_ms_avg": _round(msg.inference_ms_avg if msg else None),
                 "unhealthy_ratio": msg.unhealthy_ratio if msg else None,
+                "gate_active_ratio": msg.gate_active_ratio if msg else None,
                 "last_health_age_s": _round(since),
                 "snapshot": camera.control_url is not None,
             }

@@ -60,7 +60,7 @@ curl -fsS http://127.0.0.1:8000/healthz
 cd /opt/parking/deploy
 PARKING_VERSION=v0.x.y WORKER_TOKEN=<from the server's .env> scripts/prod-env.sh site
 P="docker run --rm --env-file .env -v /opt/parking/config:/app/config -v /opt/parking/data:/app/data -v /opt/parking/models:/app/models -w /app --entrypoint /app/backend/.venv/bin/parking ghcr.io/iulian-redinciuc/parking-vision:v0.x.y"
-$P models export --model yolo11n --imgsz 640 --runtime ncnn --out models        # step 4 (the runtime for this machine)
+$P models export --model yolo11n --imgsz 480 --runtime ncnn --out models/flow-480   # step 4 (cam-ramp, P5.10; the runtime for this machine)
 $P benchmark --image data/reference/cam-ground.jpg --camera cam-ground --out data/benchmarks   # step 5
 $P evaluate --camera cam-ground --images data/validation/cam-ground             # P4.8's validation set, ≥ 97%
 $P evaluate-flow --video data/recordings/<clip>.mp4 --camera cam-ramp           # P5.9's clips, ≥ 98%; fps as in P5.10
