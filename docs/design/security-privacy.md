@@ -81,7 +81,7 @@ If the lot is in the EU/EEA (or the UK), filming people and vehicles is personal
 |-------------|-------|-------|
 | Privacy screen | `#/privacy` in the app ([frontend.md §2.5](frontend.md#25-privacy-privacy-phase-8)), linked from the footer of every screen and from the Alerts screen. The operator's name and contact come from `PRIVACY_OPERATOR` / `PRIVACY_CONTACT` in the API's `.env` | Built; the two values are set on the production server |
 | Retention check | `parking db retention` ([data-model.md §4](data-model.md#4-retention-and-rollups-apscheduler-jobs-in-the-api)): the oldest row of every table against its period, exit 1 when the prune job isn't deleting. Debug captures: `find data/debug -type f -mmin +$((24*60+10))` on the vision host prints nothing (with the default `DEBUG_RETENTION_HOURS=24`) | Built; run on production after it has been up for more than 90 days, and at each quarterly security check ([runbook](../runbook.md#privacy-check)) |
-| Signage | The text below, printed and put up at each entrance, before the cameras are switched on | The operator does it |
+| Signage | The text below, printed and put up at each entrance, before the cameras are switched on. `deploy/scripts/privacy-sign.sh [en\|ro]` writes it as a printable A4 page (HTML) filled in from the same `.env` values as the Privacy screen (`PRIVACY_OPERATOR`, `PRIVACY_CONTACT`, `PUBLIC_HOST`) | Script built; printing and putting them up: the operator |
 | Purpose, lawful basis with the balancing note, DPIA decision, who has admin | The operator's own notes, **kept private, not in this repo**. The headings to fill in: purpose; lawful basis and why the interest outweighs the intrusion (what was done to keep it small: this section's checklist); whether a DPIA is needed and why (not); camera positions and what each sees, privacy masks; who has admin access; where the data is (the lot box, the server and its hosting provider with its region, the backup storage) and the retention periods; how a request from a person is answered | The operator does it |
 
 **What the system really keeps** (the Privacy screen says the same; change both together):
@@ -101,7 +101,7 @@ If the lot is in the EU/EEA (or the UK), filming people and vehicles is personal
 
 **T3 only:** if production ever moves to T3, video travels from the cameras to the cloud machine over the encrypted VPN and is analysed there in memory; this table, the screen's *The cameras at the lot* texts and the sign must then say so. The chosen layout is T2, where no picture leaves the lot.
 
-**Sign text** (A4 or larger, at each entrance, in the local language; a camera pictogram on top):
+**Sign text** (A4 or larger, at each entrance, in the local language; a camera pictogram on top; English and Romanian in `privacy-sign.sh`, change them together):
 
 > **Camera in use: counting free parking spaces**
 > The cameras count free and taken spaces. Pictures are analysed on site and discarded: no recording, no number-plate reading, no identification of people.

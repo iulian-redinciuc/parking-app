@@ -468,6 +468,8 @@ grep -E '^(DEBUG_CAPTURE|DEBUG_RETENTION_HOURS)=' /opt/parking/deploy/.env   # l
 
 When what the system stores changes, the Privacy screen's texts (`frontend/src/i18n/locales/*.json`, `privacy.*`), the table in security-privacy.md §4.1 and the signs change with it.
 
+**The signs:** `deploy/scripts/privacy-sign.sh ro > semn.html` (or `en`) on the server, in `/opt/parking/deploy`: an A4 page filled in from `PRIVACY_OPERATOR`, `PRIVACY_CONTACT` and `PUBLIC_HOST`; print it from a browser, one per entrance. Print new ones whenever one of the three changes.
+
 ## Security check
 
 After every change to the public entry, the firewall, `.env` or the Compose files, and once a quarter ([security-privacy.md §2.1](design/security-privacy.md#21-checking-the-controls-p88)):
