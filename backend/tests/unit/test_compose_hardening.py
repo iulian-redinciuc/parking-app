@@ -4,6 +4,7 @@
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -143,7 +144,7 @@ def test_web_image_runs_caddy_as_uid_1000():
 
 FAKE_DOCKER = """#!/bin/sh
 case "$1 $2" in
-  "ps -aq") echo abc123 ;;
+  "ps -aq") echo "$4" >>"$FAKE_LOG.ps"; echo abc123 ;;
   "ps -a") printf '%b' "$FAKE_PS" ;;
   "ps --filter") echo "  listed" ;;
   "exec -e") [ -z "$FAKE_API_DOWN" ] || exit 1; echo "$3" >>"$FAKE_LOG"; echo "$FAKE_STALE" ;;
@@ -206,6 +207,17 @@ def test_boot_check_fails_past_the_limit(tmp_path):
     r = _boot_check(tmp_path, "server", BOOT_LIMIT_S="0")
     assert r.returncode == 1
     assert "ready" in r.stdout and "later than the limit" in r.stderr
+
+
+@linux
+def test_boot_check_rehearsal_project_and_cut(tmp_path):
+    # a rehearsal on a machine that isn't rebooted: its own project, counted from the simulated cut
+    since = str(int(time.time()) - 42)
+    r = _boot_check(tmp_path, "site", BOOT_PROJECT="parking-rehearsal-site", BOOT_SINCE=since)
+    assert r.returncode == 0, r.stderr
+    assert re.match(r"ready 4[23] s after the cut \(limit 999999999 s\)\n", r.stdout)
+    ps_log = (tmp_path / "log.ps").read_text()
+    assert ps_log == "label=com.docker.compose.project=parking-rehearsal-site\n"
 
 
 def test_boot_check_usage(tmp_path):

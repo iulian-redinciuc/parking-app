@@ -11,6 +11,9 @@
 # server, until /api/status has no stale zone (the workers are delivering again). Prints the seconds
 # since boot at that moment; fails when that is more than BOOT_LIMIT_S (180) or nothing changes for
 # BOOT_WAIT_S (300). It only reads: it never starts or restarts a container.
+#
+# Rehearsals (no reboot): BOOT_PROJECT=<compose project> (default parking), BOOT_API_CONTAINER=<name>,
+# BOOT_SINCE=<epoch seconds of the simulated power cut>: counts from that moment instead of the boot.
 set -euo pipefail
 
 ROLE=${1:-}
@@ -20,12 +23,19 @@ ZONES="$*"
 LIMIT=${BOOT_LIMIT_S:-180}
 WAIT=${BOOT_WAIT_S:-300}
 API=${BOOT_API_CONTAINER:-parking-api}
+PROJECT=${BOOT_PROJECT:-parking}
+SINCE=${BOOT_SINCE:-}
+FROM="boot"
+[ -z "$SINCE" ] || FROM="the cut"
 
-uptime_s() { awk '{ print int($1) }' /proc/uptime; }
+# Seconds since boot, or since BOOT_SINCE.
+uptime_s() {
+  if [ -n "$SINCE" ]; then echo $(( $(date +%s) - SINCE )); else awk '{ print int($1) }' /proc/uptime; fi
+}
 
 # Containers of the project that aren't "running" + ("healthy" or without a healthcheck).
 not_ready() {
-  docker ps -a --filter label=com.docker.compose.project=parking \
+  docker ps -a --filter "label=com.docker.compose.project=$PROJECT" \
     --format '{{.Names}} {{.State}} {{.Status}}' |
     awk '!($2 == "running" && $0 !~ /\((unhealthy|health: starting)\)/) { printf "%s(%s) ", $1, $2 }'
 }
@@ -43,8 +53,8 @@ print(" ".join(missing + stale))
 ' 2>/dev/null || echo "api-unreachable"
 }
 
-[ -n "$(docker ps -aq --filter label=com.docker.compose.project=parking)" ] ||
-  { echo "boot-check: no containers of the parking project on this machine" >&2; exit 1; }
+[ -n "$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT")" ] ||
+  { echo "boot-check: no containers of the $PROJECT project on this machine" >&2; exit 1; }
 
 deadline=$(( $(date +%s) + WAIT ))
 while :; do
@@ -55,14 +65,14 @@ while :; do
   fi
   up=$(uptime_s)
   if [ -z "$waiting" ]; then
-    echo "ready ${up} s after boot (limit ${LIMIT} s)"
-    docker ps --filter label=com.docker.compose.project=parking --format '  {{.Names}}: {{.Status}}'
+    echo "ready ${up} s after $FROM (limit ${LIMIT} s)"
+    docker ps --filter "label=com.docker.compose.project=$PROJECT" --format '  {{.Names}}: {{.Status}}'
     [ "$up" -le "$LIMIT" ] && exit 0
     echo "boot-check: later than the limit (or the check was started late: run it right after the reboot)" >&2
     exit 1
   fi
   if [ "$(date +%s)" -ge "$deadline" ]; then
-    echo "boot-check: not ready ${up} s after boot, still waiting for: $waiting" >&2
+    echo "boot-check: not ready ${up} s after $FROM, still waiting for: $waiting" >&2
     exit 1
   fi
   sleep 2
