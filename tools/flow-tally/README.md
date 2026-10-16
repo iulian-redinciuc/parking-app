@@ -18,7 +18,8 @@ Then open http://127.0.0.1:8765/tools/flow-tally/ and _Open video_ (e.g. a
 
 ## Use it
 
-Play the clip and press a key **when the car crosses the lines**:
+Play the clip and press a key **when the car has crossed the second line** on its way (line B
+going in, line A going out: the moment the counter counts it):
 
 | Key                       | What it does                                |
 | ------------------------- | ------------------------------------------- |
@@ -37,6 +38,8 @@ Play the clip and press a key **when the car crosses the lines**:
   the same clip again carries on where you stopped. _Clear_ empties the list.
 - _Import CSV_ loads a labels file to continue it, or `evaluate-flow`'s
   `out/eval/flow-<clip>-pred.csv` to step through what the pipeline counted.
+- Press at the second line, not between the lines: a car queueing at 5 km/h takes ~3.5 s from one
+  line to the other, more than the ±2 s window.
 - Keypresses lag the crossing a little; `evaluate-flow` matches within ±2 s, so tally at 1–2×
   in busy stretches and fast-forward the quiet ones.
 

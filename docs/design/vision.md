@@ -337,6 +337,7 @@ A still stays `--hold` frames (6 × 5 s) because smoothing (§3) needs 3 equal r
 
 ### Flow metrics (per clip)
 - Match predicted events to truth events with the same direction within **±2 s** (greedy, by time).
+- **When an event happens**: the moment the car's middle passes the **second line on its way** (line B going in, line A going out), which is when `TwoLineCounter` counts it. The tally is made the same way (tally README) and so is `synth_ramp.py`'s truth. A car queueing at 5 km/h takes ~3.5 s from one line to the other, so a tally "between the lines" lands outside the ±2 s window and shows as a miss plus an extra count (P5.9).
 - Report **TP, FP (extra counts), FN (missed)**, event accuracy = TP / (TP + FP + FN), and **net error** = (pred in − pred out) − (true in − true out). Net error is what causes drift.
 - **Matching** (`match_flow`): all same-direction pairs within the window, closest first (ties: earlier truth, then earlier prediction), each event used once. "Greedy by time" on its own could pair a count with an earlier tally entry it doesn't belong to; closest-first avoids that.
 - **Target** (P5.9): event accuracy ≥ **98%** per clip (`TARGET_EVENT_ACCURACY`); `meets_target` is null when the clip has no events in the tally or the run.

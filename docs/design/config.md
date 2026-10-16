@@ -284,7 +284,7 @@ video_time_s,direction,note
 12.4,in,
 57.9,out,van
 ```
-Git-ignored, because it is tied to real clips. One row per car crossing: seconds from the start of the clip, `in` or `out` (case-insensitive), an optional free-text note (RFC 4180 quoting). The `note` column may be left out of the header; a UTF-8 BOM and blank lines are ignored; rows may be in any order. Made with the tally tool (`tools/flow-tally/`, P5.9), read by `parking evaluate-flow` (`load_flow_labels`), which also writes its own counts in this format.
+Git-ignored, because it is tied to real clips. One row per car crossing: seconds from the start of the clip (when the car's middle passes the second line on its way, [vision.md §10](vision.md#flow-metrics-per-clip)), `in` or `out` (case-insensitive), an optional free-text note (RFC 4180 quoting). The `note` column may be left out of the header; a UTF-8 BOM and blank lines are ignored; rows may be in any order. Made with the tally tool (`tools/flow-tally/`, P5.9), read by `parking evaluate-flow` (`load_flow_labels`), which also writes its own counts in this format.
 
 ### Drift notes: `data/labels/drift-<zone>.csv`
 ```csv

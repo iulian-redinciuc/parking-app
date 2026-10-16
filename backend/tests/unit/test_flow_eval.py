@@ -153,3 +153,51 @@ def test_cli_evaluate_flow(repo, monkeypatch):  # noqa: F811
 
     result = runner.invoke(app, [*args, "--tolerance", "0"])
     assert result.exit_code != 0
+
+
+# --- the synthetic test clips' truth (backend/scripts/synth_ramp.py --scenario, P5.9 PoC) ---
+
+
+@pytest.mark.parametrize("scenario", ["offpeak", "rush", "night"])
+def test_synthetic_clip_truth(scenario, tmp_path):
+    """One truth row per car, in the labels format, at a frame where that car's middle is at
+    the second line on its way (TALLY_X); one lane: a car never overlaps another car in view
+    (platoons included)."""
+    import importlib.util
+    from pathlib import Path
+
+    from parking.vision.evaluate import load_flow_labels
+
+    root = Path(__file__).resolve().parents[3]
+    spec = importlib.util.spec_from_file_location(
+        "synth_ramp", root / "backend" / "scripts" / "synth_ramp.py"
+    )
+    synth = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(synth)
+    cars = 12
+    sched, _ = synth.schedule(6, cars, scenario=scenario)
+    rows = synth.truth(sched)
+    assert len(rows) == cars and all(d in ("in", "out") for _, d in rows)
+    if scenario == "rush":
+        assert sum(d == "in" for _, d in rows) > cars / 2
+    path = tmp_path / "x.csv"
+    synth.write_truth(path, rows, scenario)
+    assert [(e.t, e.direction) for e in load_flow_labels(path)] == rows
+
+    def left_end(car, i):
+        start, v, _ = car
+        return (synth.W if v < 0 else -synth.CAR_LEN) + v * (i - start)
+
+    for car, (t, d) in zip(sorted(sched), rows, strict=True):
+        assert d == ("in" if car[1] < 0 else "out")
+        mid = left_end(car, round(t * synth.FPS)) + synth.CAR_LEN / 2
+        assert abs(mid - synth.TALLY_X[d]) <= abs(car[1])  # within a frame's travel
+    for i in range(int(6 * 60 * synth.FPS)):
+        xs = sorted(
+            x for car in sched if i >= car[0] and -synth.CAR_LEN < (x := left_end(car, i)) < synth.W
+        )
+        assert all(b - a >= synth.CAR_LEN for a, b in zip(xs, xs[1:], strict=False)), (
+            scenario,
+            i,
+            xs,
+        )
