@@ -454,7 +454,7 @@ Exit codes: `0` done, `1` failed, `3` the local archive exists but was **not** c
 
 Variables for `backup.sh` (environment, all optional): `RCLONE`, `BACKUP_RCLONE_CONFIG`, `BACKUP_REMOTE`, `BACKUP_REMOTE_DAYS`, `BACKUP_ENV_NAME`, `BACKUP_ENV_FILE`, `BACKUP_ROOT` (the folder holding `config/` and `data/`), `BACKUP_API_CONTAINER`, `BACKUP_IMAGE`.
 
-**Restore drill** (P8.6): done on the dev Pi from a backup of the dev stack (2026-10-10) and of a T2 production rehearsal (2026-10-16), each through a `crypt` remote over a local folder (results in [PROGRESS.md → Metrics](../../PROGRESS.md#metrics)); repeated with a production backup once production exists ([go-live.md §3](../go-live.md#p86-backups-and-restore-drill)).
+**Restore drill** (P8.6): done on the dev Pi from a backup of the dev stack (2026-10-10) and of a T2 production rehearsal (2026-10-16), each through a `crypt` remote over a local folder (results in [PROGRESS.md → Metrics](../../PROGRESS.md#metrics)); repeated with a production backup once production exists ([go-live-checks.md](../go-live-checks.md#p86-backups-and-restore-drill)).
 
 ## 8. Releases and updating
 
