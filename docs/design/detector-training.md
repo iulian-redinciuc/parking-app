@@ -5,7 +5,7 @@ Two things the stock detector can't give:
 - **Accuracy on this lot's view.** COCO-pretrained YOLO11n doesn't recognise cars seen straight down ([vision.md §1](vision.md#1-detector)); a detector trained on the lot's own frames can.
 - **A detector that isn't AGPL.** The Ultralytics models and code are AGPL-3.0; YOLOX is Apache-2.0.
 
-**Status: the tools are built, no model is trained.** Training needs the labelled frames of the real camera (P4.8, about 200) and a machine with a GPU. Nothing in the running system changes until a camera's `detector` in `lot.yaml` points at a new model.
+**Status: the tools are built and checked on images (§7); no model is trained on the real camera.** Training needs the labelled frames of the real camera (P4.8, about 200) and a machine with a GPU. Nothing in the running system changes until a camera's `detector` in `lot.yaml` points at a new model.
 
 ## 1. The two routes
 
@@ -157,3 +157,5 @@ No real frames and no GPU exist yet, so this checks the tools, **not** the accur
 - **`YoloxDetector` (route B, inference only).** The official `yolox_nano.onnx` (416 px, COCO) on Ultralytics' `bus.jpg` test picture: the bus at 0.91 and three people at 0.68–0.85, boxes within 3 px of YOLO11n NCNN @ 640 on the bus (YOLO11n also finds a fourth, half-hidden person at 0.41). **52 ms** per frame (median of 20, pre- and post-processing included, 2 threads). Through `parking evaluate` with `type: yolox` on the simulated hold-out: 48.7%, every taken space said free: like YOLO11n, a COCO model doesn't see cars from straight above, which is what the training is for.
 - YOLOX **training** (§4.2) was not run: no GPU, and no YOLOX install on the dev Pi.
 - Tests: `tests/unit/test_yolox.py` (letterbox, grid decoding, class filter, per-class NMS, clipping, sidecar, input size, config rules, worker and `analyze` through a stand-in session), `test_yolo_dataset.py` (boxes, split, unsure slots, COCO rebuild, the command and its errors).
+
+**PoC check (2026-10-16), on P4.8's PoC validation frames** (200 lit copies of the sample scene: day, dusk, IR night, rain; [vision.md §10](vision.md#10-evaluation-parkingvisionevaluatepy)): `export-yolo` 167 train + 33 held-out frames, 1518 boxes; YOLO11n fine-tuned on the CPU at 640 (4 epochs in ~18 min: mAP50 0.988), NCNN. On the 33 held-out frames: appearance 99.1%, count error ≤ 1 on 97.0% (**target met**); the fine-tuned model 74.0% at `conf: 0.25` (a short training leaves low scores, so lower `detector.conf` for an undertrained model), **98.2%** at `conf: 0.05` and threshold 0.10 but count error ≤ 1 on only 93.9% (**missed**); official YOLOX-nano 53.5%. The appearance scorer stays.
