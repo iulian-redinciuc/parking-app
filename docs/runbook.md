@@ -522,7 +522,7 @@ Once, before the address is shared ([phase guide P8.13](phases/phase-8-hardening
 1. Look at the ground level and at the app at the same moment: free spaces, and on the admin page the camera's picture with the spaces it marks taken.
 2. Count the underground level and write the drift note (`$P drift-note --zone underground --true <counted> --api http://10.77.0.1:8000`). **No corrections** during the week.
 3. `python3 soak.py report soak.jsonl --days 1` on each machine: read the outages (the verdict complains about the span until day 7), and look at the admin page's alerts.
-4. One line in PROGRESS.md → Metrics: date, ground app/real, underground app/real, outages, what the testers reported.
+4. One line in docs/history.md → Metrics: date, ground app/real, underground app/real, outages, what the testers reported.
 
 A day is **clean** when all of these hold:
 

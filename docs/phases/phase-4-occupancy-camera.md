@@ -22,7 +22,7 @@
 
 **Done when:** the decisions are recorded and the hardware is ordered.
 
-**PoC check (2026-10-15):** decisions recorded (PROGRESS.md decision log, [hardware.md §4.5](../design/hardware.md#45-chosen-in-p41-to-order)): **T2**; Camera B a **Raspberry Pi Camera Module 3 Wide** (12 MP, 102°) on the box at the sample photo's window, ≥ 5 m up, ≥ 45° down, focus fixed at infinity; vision host a **Raspberry Pi 5 8 GB** + NVMe SSD; the PoE camera only if wired access is granted. Checked on images on the dev Pi: `parking evaluate --camera cam-ground --labels data/labels/cam-ground-feed.json` on the 284-frame replay feed shrunk to 1, 1/2, 1/4, 1/6, 1/8, 1/12, 1/16 of its size gives 100% (4828/4828) every time, at 1/25 99.6% (spaces 8–19 px across): the chosen camera's ≥ 60 px target has about 4× margin over the smallest size that worked. `parking benchmark --runtimes ''` on a 12 MP (3000×4000) frame: scorer 536 ms median (p95 601 ms, 200 MB peak RSS), decode 93 ms, 58 °C, so one frame every 5 s uses ~13% of a core on the vision host's hardware. Nothing was ordered (moved to go-live), and nothing was measured on a real camera or lens.
+**PoC check (2026-10-15):** decisions recorded (docs/history.md decision log, [hardware.md §4.5](../design/hardware.md#45-chosen-in-p41-to-order)): **T2**; Camera B a **Raspberry Pi Camera Module 3 Wide** (12 MP, 102°) on the box at the sample photo's window, ≥ 5 m up, ≥ 45° down, focus fixed at infinity; vision host a **Raspberry Pi 5 8 GB** + NVMe SSD; the PoE camera only if wired access is granted. Checked on images on the dev Pi: `parking evaluate --camera cam-ground --labels data/labels/cam-ground-feed.json` on the 284-frame replay feed shrunk to 1, 1/2, 1/4, 1/6, 1/8, 1/12, 1/16 of its size gives 100% (4828/4828) every time, at 1/25 99.6% (spaces 8–19 px across): the chosen camera's ≥ 60 px target has about 4× margin over the smallest size that worked. `parking benchmark --runtimes ''` on a 12 MP (3000×4000) frame: scorer 536 ms median (p95 601 ms, 200 MB peak RSS), decode 93 ms, 58 °C, so one frame every 5 s uses ~13% of a core on the vision host's hardware. Nothing was ordered (moved to go-live), and nothing was measured on a real camera or lens.
 
 ## P4.2: Install and network
 **Steps**
@@ -164,7 +164,7 @@ The code, the methods and the training script are in place (prepared while P4.9 
    `uv sync --extra vision && uv run --with onnx python scripts/train_slot_classifier.py --camera cam-ground --images ../data/validation/cam-ground --labels ../data/labels/cam-ground-validation.json --out ../models/slot_classifier.onnx`
    (optionally pre-train first with `--crops <PKLot/CNRPark crops>` and fine-tune with `--init ../models/<pre-trained>.pt --lr 3e-4`). Copy `models/slot_classifier.{onnx,json,holdout.json}` to the vision host's and dev Pi's `models/`.
 2. Compare on the held-out frames only: `parking evaluate --camera cam-ground --images data/validation/cam-ground --labels models/slot_classifier.holdout.json --method M --sweep 0.1:0.9:0.05` for `M` = `appearance`, `classifier`, `ensemble` (add `--classifier FILE` to try another model).
-3. Set the winner as `occupancy.method` (and `classifier.threshold` if the sweep says so) in `config/lot.yaml`, `reload` the worker, record the numbers in PROGRESS.md Metrics.
+3. Set the winner as `occupancy.method` (and `classifier.threshold` if the sweep says so) in `config/lot.yaml`, `reload` the worker, record the numbers in docs/history.md Metrics.
 
 **Done when:** targets are met, or the gap and next steps are documented.
 

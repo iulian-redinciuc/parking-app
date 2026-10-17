@@ -176,7 +176,7 @@ def cpu_temp() -> float | None:
 
 
 def table(results: Sequence[CaseResult]) -> list[str]:
-    """A Markdown table, one row per case (ready to paste into PROGRESS.md)."""
+    """A Markdown table, one row per case (ready to paste into docs/history.md → Metrics)."""
     rows = [
         "| Case | Runtime | imgsz | Median ms | p95 ms | Peak RSS MB | Vehicles |",
         "|------|---------|-------|-----------|--------|-------------|----------|",

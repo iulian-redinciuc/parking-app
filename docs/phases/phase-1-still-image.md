@@ -135,7 +135,7 @@ Plain HTML and JavaScript with no build step, served with `python3 -m http.serve
 **Done when:** tests with `FakeDetector` detections produce a valid slot file that opens in the editor. (MVP note: the only sample is a straight-down view where the COCO detector finds no cars, and its slots are already drawn by hand in P1.3, so there is no real-photo check here. Re-check it on the real camera's view in Phase 4.)
 
 ## P1.10: Benchmark on the dev Pi
-**Files:** CLI `benchmark`, results in PROGRESS.md → Metrics
+**Files:** CLI `benchmark`, results in docs/history.md → Metrics
 
 **Steps**
 1. `parking benchmark --image data/samples/ground-01.jpg --runs 20`: for each combination of {PyTorch, NCNN} × {640, 1280} × {yolo11n, yolo11n-seg}, warm up 3 runs, then report median and p95 ms, plus peak RSS memory. Also time the **appearance scorer** (`method: appearance`, the MVP setting for `cam-ground`) on the same image.

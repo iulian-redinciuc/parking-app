@@ -136,7 +136,7 @@ uv run parking evaluate --camera cam-ground --images ../data/yolo/cam-ground/ima
   --labels ../data/yolo/cam-ground/holdout.json --method appearance      # or classifier: today's method
 ```
 
-The verdict is `parking evaluate`'s target line ([vision.md §10](vision.md#10-evaluation-parkingvisionevaluatepy)): slot accuracy ≥ 97% and count error ≤ 1 on ≥ 95% of the images. A new detector replaces the current method only if it meets the target and beats it on these frames; record the table in PROGRESS.md → Metrics. Detections are cached per model name and input size, so the sweep is quick.
+The verdict is `parking evaluate`'s target line ([vision.md §10](vision.md#10-evaluation-parkingvisionevaluatepy)): slot accuracy ≥ 97% and count error ≤ 1 on ≥ 95% of the images. A new detector replaces the current method only if it meets the target and beats it on these frames; record the table in docs/history.md → Metrics. Detections are cached per model name and input size, so the sweep is quick.
 
 ## 6. What the licence swap covers, and what it doesn't
 

@@ -66,7 +66,7 @@ Every task in a phase guide has:
 2. Tests exist for the logic and pass locally and in CI.
 3. Any contract change (payload, config, endpoint) is reflected in the `design/` spec **in the same commit**.
 4. **No secrets or real camera images** in the diff (see [design/security-privacy.md](design/security-privacy.md#3-public-repo-rules)).
-5. PROGRESS.md is ticked and the session log updated.
+5. PROGRESS.md is ticked and the session log in [history.md](history.md#session-log) updated.
 
 ### Git workflow
 - `main` is always deployable. Pushing to `main` redeploys the GitHub Pages **preview**. Production is deployed only from release tags (`v*`).

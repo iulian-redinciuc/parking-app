@@ -1123,7 +1123,7 @@ def benchmark(
     """Time each runtime × imgsz × model (median, p95, peak RSS) and the appearance scorer.
 
     Each case runs in a fresh process. NCNN models are exported per size into
-    <models-dir>/bench/ on first use. Prints a Markdown table for PROGRESS.md → Metrics.
+    <models-dir>/bench/ on first use. Prints a Markdown table for docs/history.md → Metrics.
     """
     import platform
     from datetime import datetime

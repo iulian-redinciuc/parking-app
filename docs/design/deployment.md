@@ -253,7 +253,7 @@ These are the dev-Pi values; they are tuned on the production machines after P8.
 
 **Reboot:** `provision.sh` enables the Docker service (and, on T2, orders it after `wg-quick@wg0`, so the VPN address the ports are published on exists first). At boot Docker starts every container that was running, in no particular order and without `depends_on`: the workers retry until the API answers, Caddy answers 502 for `/api/*` until then. Target: live data again within 3 minutes of power-on with no manual step. `deploy/scripts/boot-check.sh server|site [zone …]`, run right after logging in again, waits until every container of the project is running and healthy and (server) `/api/status` has no stale zone, and prints the seconds since boot (fails above `BOOT_LIMIT_S`, default 180). It only reads; it never starts a container. For a rehearsal without a reboot, `BOOT_PROJECT=<project>`, `BOOT_API_CONTAINER=<name>` and `BOOT_SINCE=<epoch of the simulated cut>` (it then counts from the cut).
 
-Measured on the dev Pi (P8.4, not a reboot: the API and the worker processes ended at the same moment and Docker's restart policy brought them back; on 2026-10-16 the same for all 5 containers of a T2 production rehearsal, 11–12 s to fresh data): see PROGRESS.md → Metrics.
+Measured on the dev Pi (P8.4, not a reboot: the API and the worker processes ended at the same moment and Docker's restart policy brought them back; on 2026-10-16 the same for all 5 containers of a T2 production rehearsal, 11–12 s to fresh data): see docs/history.md → Metrics.
 
 ### 4.2 Watchdog for stuck workers (P8.5)
 
@@ -267,7 +267,7 @@ The Docker socket is root on the host for whoever can talk to it, so this is the
 
 **Restart count:** an autoheal restart doesn't raise Docker's own `RestartCount`. Every health message carries the worker process's `started_at`; the API counts a restart whenever a camera's value changes and shows it in `/healthz` as `restarts` ([api.md §2](api.md#2-public-rest-endpoints)), with a warning in its log.
 
-**Testing it:** `docker compose kill -s USR1 vision-occupancy` (or `vision-flow`). `SIGUSR1` makes the worker's main thread sleep forever inside the signal handler, so the loop stops wherever it was while the other threads go on, which is what a real hang looks like. `docker compose pause` doesn't count: a paused container can't be health-checked. Measured on the dev Pi: PROGRESS.md → Metrics.
+**Testing it:** `docker compose kill -s USR1 vision-occupancy` (or `vision-flow`). `SIGUSR1` makes the worker's main thread sleep forever inside the signal handler, so the loop stops wherever it was while the other threads go on, which is what a real hang looks like. `docker compose pause` doesn't count: a paused container can't be health-checked. Measured on the dev Pi: docs/history.md → Metrics.
 
 ### 4.3 A camera plugged into the vision host (P4.12)
 
@@ -454,7 +454,7 @@ Exit codes: `0` done, `1` failed, `3` the local archive exists but was **not** c
 
 Variables for `backup.sh` (environment, all optional): `RCLONE`, `BACKUP_RCLONE_CONFIG`, `BACKUP_REMOTE`, `BACKUP_REMOTE_DAYS`, `BACKUP_ENV_NAME`, `BACKUP_ENV_FILE`, `BACKUP_ROOT` (the folder holding `config/` and `data/`), `BACKUP_API_CONTAINER`, `BACKUP_IMAGE`.
 
-**Restore drill** (P8.6): done on the dev Pi from a backup of the dev stack (2026-10-10) and of a T2 production rehearsal (2026-10-16), each through a `crypt` remote over a local folder (results in [PROGRESS.md → Metrics](../../PROGRESS.md#metrics)); repeated with a production backup once production exists ([go-live-checks.md](../go-live-checks.md#p86-backups-and-restore-drill)).
+**Restore drill** (P8.6): done on the dev Pi from a backup of the dev stack (2026-10-10) and of a T2 production rehearsal (2026-10-16), each through a `crypt` remote over a local folder (results in [docs/history.md → Metrics](../history.md#metrics)); repeated with a production backup once production exists ([go-live-checks.md](../go-live-checks.md#p86-backups-and-restore-drill)).
 
 ## 8. Releases and updating
 

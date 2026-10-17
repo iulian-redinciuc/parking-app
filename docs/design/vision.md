@@ -1,6 +1,6 @@
 # Computer vision
 
-All numbers below (thresholds, timings) are **starting values** to be tuned with real data. Each tuning result goes in PROGRESS.md → Decision log.
+All numbers below (thresholds, timings) are **starting values** to be tuned with real data. Each tuning result goes in docs/history.md → Decision log.
 
 ## 1. Detector
 
@@ -34,7 +34,7 @@ class YoloDetector:
   ```
   `mask` is optional. Masks with fewer than 3 points become `None`.
 - `parking models export --model <name> --imgsz <n> --runtime ncnn|openvino|onnx|engine [--out models]` downloads `<out>/<name>.pt` and exports next to it. The `vision` extra installs **CPU-only** PyTorch from the PyTorch CPU index (`[tool.uv.sources]` in `backend/pyproject.toml`) and `pnnx` (needed by the NCNN export). The task (`segment`/`detect`) is taken from the model name (`*-seg`).
-- **Viewpoint:** COCO-pretrained models recognise cars seen from the side or at an angle. On the Phase 1 sample photo, taken from high up looking **straight down**, YOLO11n/s/m (boxes and seg, 640 and 1280, with rotation or crops) find 0–1 of the 5 visible cars, and the DOTA-trained `yolo11n/s-obb` aerial models find at most the 2 fully visible cars, depending on `imgsz`. A straight-down occupancy camera therefore needs a different model (P9.4, [detector-training.md](detector-training.md)) or an angled camera; see PROGRESS.md decision log 2026-10-08 (P1.4).
+- **Viewpoint:** COCO-pretrained models recognise cars seen from the side or at an angle. On the Phase 1 sample photo, taken from high up looking **straight down**, YOLO11n/s/m (boxes and seg, 640 and 1280, with rotation or crops) find 0–1 of the 5 visible cars, and the DOTA-trained `yolo11n/s-obb` aerial models find at most the 2 fully visible cars, depending on `imgsz`. A straight-down occupancy camera therefore needs a different model (P9.4, [detector-training.md](detector-training.md)) or an angled camera; see docs/history.md decision log 2026-10-08 (P1.4).
 - **Small far-away cars:** use `imgsz=1280` for occupancy (one frame every 5 s, so speed isn't critical). If cars are still missed, add tiling: split into 2×2 overlapping tiles, detect each, merge with NMS (IoU 0.5).
 - The detector sits behind the `Detector` protocol, and `build_detector(cfg, model_path)` picks the class from `detector.type`: `yolo` (default) → `YoloDetector`; `yolox` → **`YoloxDetector`** (`parking/vision/yolox.py`): a YOLOX (Apache-2.0) ONNX model on ONNX Runtime, boxes only, no Ultralytics import, for occupancy cameras. Its input/output handling, the class sidecar, how to train one or fine-tune YOLO11n on the lot's own frames (`parking export-yolo`) and what the licence swap does not cover yet (the flow camera's tracker) are in [detector-training.md](detector-training.md) (P9.4).
 
@@ -369,7 +369,7 @@ Guidelines on any machine:
 - Occupancy: one inference every 5 s, so even 1–2 s at `imgsz=1280` with masks is fine.
 - Flow: aim for ≥ 8 fps while active. If detect + track takes over 120 ms per frame, first shrink the ROI and use `imgsz=480`; then use a faster runtime or an accelerator for that machine.
 - **Flow on a Pi 5 (P5.10): `yolo11n` NCNN @ 480, no accelerator.** In `vision-flow`'s 1.5-CPU quota next to the occupancy worker, real time on the busiest synthetic clip: @ 640 6.65 fps while cars pass (8.3 with 2 CPUs), @ 480 9.55 fps at 72 ms per gated frame, with the same or better event accuracy (P5.9's clips: 100 / 100 / 70% vs 100 / 100 / 62%). The 480 export goes to `models/flow-480/` so it doesn't replace the 640 one. An AI HAT+ (`HailoDetector`) only if the vision host's real numbers fall short (go-live-checks.md).
-- Measure with `parking benchmark` and record results in PROGRESS.md → Metrics, **labelled with the machine**.
+- Measure with `parking benchmark` and record results in docs/history.md → Metrics, **labelled with the machine**.
 
 `parking benchmark` (`parking/vision/benchmark.py`) runs every runtime × `imgsz` × model case, and the appearance scorer (`method: appearance` on `--camera`'s slots, the whole `analyze_frame` without a detector), each in a **fresh spawned process** so the peak RSS (`ru_maxrss`) belongs to that case alone. Each case does `--warmup` untimed runs, then `--runs` timed `detect(frame)` calls on the full image (pre-processing included, model loading excluded); p95 is nearest-rank. NCNN exports have a fixed input size, so it exports each size once into `models/bench/<model>-<imgsz>/` (copying the local `.pt`). A failing case shows as an error row; the others go on. It prints a Markdown table plus the CPU temperature before/after (`vcgencmd measure_temp`, else `/sys/class/thermal`; warns over 80 °C) and writes `out/benchmark/benchmark-<time>.json`.
 
@@ -382,6 +382,6 @@ Guidelines on any machine:
 | YOLO11n-seg @ 1280 px | 1827 ms | 520 ms |
 | Appearance scorer (17 slots, 1932×2576) | 158 ms, no model | |
 
-Medians of 20 runs on `ground-01.jpg`; full table with p95 and memory in PROGRESS.md → Metrics.
+Medians of 20 runs on `ground-01.jpg`; full table with p95 and memory in docs/history.md → Metrics.
 
 The **dev Pi is a worst case.** Production hardware is benchmarked again in P8.2 (and on the candidate vision host during Phase 5), and the settings are re-tuned there.

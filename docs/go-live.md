@@ -46,7 +46,7 @@ In order. Each step links to where the detail already is.
 
 ## 3. Decisions only you can make
 
-Everything else has a working default, written in the decision log. These six don't:
+Everything else has a working default, written in the [decision log](history.md#decision-log). These six don't:
 
 | # | Decision | Default until you decide | Needed by |
 |---|----------|--------------------------|-----------|
